@@ -219,6 +219,10 @@ describe("Embedding 模型的提醒", () => {
     );
   });
 
+  it("沒有模型網址（例如直接連 Anthropic）時也提醒", () => {
+    expect(embeddingWarning(found([], "none"), "")).toContain("沒有模型網址");
+  });
+
   it("查詢失敗時提醒原因", () => {
     expect(
       embeddingWarning({ ...found([], "error"), error: "金鑰不正確" }, ""),
@@ -230,10 +234,9 @@ describe("Embedding 模型的提醒", () => {
     expect(embeddingWarning(found(["bge-m3"], "names"), "old-emb")).toBe("");
   });
 
-  it("有模型、還在查詢或沒有端點時不提醒", () => {
+  it("有模型或還在查詢時不提醒", () => {
     expect(embeddingWarning(found(["bge-m3"]), "bge-m3")).toBe("");
     expect(embeddingWarning(found(["bge-m3"]), "")).toBe("");
     expect(embeddingWarning(undefined, "")).toBe("");
-    expect(embeddingWarning(found([], "none"), "")).toBe("");
   });
 });

@@ -194,7 +194,10 @@ export function embeddingWarning(
   found: KnowledgeModelChoices | undefined,
   current: string,
 ): string {
-  if (!found || found.source === "none") return "";
+  if (!found) return "";
+  if (found.source === "none") {
+    return "目前的模型連線沒有模型網址（或是直接連 Anthropic 等沒有 embedding 模型的供應商），沒有可以選的 embedding 模型，只能選關鍵字或演算法（BM25）。要用語意檢索，請到「管理平台 → 模型」改連有 embedding 模型的網址（例如 LiteLLM Proxy），或選「其他」自行輸入。";
+  }
   if (found.source === "error") {
     return `列不出模型網址上的 embedding 模型（${found.error ?? "查詢失敗"}），目前只能選關鍵字或演算法，或選「其他」自行輸入模型名稱。`;
   }

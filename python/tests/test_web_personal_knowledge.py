@@ -251,3 +251,84 @@ class TestPersonalKnowledge:
             "knowledge.personal_upload",
             "knowledge.personal_create",
         ]
+
+
+class TestUserAgents:
+    """自建 agent 可以選自己的個人知識庫：兩者都只有建立者能用。"""
+
+    async def test_own_agent_can_search_own_base(self, site):
+        s = await site(
+            agent=KNOWLEDGE_AGENT,
+            prepare=kb_tests.add_documents,
+            script=kb_tests.search_script(),
+        )
+        alice = await s.login("alice", password_of("alice"))
+        _, created = await create(alice, "專案筆記")
+        base_id = created["id"]
+        await upload(s, alice, base_id, "a.md", "特休自己的筆記")
+
+        status, agent = await alice.api(
+            "POST", "/agents", {"name": "筆記助手", "knowledgeBases": [base_id]}
+        )
+        _, summary = await alice.api(
+            "POST", "/sessions", {"text": "特休", "agent": agent["key"]}
+        )
+        await alice.wait_idle(summary["id"])
+
+        assert status == 201 and agent["knowledgeBases"] == [base_id]
+        found = s.model.requests[-1]["messages"][-1]["content"]
+        assert "特休自己的筆記" in found
+
+    async def test_others_cannot_pick_it_and_names_stay_hidden(self, site):
+        s = await site(
+            agent=KNOWLEDGE_AGENT,
+            extra=BASES,
+            prepare=kb_tests.add_documents,
+        )
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        bob = await s.login("bob", password_of("bob"))
+        _, created = await create(alice, "祕密筆記")
+        await boss.api(
+            "PATCH", "/admin/groups/everyone", {"knowledgeBases": ["it"]}
+        )
+
+        other, other_error = await bob.api(
+            "POST",
+            "/agents",
+            {"name": "x", "knowledgeBases": [created["id"]]},
+        )
+        company, company_error = await bob.api(
+            "POST", "/agents", {"name": "x", "knowledgeBases": ["hr"]}
+        )
+
+        assert other == 400 and created["id"] in other_error["error"]
+        assert "祕密筆記" not in other_error["error"]
+        assert company == 400 and "人資規章" in company_error["error"]
+
+    async def test_deleted_or_disabled_bases_are_skipped(self, site):
+        s = await site(
+            agent=KNOWLEDGE_AGENT,
+            prepare=kb_tests.add_documents,
+            script=[conftest.text_response("好")],
+        )
+        alice = await s.login("alice", password_of("alice"))
+        _, created = await create(alice)
+        await upload(s, alice, created["id"], "a.md", "內容")
+        _, agent = await alice.api(
+            "POST",
+            "/agents",
+            {"name": "a", "knowledgeBases": [created["id"]]},
+        )
+        await alice.api("DELETE", f"/my/knowledge/{created['id']}")
+
+        _, summary = await alice.api(
+            "POST", "/sessions", {"text": "嗨", "agent": agent["key"]}
+        )
+        await alice.wait_idle(summary["id"])
+
+        names = [
+            tool["function"]["name"]
+            for tool in s.model.requests[0].get("tools") or []
+        ]
+        assert "search_knowledge" not in names

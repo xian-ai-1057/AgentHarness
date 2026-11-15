@@ -321,7 +321,11 @@ export function AgentEditor({ id }: { id: string }) {
       knowledgeBases: (project.knowledgeBases ?? []).map((base) => ({
         name: base.id,
         label: base.name,
-        hint: base.description,
+        hint: base.personal
+          ? ["我的知識庫，只有你能用", base.description]
+              .filter(Boolean)
+              .join(" · ")
+          : base.description,
       })),
       skills: (project.skills ?? []).map((skill) => ({
         name: skill.name,

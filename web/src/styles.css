@@ -4486,3 +4486,16 @@ a.kb-card:focus-visible {
 .agent-count-over {
   color: var(--danger);
 }
+
+/* 勾選的技能缺少需要的工具時的提醒。 */
+.agent-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: 13px;
+}

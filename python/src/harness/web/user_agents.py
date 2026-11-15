@@ -36,6 +36,10 @@ STARTER_LIMIT = 100
 STARTERS_MAX = 4
 # 一個人最多建立幾個 agent，避免把資料庫塞爆。
 PER_USER_LIMIT = 100
+# 腳本要在沙盒裡執行的 skills（處理 Office 檔與 PDF）；沒有勾「執行 Python」
+# （sandbox 工具組）時用不了，建立表單不會預設勾選。
+SANDBOX_SKILLS = frozenset({"xlsx", "docx", "pptx", "pdf"})
+SANDBOX_TOOLSET = "sandbox"
 _LIST_LIMIT = 200
 
 _SCHEMA = """

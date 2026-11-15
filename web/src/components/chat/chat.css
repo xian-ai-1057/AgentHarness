@@ -2528,3 +2528,8 @@ button.ch-cite:focus-visible {
 .ch-pdf-zoom:hover {
   background: var(--soft);
 }
+
+/* 對話頁頁首：用自建 agent 時的「編輯 Agent」，靠右放在檔案面板按鈕旁。 */
+.ch-edit-agent {
+  margin-left: auto;
+}

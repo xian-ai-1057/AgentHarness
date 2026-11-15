@@ -909,6 +909,11 @@ export interface UserAgentInfo extends UserAgentInput {
 
 export interface UserAgentList {
   agents: UserAgentInfo[];
+  /**
+   * 建立表單預設勾選的工具組與 skills：工具組和一般對話的預設 agent 一樣
+   * （只留群組開放的）；skills 全部勾選，但沒有沙盒時不勾要在沙盒裡跑的。
+   */
+  defaults?: { toolsets: string[]; skills: string[] };
   limits: {
     name: number;
     description: number;

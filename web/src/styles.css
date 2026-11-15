@@ -3795,6 +3795,8 @@ h3 {
 .group-danger {
   padding-top: 20px;
   border-top: 1px solid var(--line);
+  /* 有未儲存的變更時，底部浮動的儲存列不會蓋住「刪除群組」。 */
+  padding-bottom: 88px;
 }
 
 /* ── 管理平台 → 知識庫 ──────────────────────────────── */

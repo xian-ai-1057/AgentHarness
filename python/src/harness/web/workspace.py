@@ -603,6 +603,13 @@ class Workspace:
         self.refresh_project()
         return [item.id for item in groups if not item.builtin]
 
+    def group_info(self, group_id: str) -> dict[str, Any] | None:
+        """一個群組的 GroupInfo；找不到或不是帳號模式時為 None。"""
+        if self._groups is None:
+            return None
+        group = self._groups.get_group(group_id)
+        return None if group is None else group.info()
+
     def group_names(self) -> dict[str, str]:
         """群組識別碼 → 名稱（稽核紀錄用）。"""
         if self._groups is None:

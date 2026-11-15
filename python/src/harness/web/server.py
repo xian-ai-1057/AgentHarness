@@ -929,13 +929,16 @@ def _group_routes(routes: web.RouteTableDef) -> None:
         _require_admin(request)
         body = await _body(request)
         group_id = request.match_info["group_id"]
-        group = _ws(request).update_group(group_id, body)
-        _audit(
-            request,
-            "group.update",
-            target=group["name"],
-            detail={"id": group_id, "changes": body},
-        )
+        ws = _ws(request)
+        before = ws.group_info(group_id)
+        group = ws.update_group(group_id, body)
+        detail = _group_changes(request, before or {}, group, body)
+        if (
+            detail["changes"]
+            or "membersAdded" in detail
+            or ("membersRemoved" in detail)
+        ):
+            _audit(request, "group.update", target=group["name"], detail=detail)
         return _json(group)
 
     @routes.delete("/api/admin/groups/{group_id:[\\w-]+}")
@@ -1405,6 +1408,46 @@ def _int_param(request: web.Request, name: str) -> int | None:
         return int(value)
     except ValueError as error:
         raise workspace_lib.WebError(400, f"{name} 必須是整數") from error
+
+
+def _group_changes(
+    request: web.Request,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """群組稽核紀錄的內容：真的改了的欄位，以及加入、移出的成員帳號。
+
+    群組頁存檔時會送出所有欄位，只記有變的，免得看起來整個群組都改了。
+    """
+
+    def same(key: str) -> bool:
+        old, new = before.get(key), after.get(key)
+        if isinstance(old, list) and isinstance(new, list):
+            return sorted(old) == sorted(new)
+        return old == new
+
+    detail: dict[str, Any] = {
+        "id": after["id"],
+        "changes": {
+            key: after[key]
+            for key in body
+            if key in after and key != "members" and not same(key)
+        },
+    }
+    old_members = set(before.get("members") or [])
+    new_members = set(after.get("members") or [])
+    store = request.app[_ACCOUNTS]
+
+    def names(ids: set[str]) -> list[str]:
+        users = (store.get_user(item) for item in sorted(ids))
+        return sorted(user.username for user in users if user is not None)
+
+    if new_members - old_members:
+        detail["membersAdded"] = names(new_members - old_members)
+    if old_members - new_members:
+        detail["membersRemoved"] = names(old_members - new_members)
+    return detail
 
 
 def _member(

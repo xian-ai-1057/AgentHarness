@@ -501,3 +501,49 @@ class TestDeleteMember:
         assert store.find_user("boss") is not None
         with pytest.raises(accounts_lib.AccountError):
             store.delete_user(boss_id)
+
+
+class TestGroupAudit:
+    async def test_group_page_save_records_only_real_changes(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+        alice_id = user_id(s.root, "alice")
+        bob_id = user_id(s.root, "bob")
+        _, group = await boss.api(
+            "POST", "/admin/groups", {"name": "資訊處", "members": [alice_id]}
+        )
+        # 群組頁存檔會送出全部欄位；只有成員有變。
+        full = {
+            key: group[key]
+            for key in (
+                "name",
+                "description",
+                "agents",
+                "toolsets",
+                "knowledgeBases",
+                "knowledge",
+            )
+        }
+        await boss.api(
+            "PATCH",
+            f"/admin/groups/{group['id']}",
+            {**full, "members": [bob_id]},
+        )
+        await boss.api(
+            "PATCH",
+            f"/admin/groups/{group['id']}",
+            {**full, "members": [bob_id]},
+        )
+
+        _, audit = await boss.api("GET", "/admin/audit?category=group")
+        updates = [
+            item
+            for item in audit["entries"]
+            if item["action"] == "group.update"
+        ]
+
+        # 第二次什麼都沒改，不記。
+        assert len(updates) == 1
+        assert updates[0]["detail"]["changes"] == {}
+        assert updates[0]["detail"]["membersAdded"] == ["bob"]
+        assert updates[0]["detail"]["membersRemoved"] == ["alice"]

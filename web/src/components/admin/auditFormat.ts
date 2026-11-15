@@ -122,8 +122,16 @@ export function describeDetail(entry: AuditEntry): string {
       return `${String(detail.displayName ?? "")} · 角色：${roleLabel(detail.role)}`;
     case "member.update":
       return describeChanges(detail.changes);
-    case "group.update":
-      return `修改了：${fieldList(detail.changes)}`;
+    case "group.update": {
+      const parts: string[] = [];
+      const fields = fieldList(detail.changes);
+      if (fields) parts.push(`修改了：${fields}`);
+      const added = nameList(detail.membersAdded);
+      if (added) parts.push(`加入成員：${added}`);
+      const removed = nameList(detail.membersRemoved);
+      if (removed) parts.push(`移出成員：${removed}`);
+      return parts.join(" · ");
+    }
     case "knowledge.create":
     case "knowledge.personal_create":
     case "knowledge.personal_delete":

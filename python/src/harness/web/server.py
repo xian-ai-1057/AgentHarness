@@ -45,7 +45,22 @@
     GET    /api/knowledge/source?base=&path=
                                          搜尋結果出處的原文（搜尋得到這份
                                          文件的人都可以看）
+    GET    /api/knowledge/source/text?base=&path=
+                                         同一份文件讀出來的文字，依片段
+                                         排列（網頁用來標出引用的段落）
     POST   /api/knowledge/{id}/search    搜尋測試，{"query", "topK"?}
+    GET    /api/my/knowledge             知識庫頁：可以用的公司知識庫與自己的
+                                         個人知識庫、上限與已用空間
+    POST   /api/my/knowledge             建立個人知識庫，{"name",
+                                         "description"?, "chunking"?}
+    PATCH  /api/my/knowledge/{id}        改自己知識庫的名稱、說明或切片方式
+    DELETE /api/my/knowledge/{id}        刪除自己的知識庫（含文件）
+    GET    /api/my/knowledge/{id}/documents
+                                         自己知識庫的文件與索引概況
+    POST   /api/my/knowledge/{id}/documents
+                                         上傳文件（multipart；?replace=）
+    DELETE /api/my/knowledge/{id}/documents?path=
+                                         刪除文件
 
 登入方式（見 auth_mode）：
 
@@ -110,6 +125,7 @@ from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
 from harness.web import office as office_lib
 from harness.web import uploads as uploads_lib
+from harness.web import user_agents as user_agents_lib
 from harness.web import workspace as workspace_lib
 
 DEFAULT_PORT = 4321
@@ -123,7 +139,7 @@ UPLOAD_PATH = "/api/uploads"
 # 腳本因此無法借用使用者的登入狀態上傳檔案。
 UPLOAD_HEADER = "X-Harness-Upload"
 # 上傳文件到知識庫也是 multipart（和 UPLOAD_PATH 一樣的檢查）。
-_KNOWLEDGE_UPLOAD = re.compile(r"^/api/knowledge/[\w-]+/documents$")
+_KNOWLEDGE_UPLOAD = re.compile(r"^/api/(my/)?knowledge/[\w-]+/documents$")
 _UPLOAD_CHUNK = 256 * 1024
 _FILE_CHUNK = 256 * 1024
 COOKIE = "harness_session"
@@ -327,6 +343,7 @@ def create_app(
             if mode == "accounts"
             else None
         ),
+        user_agents=user_agents_lib.UserAgentStore.for_project(project.root),
     )
     if owner is not None:
         workspace.migrate(owner)
@@ -363,7 +380,9 @@ def create_app(
     _file_routes(routes)
     _account_routes(routes, mode)
     _group_routes(routes)
+    _user_agent_routes(routes)
     _knowledge_routes(routes)
+    _personal_knowledge_routes(routes)
     _settings_routes(routes)
     _audit_routes(routes)
 
@@ -861,6 +880,50 @@ def _group_routes(routes: web.RouteTableDef) -> None:
         return _json({"ok": True})
 
 
+def _user_agent_routes(routes: web.RouteTableDef) -> None:
+    """自建 agent：每個人只能看、改、刪自己建立的。"""
+    one = "/api/agents/{agent_id:[0-9a-f]{12}}"
+
+    def detail(agent: dict[str, Any]) -> dict[str, Any]:
+        # 稽核紀錄不放指示全文，只記用了哪些資源。
+        keys = ("id", "name", "model", "toolsets", "knowledgeBases", "skills")
+        return {key: agent[key] for key in keys}
+
+    @routes.get("/api/agents")
+    async def list_agents(request: web.Request) -> web.Response:
+        return _json(_ws(request).list_user_agents(_user(request)))
+
+    @routes.post("/api/agents")
+    async def create_agent(request: web.Request) -> web.Response:
+        body = await _body(request)
+        agent = _ws(request).create_user_agent(_user(request), body)
+        _audit(
+            request, "agent.create", target=agent["name"], detail=detail(agent)
+        )
+        return _json(agent, status=201)
+
+    @routes.patch(one)
+    async def update_agent(request: web.Request) -> web.Response:
+        body = await _body(request)
+        agent = _ws(request).update_user_agent(
+            _user(request), request.match_info["agent_id"], body
+        )
+        _audit(
+            request, "agent.update", target=agent["name"], detail=detail(agent)
+        )
+        return _json(agent)
+
+    @routes.delete(one)
+    async def delete_agent(request: web.Request) -> web.Response:
+        agent = _ws(request).delete_user_agent(
+            _user(request), request.match_info["agent_id"]
+        )
+        _audit(
+            request, "agent.delete", target=agent["name"], detail=detail(agent)
+        )
+        return _json({"ok": True})
+
+
 def _knowledge_routes(routes: web.RouteTableDef) -> None:
     """知識庫：管理者管理全部；維護者只能管理自己維護的知識庫的文件。"""
     base = "/api/knowledge/{base_id:[\\w-]+}"
@@ -964,6 +1027,15 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
         headers = files_lib.response_headers(name, download)
         return await _send_file(request, fd, info.st_size, headers)
 
+    @routes.get("/api/knowledge/source/text")
+    async def knowledge_source_text(request: web.Request) -> web.Response:
+        found = await _ws(request).knowledge_source_text(
+            _user(request),
+            request.query.get("base", ""),
+            request.query.get("path", ""),
+        )
+        return _json(found)
+
     @routes.post(f"{base}/search")
     async def try_search(request: web.Request) -> web.Response:
         body = await _body(request)
@@ -972,6 +1044,105 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
                 _user(request), request.match_info["base_id"], body
             )
         )
+
+
+def _personal_knowledge_routes(routes: web.RouteTableDef) -> None:
+    """一般使用者的知識庫頁：瀏覽可以用的知識庫、管理自己的個人知識庫。
+
+    個人知識庫只有擁有者能看、能改；別人的一律回 404。
+    """
+    base = "/api/my/knowledge/{base_id:[\\w-]+}"
+
+    @routes.get("/api/my/knowledge")
+    async def list_mine(request: web.Request) -> web.Response:
+        return _json(_ws(request).my_knowledge(_user(request)))
+
+    @routes.post("/api/my/knowledge")
+    async def create_mine(request: web.Request) -> web.Response:
+        body = await _body(request)
+        created = _ws(request).create_personal_knowledge(_user(request), body)
+        _audit(
+            request,
+            "knowledge.personal_create",
+            target=created["id"],
+            detail={"name": created["name"]},
+        )
+        return _json(created, status=201)
+
+    @routes.patch(base)
+    async def update_mine(request: web.Request) -> web.Response:
+        body = await _body(request)
+        base_id = request.match_info["base_id"]
+        updated = _ws(request).update_personal_knowledge(
+            _user(request), base_id, body
+        )
+        _audit(
+            request,
+            "knowledge.personal_update",
+            target=base_id,
+            detail={"changes": body},
+        )
+        return _json(updated)
+
+    @routes.delete(base)
+    async def delete_mine(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        deleted = _ws(request).delete_personal_knowledge(
+            _user(request), base_id
+        )
+        _audit(
+            request,
+            "knowledge.personal_delete",
+            target=base_id,
+            detail={"name": deleted["name"]},
+        )
+        return _json({"ok": True})
+
+    @routes.get(f"{base}/documents")
+    async def list_my_documents(request: web.Request) -> web.Response:
+        return _json(
+            await _ws(request).personal_documents(
+                _user(request), request.match_info["base_id"]
+            )
+        )
+
+    @routes.post(f"{base}/documents")
+    async def upload_my_documents(request: web.Request) -> web.Response:
+        workspace = _ws(request)
+        user = _user(request)
+        base_id = request.match_info["base_id"]
+        replace = request.query.get("replace") or None
+        saved = []
+        async for filename, chunks in _iter_files(request):
+            saved.append(
+                await workspace.save_personal_document(
+                    user, base_id, filename, chunks, replace=replace
+                )
+            )
+            if replace is not None:
+                break
+        if not saved:
+            raise workspace_lib.WebError(400, "沒有收到檔案")
+        detail: dict[str, Any] = {"files": [item["path"] for item in saved]}
+        if replace is not None:
+            detail["replace"] = replace
+        _audit(
+            request, "knowledge.personal_upload", target=base_id, detail=detail
+        )
+        return _json({"files": saved}, status=201)
+
+    @routes.delete(f"{base}/documents")
+    async def delete_my_document(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        path = request.query.get("path", "")
+        _ws(request).delete_personal_document(_user(request), base_id, path)
+        _audit(
+            request,
+            "knowledge.personal_document_delete",
+            target=base_id,
+            detail={"path": path},
+        )
+        return _json({"ok": True})
 
 
 def _settings_routes(routes: web.RouteTableDef) -> None:

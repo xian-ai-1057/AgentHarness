@@ -461,7 +461,7 @@ def _command_sandbox(
 
 # 在沙盒裡印出 Python 版本、可用的常見套件，並確認網路與寫入的限制。
 _SANDBOX_CHECK = """
-import importlib.util, os, socket, sys
+import importlib.util, os, shutil, socket, sys
 print("Python", sys.version.split()[0])
 names = ["pandas", "numpy", "openpyxl", "pdfplumber", "docx", "matplotlib"]
 found = [n for n in names if importlib.util.find_spec(n)]
@@ -469,6 +469,17 @@ missing = [n for n in names if n not in found]
 print("已安裝：", "、".join(found) or "（無）")
 if missing:
     print("未安裝：", "、".join(missing))
+# 內建的 xlsx、docx、pptx、pdf skills 需要的工具與腳本。
+tools = ["soffice", "node", "pandoc", "qpdf", "pdftoppm", "tesseract"]
+lacking = [n for n in tools if shutil.which(n) is None]
+modules = ["pypdf", "reportlab"]
+lacking += [n for n in modules if not importlib.util.find_spec(n)]
+if not os.path.isdir("/opt/skills"):
+    lacking.append("/opt/skills（skill 腳本）")
+if lacking:
+    print("文件 skills 缺少：", "、".join(lacking))
+else:
+    print("文件 skills（xlsx、docx、pptx、pdf）：工具齊全")
 try:
     socket.create_connection(("pypi.org", 443), timeout=3).close()
     print("網路：可以連線")

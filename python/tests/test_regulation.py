@@ -114,6 +114,86 @@ class TestSplitRegulation:
         assert all(len(piece) <= 50 for piece in first)
         assert "".join(first).replace(" ", "") == body.replace(" ", "")
 
+    def test_each_piece_of_a_long_article_has_its_own_page(self):
+        pages = [
+            ("第 1 頁", "第一條 " + "應遵守規定。" * 8),
+            ("第 2 頁", "應定期檢討。" * 8),
+            ("第 3 頁", "第二條 乙。\n第三條 丙。"),
+        ]
+
+        chunks = regulation.split_regulation(pages, 30)
+
+        first = [
+            location for location, _ in chunks or [] if "第一條" in location
+        ]
+        assert first[0] == "第一條（第 1 頁）"
+        assert first[-1] == "第一條（第 2 頁）"
+
+    def test_long_point_is_split_at_sub_items(self):
+        pages = [
+            (
+                "第 1 頁",
+                "一、核心原則\n（一）原則三：" + "保護隱私。" * 6,
+            ),
+            ("第 2 頁", "（二）原則四：" + "確保穩健。" * 6),
+            ("第 3 頁", "二、配套。\n三、結語。"),
+        ]
+
+        chunks = regulation.split_regulation(pages, 50)
+
+        first = [chunk for chunk in chunks or [] if "第一點" in chunk[0]]
+        assert first[-1][0] == "第一點（第 2 頁）"
+        assert first[-1][1].startswith("（二）原則四")
+        assert "保護隱私" not in first[-1][1]
+
+    def test_appendix_ends_the_chapter_and_points_restart(self):
+        pages = [
+            ("第 1 頁", "第一章 總則\n一、目的。\n二、範圍。\n三、定義。"),
+            ("第 2 頁", "第二章 風險\n一、評估。\n二、監督。"),
+            ("第 3 頁", "附錄—核心原則說明\n一、前言。\n二、原則四：穩健性。"),
+            ("第 4 頁", "參考資料\n1. 某某報告。"),
+        ]
+
+        chunks = regulation.split_regulation(pages, 500)
+
+        assert [location for location, _ in chunks or []] == [
+            "第一章 總則 › 第一點（第 1 頁）",
+            "第一章 總則 › 第二點（第 1 頁）",
+            "第一章 總則 › 第三點（第 1 頁）",
+            "第二章 風險 › 第一點（第 2 頁）",
+            "第二章 風險 › 第二點（第 2 頁）",
+            "附錄—核心原則說明 › 第一點（第 3 頁）",
+            "附錄—核心原則說明 › 第二點（第 3 頁）",
+            "參考資料（第 4 頁）",
+        ]
+
+    def test_table_of_contents_and_running_footers_are_not_headings(self):
+        toc = "\n".join(
+            [
+                "目錄",
+                "第一章 總則 ........ 1",
+                "第二章 風險 ........ 2",
+                "參考資料 ........ 3",
+                "附錄-核心原則",
+            ]
+        )
+        pages = [
+            ("第 1 頁", toc),
+            ("第 2 頁", "第一章 總則\n一、目的。\n二、範圍。\n附件 1-1"),
+            ("第 3 頁", "三、定義。\n第三章 其他 12\n附件 1-2"),
+            ("第 4 頁", "四、施行。\n附件 1-3"),
+        ]
+
+        chunks = regulation.split_regulation(pages, 500)
+
+        assert [location for location, _ in chunks or []] == [
+            "第 1 頁",
+            "第一章 總則 › 第一點（第 2 頁）",
+            "第一章 總則 › 第二點（第 2 頁）",
+            "第一章 總則 › 第三點（第 3 頁）",
+            "第一章 總則 › 第四點（第 4 頁）",
+        ]
+
     def test_not_a_regulation(self):
         text = "# 會議紀錄\n\n第一條路線比較好。\n一、先做原型。"
 

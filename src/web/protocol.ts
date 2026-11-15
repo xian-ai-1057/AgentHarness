@@ -84,6 +84,8 @@ export interface SessionSummary {
   notice?: string;
   /** 正在等使用者決定的工具呼叫，讓列表可以直接允許或拒絕。 */
   approval?: Approval;
+  /** 自建 agent 的名稱（Python 版）；agent 刪掉後仍然保留。 */
+  agentLabel?: string;
 }
 
 /** 寫檔類工具執行前，給使用者看的內容。 */
@@ -266,10 +268,21 @@ export interface ServerFeatures {
    */
   knowledgeSources?: boolean;
   /**
+   * 個人知識庫（Python 版）：側欄的「知識庫」頁可以瀏覽可以用的知識庫，
+   * 也能建立只有自己能用的知識庫（見 MyKnowledge）。false 表示管理者在
+   * harness.yaml 關掉了建立個人知識庫（頁面仍然列出公司知識庫）。
+   */
+  personalKnowledge?: boolean;
+  /**
    * 稽核紀錄（Python 版）：管理平台可以查詢與匯出登入、成員、群組、設定
    * 與工具核准的紀錄（見 AuditEntry）。
    */
   audit?: boolean;
+  /**
+   * 自建 Agent（Python 版）：每個人在 /agents 建立自己的 agent，只能挑
+   * 所屬群組開放的工具組與知識庫（見 UserAgentInfo）。
+   */
+  userAgents?: boolean;
 }
 
 /**
@@ -402,6 +415,58 @@ export interface KnowledgeBaseInfo {
   id: string;
   name: string;
   description: string;
+  /** 使用者自己建立的個人知識庫（id 以 my- 開頭，只有自己看得到）。 */
+  personal?: boolean;
+}
+
+/**
+ * 一般使用者的知識庫頁（Python 版，features.personalKnowledge）。
+ *   GET    /api/my/knowledge → MyKnowledge
+ *   POST   /api/my/knowledge {name, description?, chunking?}
+ *          → PersonalKnowledgeBase
+ *   PATCH  /api/my/knowledge/:id {name?, description?, chunking?}
+ *   DELETE /api/my/knowledge/:id（連同文件一起刪除）
+ *   GET    /api/my/knowledge/:id/documents → KnowledgeDocuments
+ *   POST   /api/my/knowledge/:id/documents?replace=（multipart，要帶
+ *          X-Harness-Upload: 1）→ {files: {path, size}[]}
+ *   DELETE /api/my/knowledge/:id/documents?path=
+ * 個人知識庫只有建立的人能看、能用，不經過存取群組，也不能分享。
+ */
+export interface MyKnowledge {
+  /** 群組開放給這個人的公司知識庫（管理者在管理平台建立的）。 */
+  company: CompanyKnowledgeBase[];
+  /** 自己建立的知識庫，依建立時間排序。 */
+  mine: PersonalKnowledgeBase[];
+  limits: PersonalKnowledgeLimits;
+  /** 個人知識庫的文件加起來的大小（位元組）。 */
+  usedBytes: number;
+  /** 支援的副檔名，例如 [".docx", ".md", …]。 */
+  formats: string[];
+}
+
+export interface CompanyKnowledgeBase extends KnowledgeBaseInfo {
+  documents: number;
+  /** 這個人能不能在管理平台管理它（管理者或維護者）。 */
+  manage: boolean;
+}
+
+export interface PersonalKnowledgeBase extends KnowledgeBaseInfo {
+  /** 切片方式：paragraph（依段落）或 regulation（法規一條一片）。 */
+  chunking: "paragraph" | "regulation";
+  documents: number;
+  /** 文件加起來的大小（位元組）。 */
+  bytes: number;
+  /** 秒（Unix time）。 */
+  createdAt: number;
+}
+
+/** harness.yaml 的 personalKnowledge 區塊（大小已換算成位元組）。 */
+export interface PersonalKnowledgeLimits {
+  enabled: boolean;
+  maxBases: number;
+  maxDocuments: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
 }
 
 /** 知識庫的檢索設定（和 harness.yaml 的鍵相同）。 */
@@ -470,6 +535,8 @@ export interface KnowledgeDocument {
   /** 切成幾個片段（索引建立失敗時是 0）。 */
   chunks: number;
   labels: string[];
+  /** 支援的格式卻搜尋不到時的原因，例如掃描的 PDF 沒有文字。 */
+  note?: string;
 }
 
 export interface KnowledgeDocuments {
@@ -483,6 +550,16 @@ export interface KnowledgeDocuments {
         warnings: string[];
       }
     | { error: string };
+}
+
+/**
+ * 出處文件讀出來的文字，依索引的片段排列（Python 版）：
+ *   GET /api/knowledge/source/text?base&path → KnowledgeSourceText
+ * 網頁在裡面標出引用的片段。只有搜尋得到這份文件的人拿得到。
+ */
+export interface KnowledgeSourceText {
+  path: string;
+  sections: { location: string; text: string }[];
 }
 
 export interface KnowledgeHit {
@@ -581,7 +658,12 @@ export interface ToolsetInfo {
 export type SettingSource = "agent" | "config" | "env" | "default";
 
 export interface AgentInfo {
+  /** 對話裡用的名稱；自建的 agent 是 user:<識別碼>。 */
   name: string;
+  /** 顯示的名稱（自建的 agent）；沒有時顯示 name。 */
+  label?: string;
+  /** 這個人自己建立的 agent 才有。 */
+  custom?: { id: string; starters: string[] };
   description: string;
   tools: string[];
   /** 實際使用的模型名稱；都沒設定時為 null。 */
@@ -788,3 +870,55 @@ export type ServerEvent =
   | { type: "project" }
   /** 專案（ChatCategory）有變動：重新讀取 GET /api/categories。 */
   | { type: "categories" };
+
+/**
+ * 自己建立的 agent（Python 版，features.userAgents）。只有建立的人看得到。
+ *
+ *   GET    /api/agents             → UserAgentList
+ *   POST   /api/agents             UserAgentInput → UserAgentInfo
+ *   PATCH  /api/agents/:id         Partial<UserAgentInput> → UserAgentInfo
+ *   DELETE /api/agents/:id
+ *
+ * 工具組、知識庫與模型只能挑這個人能用的（群組開放的、模型選單裡的），
+ * 執行時再依群組限制一次。開新對話時 agent 填 key。
+ */
+export interface UserAgentInput {
+  name: string;
+  description: string;
+  /** 指示（角色指令）。 */
+  instructions: string;
+  /** 開場建議，最多 limits.starters 個。 */
+  starters: string[];
+  /** 預設模型；null 表示跟著專案的預設模型。 */
+  model: string | null;
+  /** 工具組名稱（ToolsetInfo.name）。 */
+  toolsets: string[];
+  /** 知識庫識別碼（KnowledgeBaseInfo.id）。 */
+  knowledgeBases: string[];
+  /** 技能名稱（SkillInfo.name）。 */
+  skills: string[];
+}
+
+export interface UserAgentInfo extends UserAgentInput {
+  id: string;
+  /** 對話裡的 agent 名稱（user:<id>）。 */
+  key: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UserAgentList {
+  agents: UserAgentInfo[];
+  /**
+   * 建立表單預設勾選的工具組與 skills：工具組和一般對話的預設 agent 一樣
+   * （只留群組開放的）；skills 全部勾選，但沒有沙盒時不勾要在沙盒裡跑的。
+   */
+  defaults?: { toolsets: string[]; skills: string[] };
+  limits: {
+    name: number;
+    description: number;
+    instructions: number;
+    starter: number;
+    starters: number;
+  };
+}

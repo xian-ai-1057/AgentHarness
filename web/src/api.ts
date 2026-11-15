@@ -19,17 +19,23 @@ import type {
   KnowledgeDocuments,
   KnowledgeHit,
   KnowledgeSettings,
+  KnowledgeSourceText,
   MemberInfo,
   ModelChoice,
   ModelTestResult,
+  MyKnowledge,
   PermissionMode,
   PermissionSettings,
+  PersonalKnowledgeBase,
   ProjectInfo,
   SearchResult,
   SessionDetail,
   SessionOptions,
   SessionSummary,
   UploadedFile,
+  UserAgentInfo,
+  UserAgentInput,
+  UserAgentList,
 } from "../../src/web/protocol.ts";
 import { LOCAL_KEY_REQUIRED } from "../../src/web/protocol.ts";
 import { auditQuery } from "./components/admin/auditFormat.ts";
@@ -198,6 +204,14 @@ export const api = {
     request<AccessGroup>("PATCH", `/admin/groups/${id}`, changes),
   deleteGroup: (id: string) => request("DELETE", `/admin/groups/${id}`),
 
+  // 自建 Agent（features.userAgents）。
+  userAgents: () => request<UserAgentList>("GET", "/agents"),
+  createUserAgent: (agent: UserAgentInput) =>
+    request<UserAgentInfo>("POST", "/agents", agent),
+  updateUserAgent: (id: string, changes: Partial<UserAgentInput>) =>
+    request<UserAgentInfo>("PATCH", `/agents/${id}`, changes),
+  deleteUserAgent: (id: string) => request("DELETE", `/agents/${id}`),
+
   // 知識庫（features.knowledgeBases）。
   knowledge: () => request<KnowledgeAdminList>("GET", "/knowledge"),
   createKnowledge: (base: { id: string } & KnowledgeSettings) =>
@@ -234,6 +248,40 @@ export const api = {
       query,
       topK,
     }),
+  /** 出處文件的文字，網頁用來標出引用的片段（features.knowledgeSources）。 */
+  knowledgeSourceText: (base: string, path: string) =>
+    request<KnowledgeSourceText>(
+      "GET",
+      `/knowledge/source/text?${new URLSearchParams({ base, path })}`,
+    ),
+  // 知識庫頁與個人知識庫（features.personalKnowledge）。
+  myKnowledge: () => request<MyKnowledge>("GET", "/my/knowledge"),
+  createMyKnowledge: (base: {
+    name: string;
+    description?: string;
+    chunking?: PersonalKnowledgeBase["chunking"];
+  }) => request<PersonalKnowledgeBase>("POST", "/my/knowledge", base),
+  updateMyKnowledge: (
+    id: string,
+    changes: Partial<
+      Pick<PersonalKnowledgeBase, "name" | "description" | "chunking">
+    >,
+  ) => request<PersonalKnowledgeBase>("PATCH", `/my/knowledge/${id}`, changes),
+  deleteMyKnowledge: (id: string) => request("DELETE", `/my/knowledge/${id}`),
+  myKnowledgeDocuments: (id: string) =>
+    request<KnowledgeDocuments>("GET", `/my/knowledge/${id}/documents`),
+  uploadMyKnowledge: (id: string, file: File, replace?: string) =>
+    sendFile<{ path: string; size: number }>(
+      `/my/knowledge/${id}/documents${
+        replace ? `?replace=${encodeURIComponent(replace)}` : ""
+      }`,
+      file,
+    ),
+  deleteMyKnowledgeDocument: (id: string, path: string) =>
+    request(
+      "DELETE",
+      `/my/knowledge/${id}/documents?path=${encodeURIComponent(path)}`,
+    ),
   // 稽核紀錄（features.audit）。
   audit: (filters: AuditFilters, before?: number) =>
     request<AuditPage>(

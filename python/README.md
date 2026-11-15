@@ -25,7 +25,8 @@ Python 版的特點：
   [架在伺服器上](#部署到伺服器)給大家用瀏覽器使用。
 - **參考 Claude Code 與 Codex 的[內建工具](#內建工具)與
   [內建 skills](#內建-skills)**：讀取、搜尋與修改檔案、執行指令、追蹤
-  計畫、讀取網頁，以及 code-review、debugging 等現成的 skill。
+  計畫、讀取網頁，以及 code-review、debugging 等現成的 skill；處理
+  Excel、Word、PowerPoint、PDF 的 skills 改寫自 Anthropic 官方。
 - **可以連接現成的 MCP 伺服器**，和 TypeScript 版用同一份設定：
   [連接 MCP 伺服器](#連接-mcp-伺服器)。
 - **部署後就能用**：`docker compose up -d` 啟動後，在網頁上貼上模型的
@@ -59,7 +60,7 @@ docker compose logs harness      # 看管理者 admin 自動產生的密碼
 | 專案 | 建立一個通用助手：可以讀寫檔案、列計畫、讀取網頁、記住交代的事、寫程式分析上傳的檔案 | 修改 volume 裡的 `harness.yaml`、`agents/main.md`、`AGENTS.md` |
 | 管理者密碼 | 第一次啟動時建立帳號 `admin` 並產生密碼，之後每次啟動都會顯示（admin 改過密碼後就不顯示） | `.env` 的 `HARNESS_WEB_PASSWORD`（只在建立 admin 時使用） |
 | 模型與金鑰 | 在網頁上填寫（見[在網頁上連接模型](#在網頁上連接模型)） | `.env` 的 `ANTHROPIC_API_KEY` 等 |
-| 沙盒 | 一併建置裝好 pandas、matplotlib、LibreOffice（Word、PowerPoint 預覽）等套件的映像檔 | 修改 `docker/sandbox.Dockerfile` |
+| 沙盒 | 一併建置裝好 pandas、matplotlib、LibreOffice（Word、PowerPoint 預覽），以及 Office 文件與 PDF skills 需要的 Node.js、pandoc、qpdf、OCR 等工具的映像檔 | 修改 `docker/sandbox.Dockerfile` |
 | 埠號 | 4321 | `.env` 的 `HARNESS_PORT` |
 
 要調整時，把 `.env.example` 複製成 `.env` 再修改，然後重新執行
@@ -645,6 +646,10 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 網頁版可以在「管理平台 → 知識庫」新增知識庫、上傳文件與試搜尋，
 群組決定成員能搜尋哪些知識庫（見
 [說明文件的「分成好幾個知識庫」](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#分成好幾個知識庫)）。
+每個人也可以在側欄「知識庫」看到可以用的知識庫，並建立只有自己能用的
+個人知識庫、上傳自己的文件（數量與容量上限在 `harness.yaml` 的
+`personalKnowledge` 設定，見
+[說明文件的「我的知識庫」](https://agent-harness-docs-ten.vercel.app/guide/web#我的知識庫)）。
 
 放法規、內規的知識庫可以設定 `chunking: regulation`，依「第 N 條」或
 「一、二、」一條一片，出處標到第幾條（見
@@ -879,6 +884,10 @@ agent = harness.Agent(name="cs", instructions="...", skills=[refund])
 | `planning` | 把多步驟工作拆成計畫並持續更新進度 | `plan` |
 | `web-research` | 查證網路資料，整理成附來源的回答 | `web` |
 | `git-commit` | 檢查變更、撰寫 commit 訊息，經確認後 commit | `shell` |
+| `xlsx` | 建立、編輯、分析試算表，公式用 LibreOffice 重算並檢查錯誤 | `files`（另需 `sandbox`） |
+| `docx` | 建立、編輯 Word 文件，追蹤修訂、註解、轉成 PDF | `files`（另需 `sandbox`） |
+| `pptx` | 建立結構化簡報（佈景主題、版面配置、原生圖表），編輯範本並檢查 | `files`（另需 `sandbox`） |
+| `pdf` | 擷取文字與表格、合併分割、產生中文 PDF、填寫表單、OCR | `files`（另需 `sandbox`） |
 
 ```yaml
 skills: [code-review, git-commit]
@@ -890,6 +899,67 @@ skills: [code-review, git-commit]
 - 內建 skill 的專屬工具一律來自內建 toolsets，而且照樣受權限設定管制
   （例如 `run_command` 仍會先問使用者）。
 - 不使用專案資料夾時：`harness.builtin_skills()["code-review"]`。
+
+#### Office 文件與 PDF 的 skills
+
+`xlsx`、`docx`、`pptx`、`pdf` 改寫自 Anthropic 官方的
+[anthropics/skills](https://github.com/anthropics/skills)（commit `1780c5e`，
+Claude 本身產生 Office 檔與 PDF 用的就是這幾個 skill），授權是 Apache
+License 2.0：
+
+- 每個資料夾保留官方的 `LICENSE.txt`，`SKILL.md` 開頭註明來源與修改內容。
+- `scripts/`（驗證 OOXML、重算公式、複製投影片、填寫表單等腳本）與 pdf 的
+  `REFERENCE.md`、`FORMS.md` 照原樣收錄，沒有修改。
+- `SKILL.md` 翻成繁體中文，改成在沙盒裡執行，並補上中文字型（Word、
+  PowerPoint 用微軟正黑體，reportlab 用沙盒裡的 AR PL UMing）與中文 OCR
+  的做法。
+
+**需要沙盒。** 這幾個 skill 靠 agent 寫程式、執行腳本完成工作，agent 的
+`tools` 要有 `sandbox`，映像檔也要裝好需要的工具。用
+[Docker Compose 部署](#快速部署docker)時 `docker/sandbox.Dockerfile` 都已經
+裝好（LibreOffice、pandoc、qpdf、poppler-utils、tesseract 繁中與簡中、
+Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown 等），
+並把 `harness/builtin/skills/` 複製到映像檔的 `/opt/skills/`。沙盒沒有網路，
+所以全部在建置映像檔時裝好，執行時不會下載任何東西。
+
+- **腳本在沙盒裡唯讀。** `/opt/skills/` 在映像檔的系統目錄裡，容器以唯讀
+  方式執行，agent 寫的程式改不到這些腳本；專案的 `skills/` 資料夾仍然不會
+  掛進沙盒。
+- **中間檔放在每次工作專用的資料夾。** 同一個人的多段對話可能共用同一個
+  工作資料夾（例如「我的檔案」），所以這幾個 skill 要求 agent 把解壓縮的
+  檔案、JSON、逐頁圖片等放在 `.skill-work/<skill>-<隨機碼>/`，只刪除那裡的
+  檔案，做完就刪掉；成品才存到工作資料夾，並避開既有的檔名。以點開頭的
+  資料夾不會出現在產生的檔案卡片裡。
+- **load_skill 不逐一列出 `scripts/` 裡的檔案**，只說有幾個（docx、pptx、
+  xlsx 各有幾十個 XML schema）；用法寫在 `SKILL.md` 裡，需要時仍可用
+  `read_skill_file` 讀取原始碼。這個規則適用於所有 skill 的 `scripts/` 資料夾。
+- **用自己的映像檔時**，把 `python/src/harness/builtin/skills` 複製到映像檔的
+  `/opt/skills`，並裝好上面的工具；`pyharness sandbox` 會列出缺少的項目。
+
+**開啟：** 新建立的助手在有沙盒時會自動列在 `agents/main.md` 的 `skills`。
+既有的專案要自己加上：
+
+```yaml
+tools: [files, plan, web, sandbox]
+skills: [planning, web-research, xlsx, docx, pptx, pdf]
+```
+
+也可以在網頁上每段對話的「＋ → Skills」臨時選用。
+
+**目前的限制：**
+
+- **agent 看不到圖片。** 官方流程會把投影片、Word 轉成圖片給模型檢查版面；
+  這裡改成用文字檢查（`slide_text.py`、`validate.py`、`pandoc`）並計算座標，
+  轉好的 PDF 存在工作資料夾，請使用者在網頁上預覽確認。
+- **填寫中文 PDF 表單**時，表單欄位的字型通常沒有中文字，所以 `pdf` skill
+  改成把文字畫在頁面上並拿掉表單欄位（填好後不能再當表單編輯）。
+- **字型以使用者的 Office 為準。** 沙盒裡沒有微軟正黑體，LibreOffice 預覽用
+  Noto CJK 代替，換行位置可能和 Office 略有不同。
+
+**跟上官方的更新：** 把官方 repo 裡同名資料夾的 `scripts/`、`LICENSE.txt`
+（以及 pdf 的 `REFERENCE.md`、`FORMS.md`）覆蓋過來，比對官方 `SKILL.md` 的
+差異後改寫到我們的繁體中文版，更新 `SKILL.md` 開頭的 commit，再重新建置
+沙盒映像檔（`docker compose build sandbox-image`）。
 
 ## 長期記憶
 
@@ -1121,8 +1191,12 @@ pyharness sandbox     # 檢查 Docker、映像檔與限制是否正常
 哪些常用套件、網路是否關閉、工作目錄能不能寫入。
 
 用 [Docker Compose 部署](#快速部署docker)時這些都已經做好：映像檔來自
-`docker/sandbox.Dockerfile`，並用三個環境變數提供預設值（`harness.yaml`
-有寫的話以它為準）：
+`docker/sandbox.Dockerfile`（另外裝了 LibreOffice，以及內建
+[Office 文件與 PDF skills](#office-文件與-pdf-的-skills) 需要的 pandoc、
+qpdf、tesseract、Node.js 與 pptxgenjs 等工具，並把 skill 的腳本複製到
+`/opt/skills/`；建置目錄是 repo 根目錄，自己建置時執行
+`docker build -t harness-sandbox -f docker/sandbox.Dockerfile .`），並用三個
+環境變數提供預設值（`harness.yaml` 有寫的話以它為準）：
 
 | 環境變數 | 用途 |
 |---|---|

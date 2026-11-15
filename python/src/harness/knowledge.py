@@ -62,6 +62,8 @@ LABELS_FILE = "labels.yaml"
 # 切片方式：paragraph 依段落合併到 chunk_size；regulation 一條（一點）一片，
 # 不像法規的文件仍依段落（見 regulation 模組）。
 CHUNKING_MODES = ("paragraph", "regulation")
+# RunContext.state 裡記錄這一輪已經用掉幾個引用編號。
+_NUMBER_KEY = "knowledge.cited"
 TOOL_NAME = "search_knowledge"
 VECTOR_FILE = "vectors.sqlite3"
 # 舊版把 embedding 存成 JSON 的檔名，讀到時搬進向量資料庫。
@@ -412,8 +414,10 @@ class Knowledge:
             """搜尋知識庫，取得與問題相關的文件片段與出處。
 
             回答公司內部規定、產品資訊等問題前先搜尋；回答時只根據
-            找到的內容，並註明出處（方括號裡的來源）。找不到時直接說
-            知識庫裡沒有相關資料，不要自己編造。
+            找到的內容，並在句子後面寫上結果的編號註明出處，例如「應經
+            專責主管核准 [3]」。同一輪搜尋好幾次時編號會接續、不會重複，
+            直接寫原本的編號，不要改成 [A1] 這類代號或檔名。找不到時直接
+            說知識庫裡沒有相關資料，不要自己編造。
 
             Args:
                 query: 要找的內容，寫成完整的問題或關鍵字，例如
@@ -421,7 +425,7 @@ class Knowledge:
             """
             allowed = _combine_labels(labels, self._dynamic_labels(context))
             hits = await self.search(query, top_k=top_k, labels=allowed)
-            return format_hits(hits)
+            return format_hits(hits, start=_next_number(context, hits))
 
         return tools_lib.tool(search_knowledge, name=TOOL_NAME)
 
@@ -500,6 +504,15 @@ class Knowledge:
                 if label not in item["labels"]:
                     item["labels"].append(label)
         return found
+
+    async def document_chunks(self, source: str) -> list[Chunk]:
+        """建立索引並回傳某份文件的所有片段（依在文件裡的順序）。
+
+        Args:
+            source: 文件的相對路徑（Chunk.source）。
+        """
+        await self._ensure_index()
+        return [chunk for chunk in self._chunks if chunk.source == source]
 
     def _current_signature(self) -> tuple[Any, ...]:
         """用檔案的修改時間與大小判斷內容有沒有變。"""
@@ -807,8 +820,10 @@ def search_tool(
         """搜尋知識庫，取得與問題相關的文件片段與出處。
 
         回答公司內部規定、產品資訊等問題前先搜尋；回答時只根據
-        找到的內容，並註明出處（方括號裡的來源）。找不到時直接說
-        知識庫裡沒有相關資料，不要自己編造。
+        找到的內容，並在句子後面寫上結果的編號註明出處，例如「應經
+        專責主管核准 [3]」。同一輪搜尋好幾次時編號會接續、不會重複，
+        直接寫原本的編號，不要改成 [A1] 這類代號或檔名。找不到時直接
+        說知識庫裡沒有相關資料，不要自己編造。
 
         Args:
             query: 要找的內容，寫成完整的問題或關鍵字，例如
@@ -821,7 +836,7 @@ def search_tool(
             labels=None if fixed is None else list(fixed),
             context=context,
         )
-        return format_hits(hits)
+        return format_hits(hits, start=_next_number(context, hits))
 
     made = tools_lib.tool(search_knowledge, name=TOOL_NAME)
     description = made.description
@@ -1025,13 +1040,16 @@ def split_text(
     return chunks
 
 
-def format_hits(hits: list[Hit], show_scores: bool = False) -> str:
+def format_hits(
+    hits: list[Hit], show_scores: bool = False, start: int = 1
+) -> str:
     """把搜尋結果轉成給模型看的文字。
 
     Args:
         hits: 搜尋結果。
         show_scores: 是否在出處後面附上相似度與 rerank 分數（給人調整
             門檻時參考，不給模型看）。
+        start: 第一筆的編號（同一輪第二次搜尋時接續前一次的編號）。
 
     Returns:
         每筆結果附上編號與出處的文字。
@@ -1039,12 +1057,23 @@ def format_hits(hits: list[Hit], show_scores: bool = False) -> str:
     if not hits:
         return "知識庫裡沒有找到相關的內容。"
     parts = []
-    for number, hit in enumerate(hits, start=1):
+    for number, hit in enumerate(hits, start=start):
         header = f"[{number}] 來源：{hit.citation}"
         if show_scores:
             header += _describe_scores(hit)
         parts.append(f"{header}\n{hit.chunk.text}")
     return "\n\n---\n\n".join(parts)
+
+
+def _next_number(context: datatypes.RunContext, hits: list[Hit]) -> int:
+    """這次搜尋結果的第一個編號，並記下用掉的編號。
+
+    同一輪裡每次搜尋的編號接續下去（1～5、6～10…），回覆裡的 [n] 才
+    不會同時指到兩次搜尋的不同片段；網頁也靠這點把 [n] 對回出處。
+    """
+    used = context.state.get(_NUMBER_KEY, 0)
+    context.state[_NUMBER_KEY] = used + len(hits)
+    return used + 1
 
 
 def _describe_scores(hit: Hit) -> str:

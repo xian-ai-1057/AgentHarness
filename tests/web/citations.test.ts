@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   citationsByBlock,
+  findCitedSection,
   parseCitation,
   parseSearchResult,
   sourceUrl,
@@ -87,5 +88,37 @@ describe("知識庫出處", () => {
     expect(hit && sourceUrl(hit)).toBe(
       `/api/knowledge/source?base=${encodeURIComponent("行內規範")}&path=${encodeURIComponent("R03_分級辦法.pdf")}`,
     );
+  });
+});
+
+describe("在原文裡找引用的段落", () => {
+  const sections = [
+    { location: "第一條", text: "第一條 目的。" },
+    { location: "第二條", text: "第二條 高風險系統\n應經核准。" },
+    { location: "第三條", text: "第三條 施行。" },
+  ];
+
+  it("內容相同（空白不算）", () => {
+    expect(
+      findCitedSection(sections, {
+        excerpt: "第二條 高風險系統 應經核准。",
+        location: "",
+      }),
+    ).toBe(1);
+  });
+
+  it("內容改過時找位置，再找開頭", () => {
+    expect(
+      findCitedSection(sections, { excerpt: "改過的內容", location: "第三條" }),
+    ).toBe(2);
+    expect(
+      findCitedSection(
+        [{ location: "", text: "前言。第一條 目的，另有補充。" }],
+        { excerpt: "第一條 目的", location: "" },
+      ),
+    ).toBe(0);
+    expect(
+      findCitedSection(sections, { excerpt: "完全不同", location: "第九條" }),
+    ).toBe(-1);
   });
 });

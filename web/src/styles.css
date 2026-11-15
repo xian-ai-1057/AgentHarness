@@ -529,6 +529,11 @@ h3 {
   color: var(--muted);
 }
 
+.badge-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
 .dot {
   width: 6px;
   height: 6px;
@@ -3833,6 +3838,11 @@ h3 {
   color: var(--warn);
 }
 
+.kb-note {
+  font-size: 12px;
+  color: var(--warn);
+}
+
 .kb-search {
   display: flex;
   gap: 8px;
@@ -3861,4 +3871,631 @@ h3 {
   -webkit-line-clamp: 6;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ── 自建 Agent（/agents）────────────────────────────── */
+
+.agents-page {
+  gap: 28px;
+}
+
+.agents-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agents-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.agents-heading .hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--soft);
+  border-radius: var(--r-pill);
+  padding: 1px 8px;
+}
+
+.agent-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.agent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+  transition:
+    border-color var(--dur-2) var(--ease-out),
+    box-shadow var(--dur-2) var(--ease-out);
+}
+
+.agent-card:hover {
+  border-color: var(--line-3);
+  box-shadow: var(--shadow);
+}
+
+.agent-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-card-name {
+  font-weight: 700;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(13px * 1.55 * 2);
+}
+
+.agent-card-facts {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.btn-sm {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  gap: 6px;
+}
+
+/* 頭像：紅色淡底配紅字（台新的重點色），管理者提供的用灰色。 */
+.agent-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.agent-avatar-muted {
+  background: var(--soft);
+  color: var(--ink-2);
+}
+
+.agent-avatar-lg {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-lg);
+  font-size: 22px;
+}
+
+.agents-empty {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 20px;
+  border: 1px dashed var(--line-3);
+  border-radius: var(--r-lg);
+}
+
+.agents-empty > div {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.agents-empty p {
+  margin: 0;
+}
+
+.agents-empty .agents-empty-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* 編輯頁：左邊表單，右邊預覽；底下固定一條儲存列。 */
+.agent-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 32px;
+  align-items: start;
+  padding-bottom: 72px;
+}
+
+.agent-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.agent-editor-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.agent-editor .lead {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.agent-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.agent-instructions {
+  height: auto;
+  font: inherit;
+  min-height: 180px;
+  padding: 10px 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.agent-count {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-starters {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-starters li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-starters .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-checklist {
+  max-height: 320px;
+}
+
+.model-choice.is-missing .model-choice-label {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.agent-preview {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.agent-preview-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.agent-preview-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--soft);
+  text-align: center;
+}
+
+.agent-preview-name {
+  margin: 4px 0 0;
+  font-weight: 700;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.agent-preview-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.agent-preview-starters {
+  margin-top: 8px;
+}
+
+.agent-preview-starters .ch-suggestion {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+}
+
+.agent-editor-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.agent-editor-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+/* 新對話頁：選了自己建立的 agent 時的開頭。 */
+.ch-agent-intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.ch-agent-name {
+  margin: 6px 0 0;
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.ch-agent-desc {
+  margin: 0;
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+@media (max-width: 760px) {
+  .agent-editor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-preview {
+    display: none;
+  }
+}
+
+/* ── 知識庫頁（每個人都有） ─────────────────────────── */
+
+.kb-page {
+  gap: 28px;
+}
+
+.kb-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kb-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.kb-group-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.kb-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.kb-grid > li {
+  display: flex;
+  animation: fade-up-sm var(--dur-2) var(--ease-out) both;
+}
+
+/* 卡片：自己的知識庫上緣是紅色細條，公司知識庫是灰色。 */
+.kb-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    box-shadow var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+a.kb-card:hover {
+  border-color: var(--line-3);
+  border-top-color: var(--accent-hover);
+  box-shadow: var(--shadow);
+}
+
+a.kb-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.kb-card-static {
+  border-top-color: var(--line-3);
+}
+
+.kb-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kb-card-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-card-desc {
+  font-size: 13px;
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.8em;
+}
+
+.kb-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kb-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 -6px -8px;
+}
+
+.btn.btn-sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.kb-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 18px 20px;
+  border: 1px dashed var(--line-3);
+  border-radius: var(--r-md);
+  background: var(--soft);
+}
+
+.kb-empty > div {
+  flex: 1 1 240px;
+}
+
+.kb-empty p {
+  margin: 0;
+}
+
+.kb-empty p.kb-empty-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.kb-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.kb-none {
+  margin: 0;
+}
+
+.kb-detail-head .page-head {
+  align-items: flex-start;
+}
+
+.kb-detail-title {
+  overflow-wrap: anywhere;
+}
+
+.kb-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kb-type {
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+.kb-count {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.kb-docs .member-row {
+  padding-left: 10px;
+}
+
+/* 上傳區：整塊可以點，也可以把檔案拖進來。 */
+.kb-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 22px 16px;
+  border: 1.5px dashed var(--line-3);
+  border-radius: var(--r-md);
+  background: var(--soft);
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+.kb-drop:hover:not(:disabled),
+.kb-drop.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.kb-drop:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.kb-drop-icon {
+  color: var(--accent);
+}
+
+.kb-drop-title {
+  font-weight: 600;
+}
+
+.kb-type-choice {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kb-type-choice legend {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.kb-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.kb-radio:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.kb-radio input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.kb-radio > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 字數超過上限時，計數變成紅字。 */
+.agent-count-over {
+  color: var(--danger);
+}
+
+/* 勾選的技能缺少需要的工具時的提醒。 */
+.agent-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: 13px;
 }

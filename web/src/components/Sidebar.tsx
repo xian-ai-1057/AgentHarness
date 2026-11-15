@@ -1,5 +1,5 @@
 /**
- * 左側欄：新對話、搜尋、工作中、對話紀錄、專案、最近的對話、設定。
+ * 左側欄：新對話、搜尋、工作中、對話紀錄、知識庫、專案、最近的對話、設定。
  * 管理者另外有「管理平台」的入口（要登入時在帳號選單裡）。
  *
  * 伺服器支援專案時（features.categories），「專案」列出自己建立的專案，
@@ -40,6 +40,8 @@ import {
 import { CategoryNameDialog, MoveDialog } from "./CategoryDialogs.tsx";
 import {
   AddIcon,
+  AgentIcon,
+  BookIcon,
   ChatsIcon,
   FolderIcon,
   GearIcon,
@@ -275,6 +277,20 @@ export function Sidebar({
         <span className="grow">工作中</span>
         {active > 0 && <span className="hint">{active}</span>}
       </Link>
+      {project?.features?.userAgents && (
+        <Link
+          to="/agents"
+          className={`side-item ${
+            route.page === "agents" || route.page === "agentEdit"
+              ? "active"
+              : ""
+          }`}
+          current={route.page === "agents"}
+        >
+          <AgentIcon />
+          <span className="grow">Agent</span>
+        </Link>
+      )}
       {grouping && (
         <Link
           to="/chats"
@@ -283,6 +299,16 @@ export function Sidebar({
         >
           <ChatsIcon />
           <span className="grow">對話紀錄</span>
+        </Link>
+      )}
+      {project?.features?.personalKnowledge !== undefined && (
+        <Link
+          to="/knowledge"
+          className={`side-item ${route.page === "knowledge" ? "active" : ""}`}
+          current={route.page === "knowledge"}
+        >
+          <BookIcon />
+          <span className="grow">知識庫</span>
         </Link>
       )}
 

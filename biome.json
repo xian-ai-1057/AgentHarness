@@ -8,6 +8,7 @@
       "!package-lock.json",
       "!**/*.md",
       "!python/src/harness/web/static",
+      "!python/src/harness/builtin/skills/*/scripts",
       "!docs/.vitepress/dist",
       "!docs/.vitepress/cache"
     ]

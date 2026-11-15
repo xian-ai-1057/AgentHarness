@@ -1066,6 +1066,17 @@ class TestZeroConfigStart:
         names = {item.name for item in served[0].agents["main"].tools}
         assert "run_python" in names
         assert served[0].sandbox is not None
+        # 有沙盒時，處理 Office 檔與 PDF 的 skills 一併開啟。
+        skills = [item.name for item in served[0].agents["main"].skills]
+        assert {"xlsx", "docx", "pptx", "pdf"} <= set(skills)
+
+    def test_assistant_without_sandbox_skips_office_skills(
+        self, tmp_path, served
+    ):
+        cli.main(["web", "-p", str(tmp_path / "fresh")])
+
+        skills = [item.name for item in served[0].agents["main"].skills]
+        assert skills == ["planning", "web-research"]
 
     def test_existing_project_is_left_alone(self, tmp_path, served):
         root = make_project(tmp_path / "mine")
@@ -1622,8 +1633,12 @@ class TestProjectChoices:
             "knowledgeBases": True,
             # 搜尋結果的出處可以打開原文（GET /api/knowledge/source）。
             "knowledgeSources": True,
+            # 知識庫頁可以建立個人知識庫（/api/my/knowledge）。
+            "personalKnowledge": True,
             # 稽核紀錄本機模式也有（帳號是 local）。
             "audit": True,
+            # 自建 Agent（本機模式也有，擁有者是本機使用者）。
+            "userAgents": True,
         }
         assert info["auth"] == {
             "mode": "local",

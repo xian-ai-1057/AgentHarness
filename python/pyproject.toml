@@ -50,6 +50,14 @@ filterwarnings = [
 [tool.ruff]
 line-length = 80
 target-version = "py311"
+# 收錄自 Anthropic 官方 skills 的檔案（見各資料夾的 LICENSE.txt）不套用
+# 本專案的程式風格，方便日後與上游同步。
+extend-exclude = [
+    "src/harness/builtin/skills/docx",
+    "src/harness/builtin/skills/pdf",
+    "src/harness/builtin/skills/pptx",
+    "src/harness/builtin/skills/xlsx",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]

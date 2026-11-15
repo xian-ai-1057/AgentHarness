@@ -193,7 +193,9 @@ export function PlusMenu({
             items={knowledgeBases.map((base) => ({
               name: base.id,
               label: base.name,
-              description: base.description,
+              description: base.personal
+                ? `我的知識庫${base.description ? ` · ${base.description}` : ""}`
+                : base.description,
               checked: searched.includes(base.id),
             }))}
             onToggle={(id) =>

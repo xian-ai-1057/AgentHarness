@@ -118,16 +118,21 @@ export function describeDetail(entry: AuditEntry): string {
     case "group.update":
       return `修改了：${fieldList(detail.changes)}`;
     case "knowledge.create":
+    case "knowledge.personal_create":
+    case "knowledge.personal_delete":
       return `名稱：${String(detail.name ?? "")}`;
     case "knowledge.update":
+    case "knowledge.personal_update":
       return `修改了：${fieldList(detail.changes)}`;
-    case "knowledge.upload": {
+    case "knowledge.upload":
+    case "knowledge.personal_upload": {
       const files = Array.isArray(detail.files) ? detail.files.join("、") : "";
       return detail.replace
         ? `${files}（換掉 ${String(detail.replace)}）`
         : files;
     }
     case "knowledge.document_delete":
+    case "knowledge.personal_document_delete":
       return String(detail.path ?? "");
     case "approval.decide": {
       const decision =

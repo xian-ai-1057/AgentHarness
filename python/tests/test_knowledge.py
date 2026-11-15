@@ -404,6 +404,34 @@ class TestSearchTool:
         assert content.startswith("[1] 來源：product.md › 產品規格\n")
         assert "5000 mAh" in content
 
+    async def test_numbers_continue_across_searches_in_one_run(
+        self, kb_dir, fake_model
+    ):
+        kb = harness.Knowledge(kb_dir)
+        agent = harness.Agent(name="a", tools=[kb.as_tool()])
+        model = fake_model(
+            [
+                conftest.tool_response(("search_knowledge", {"query": "電池"})),
+                conftest.tool_response(("search_knowledge", {"query": "特休"})),
+                conftest.text_response("見 [1]、[2]。"),
+                conftest.tool_response(("search_knowledge", {"query": "電池"})),
+                conftest.text_response("見 [1]。"),
+            ]
+        )
+
+        session = harness.Session()
+        await harness.run(agent, "電池多大？", model_fn=model, session=session)
+        first = model.requests[1]["messages"][-1]["content"]
+        second = model.requests[2]["messages"][-1]["content"]
+        await harness.run(agent, "再問一次", model_fn=model, session=session)
+        next_turn = model.requests[4]["messages"][-1]["content"]
+
+        used = first.count("來源：")
+        assert first.startswith("[1] 來源：")
+        assert second.startswith(f"[{used + 1}] 來源：")
+        # 下一輪重新從 1 開始。
+        assert next_turn.startswith("[1] 來源：")
+
     async def test_tool_reports_when_nothing_found(self, kb_dir, context):
         tool = harness.Knowledge(kb_dir).as_tool(labels=[])
 

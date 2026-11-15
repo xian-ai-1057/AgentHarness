@@ -53,6 +53,14 @@ ACTIONS = {
     "knowledge.delete": "拿掉知識庫",
     "knowledge.upload": "上傳知識庫文件",
     "knowledge.document_delete": "刪除知識庫文件",
+    "agent.create": "建立自己的 Agent",
+    "agent.update": "修改自己的 Agent",
+    "agent.delete": "刪除自己的 Agent",
+    "knowledge.personal_create": "建立個人知識庫",
+    "knowledge.personal_update": "修改個人知識庫",
+    "knowledge.personal_delete": "刪除個人知識庫",
+    "knowledge.personal_upload": "上傳個人知識庫文件",
+    "knowledge.personal_document_delete": "刪除個人知識庫文件",
     "approval.decide": "工具核准",
     "audit.export": "匯出稽核紀錄",
 }
@@ -62,6 +70,7 @@ CATEGORIES = {
     "group": "群組",
     "settings": "設定",
     "knowledge": "知識庫",
+    "agent": "自建 Agent",
     "approval": "工具核准",
     "audit": "稽核紀錄",
 }

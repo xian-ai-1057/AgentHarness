@@ -134,3 +134,33 @@ export function sourceUrl(source: KnowledgeSource, download = false): string {
   if (download) query.set("download", "1");
   return `/api/knowledge/source?${query.toString()}`;
 }
+
+/** 比對用：去掉所有空白。 */
+function squash(text: string): string {
+  return text.replace(/\s+/g, "");
+}
+
+/**
+ * 在出處文件的片段裡找出引用的那一段。
+ *
+ * 先找內容相同的片段（search_knowledge 的片段就是索引的片段），找不到時
+ * （文件在搜尋之後改過）找位置相同的，再找含有引用開頭的。
+ *
+ * @returns 片段的索引；都找不到時是 -1。
+ */
+export function findCitedSection(
+  sections: readonly { location: string; text: string }[],
+  source: Pick<KnowledgeSource, "excerpt" | "location">,
+): number {
+  const excerpt = squash(source.excerpt);
+  if (excerpt) {
+    const same = sections.findIndex((s) => squash(s.text) === excerpt);
+    if (same >= 0) return same;
+  }
+  if (source.location) {
+    const at = sections.findIndex((s) => s.location === source.location);
+    if (at >= 0) return at;
+  }
+  const head = excerpt.slice(0, 30);
+  return head ? sections.findIndex((s) => squash(s.text).includes(head)) : -1;
+}

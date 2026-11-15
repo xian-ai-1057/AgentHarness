@@ -634,6 +634,15 @@ harness web --port 8080     # 換埠號
   核准都記在只能新增的紀錄裡（雜湊鏈防竄改），管理平台可以篩選、檢查
   完整性與匯出 CSV / JSON Lines（見
   [說明文件的「稽核紀錄」](https://agent-harness-docs-ten.vercel.app/guide/web#稽核紀錄)）。
+- **自建 Agent**（Python 版）：每個人在側欄的「Agent」頁建立自己的 agent：
+  名稱、說明、指示、開場建議、預設模型，以及要用的工具、知識庫與技能。
+  只列出所屬群組開放的工具與知識庫，執行時也照群組再限制一次；只有自己
+  看得到（見
+  [說明文件的「自建 Agent」](https://agent-harness-docs-ten.vercel.app/guide/web#自建-agent)）。
+- **知識庫頁**（Python 版）：側欄的「知識庫」列出群組開放的公司知識庫，
+  每個人也能建立只有自己能用的個人知識庫、拖曳上傳文件，再「用這個知識庫
+  開新對話」；數量與容量上限由管理者在 `harness.yaml` 設定（見
+  [說明文件的「我的知識庫」](https://agent-harness-docs-ten.vercel.app/guide/web#我的知識庫)）。
 - **專案**（Python 版）：建立「專案」把對話分類整理，每個人只看得到自己的
   專案。把側欄的對話拖到專案上就會移進去（拖曳時專案會標出來，也可以放到
   「放到新專案」），或用對話的 ⋮ →「移到專案」（見
@@ -696,6 +705,7 @@ Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
 | OpenAI Agents SDK | `Agent` 與執行迴圈分離、用 schema 定義工具參數、`context.deps` 傳遞相依物件、工具層級的 `needsApproval` |
 | Claude Agent SDK / Claude Code | Hooks、權限模式與 allow / deny / ask 規則、只附加不改寫的 JSONL 對話紀錄、用 Markdown 檔定義 agent、用 MCP 接外部工具、內建工具（Read / Edit / Glob / Grep / Bash / WebFetch）、`SKILL.md` 格式的 skills |
 | OpenAI Codex | `update_plan` 計畫工具、`shell` 指令工具、內建 skills（skill-creator 等） |
+| [Anthropic skills](https://github.com/anthropics/skills) | 內建的 xlsx、docx、pptx、pdf skills（Apache 2.0，腳本照原樣收錄，說明改寫成繁體中文） |
 | Hermes Agent | 不綁定模型供應商、toolsets（成組啟用工具）、專案層級的 `AGENTS.md` |
 | DeepSeek Harness | 對話壓縮的做法（Python 版） |
 
@@ -711,7 +721,8 @@ Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
   - Subagents 與 handoffs（agent 之間互相呼叫或轉交）
   - 知識庫（RAG）
   - Skills（需要時才載入的說明文件），包含內建的 skill-creator、
-    code-review 等 skills
+    code-review 等 skills，以及改寫自 Anthropic 官方、處理 Excel、Word、
+    PowerPoint、PDF 的 xlsx、docx、pptx、pdf skills
   - 跨對話的長期記憶
   - 訊息防護（個資遮蔽、提示注入偵測）
   - 對話過長時的自動壓縮（Python 版壓縮過的對話，TypeScript 版可以

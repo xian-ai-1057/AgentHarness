@@ -1273,9 +1273,11 @@
   gap: 8px;
 }
 
+/* 自建 agent 的開場建議可能比較長：可以換行。 */
 .ch-suggestion {
-  height: 34px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 6px 14px;
+  line-height: 1.4;
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill, 999px);
   background: var(--panel);
@@ -2288,4 +2290,272 @@ button.ch-cite:focus-visible {
 /* 點過預覽區才能用 Ctrl（⌘）＋「+」「−」縮放；滑鼠點擊不顯示外框。 */
 .ch-tab-body .scroll:focus:not(:focus-visible) {
   outline: none;
+}
+
+/* 自建 agent 刪掉後，舊對話只能看：輸入框換成這段提示。 */
+.ch-agent-deleted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 12px 12px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--soft);
+  color: var(--ink);
+}
+
+/* ── 出處原文：引用的段落螢光標示、閃一下（見 SourcePanel.tsx）──── */
+
+.ch-source-number {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.ch-source-doc {
+  padding: 4px 16px 24px;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.ch-source-section {
+  padding: 2px 0;
+  border-radius: 6px;
+  scroll-margin: 24px;
+}
+
+.ch-source-section p,
+.ch-source-mark {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ch-source-loc {
+  margin: 14px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ch-source-mark {
+  display: block;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: var(--highlight, #fff1a8);
+  color: inherit;
+}
+
+.ch-source-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 閃兩下之後螢光底與左邊的線都淡掉，變回一般文字（使用者要求不保留螢光底）。 */
+@keyframes ch-source-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 4px rgba(215, 12, 24, 0.35);
+    background: var(--highlight-strong, #ffe066);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+@keyframes ch-source-fade {
+  from {
+    background: var(--highlight, #fff1a8);
+    border-left-color: var(--accent);
+  }
+  to {
+    background: transparent;
+    border-left-color: transparent;
+  }
+}
+
+.ch-source-flash .ch-source-mark {
+  animation:
+    ch-source-flash 1.4s ease-out 2,
+    ch-source-fade 0.6s ease-out 2.8s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-source-flash .ch-source-mark {
+    animation: ch-source-fade 0.6s ease-out 2.8s forwards;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ch-source-mark {
+    --highlight: rgba(255, 214, 0, 0.22);
+    --highlight-strong: rgba(255, 214, 0, 0.4);
+  }
+}
+
+:root[data-theme="dark"] .ch-source-mark {
+  --highlight: rgba(255, 214, 0, 0.22);
+  --highlight-strong: rgba(255, 214, 0, 0.4);
+}
+
+/* 捲動原文時，檔名與下載按鈕留在上方。 */
+.ch-source-head {
+  position: sticky;
+  top: 0;
+  /* PDF 放大後往右捲時也留在原位。 */
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+}
+
+/* ── 出處的 PDF：PDF.js 畫出每一頁，引用的段落螢光標示（見 PdfViewer.tsx）── */
+
+/* 放大到比面板寬時往右捲（置中的話左半邊會捲不到）。 */
+.ch-pdf {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  padding: 12px 12px 0;
+  background: var(--soft);
+}
+
+/* 說明文字跟著面板寬度換行，不要撐開放大後的寬度（width: 0 不計入 max-content）。 */
+.ch-pdf > .ch-preview-state {
+  box-sizing: border-box;
+  width: 0;
+  min-width: 100%;
+}
+
+.ch-pdf-page {
+  position: relative;
+  flex: 0 0 auto;
+  margin-inline: auto;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  /* 捲到這一頁時不要被上方固定的檔名列擋住。 */
+  scroll-margin-top: 88px;
+}
+
+.ch-pdf-page canvas {
+  display: block;
+}
+
+/* 閃兩下之後淡掉，PDF 變回原本的樣子（使用者要求不保留螢光底）。 */
+.ch-pdf-mark {
+  position: absolute;
+  border-radius: 2px;
+  background: rgba(255, 214, 0, 0.42);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+  scroll-margin: 96px;
+  animation:
+    ch-pdf-flash 1.4s ease-out 2,
+    ch-pdf-fade 0.6s ease-out 2.8s forwards;
+}
+
+@keyframes ch-pdf-flash {
+  0%,
+  40% {
+    background: rgba(255, 190, 0, 0.75);
+    box-shadow: 0 0 0 3px rgba(215, 12, 24, 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+@keyframes ch-pdf-fade {
+  from {
+    background: rgba(255, 214, 0, 0.42);
+  }
+  to {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-pdf-mark {
+    animation: ch-pdf-fade 0.6s ease-out 2.8s forwards;
+  }
+}
+
+/* 蓋在出處那一頁的上方。 */
+.ch-pdf-note {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  left: 8px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ch-pdf-state {
+  padding: 32px 24px;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
+}
+
+/* 縮放工具列浮在面板下方，捲動時一直看得到。 */
+.ch-pdf-tools {
+  position: sticky;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 12px;
+  padding: 2px 4px 2px 10px;
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+}
+
+.ch-pdf-pages {
+  margin-right: 4px;
+  color: var(--muted);
+}
+
+.ch-pdf-tools .icon-btn {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+}
+
+.ch-pdf-zoom {
+  min-width: 48px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.ch-pdf-zoom:hover {
+  background: var(--soft);
+}
+
+/* 對話頁頁首：用自建 agent 時的「編輯 Agent」，靠右放在檔案面板按鈕旁。 */
+.ch-edit-agent {
+  margin-left: auto;
 }

@@ -46,4 +46,4 @@ agent = harness.Agent(
 )
 ```
 
-Python 版另外附帶幾個內建 skills（`code-review`、`debugging` 等），見[內建 skills](/advanced/skills#內建-skills)。
+Python 版另外附帶幾個內建 skills（`code-review`、`debugging` 等，以及處理 Office 檔與 PDF 的 `xlsx`、`docx`、`pptx`、`pdf`），見[內建 skills](/advanced/skills#內建-skills)。

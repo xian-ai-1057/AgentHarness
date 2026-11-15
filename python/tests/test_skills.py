@@ -1,10 +1,14 @@
 """Skills 的測試。"""
 
+import pathlib
+import re
+
 import pytest
 
 import harness
 from harness import scaffold
 from harness import sessions
+from harness import skills as skills_lib
 from tests import conftest
 
 
@@ -291,10 +295,14 @@ def test_builtin_skills_are_complete():
     assert sorted(loaded) == [
         "code-review",
         "debugging",
+        "docx",
         "git-commit",
+        "pdf",
         "planning",
+        "pptx",
         "skill-creator",
         "web-research",
+        "xlsx",
     ]
     for skill in loaded.values():
         assert skill.description
@@ -313,3 +321,60 @@ def test_resource_files_work_under_hidden_parent_folder(tmp_path):
     )
 
     assert skill.resource_files() == ["guide.md"]
+
+
+OFFICE_SKILLS = ["xlsx", "docx", "pptx", "pdf"]
+
+
+@pytest.mark.parametrize("name", OFFICE_SKILLS)
+def test_office_skills_keep_license_and_mention_changes(name):
+    skill = harness.builtin_skills()[name]
+    text = (skill.root / "SKILL.md").read_text(encoding="utf-8")
+
+    # Apache 2.0：保留授權條款，並註明改寫自哪裡、改了什麼。
+    assert "Apache License" in (skill.root / "LICENSE.txt").read_text("utf-8")
+    assert "github.com/anthropics/skills" in text
+    assert "修改內容" in text
+    # 同一個人的對話共用工作資料夾：中間檔放在每次工作專用的資料夾。
+    assert ".skill-work/" in text
+
+
+@pytest.mark.parametrize("name", OFFICE_SKILLS)
+def test_office_skill_scripts_exist_where_instructions_say(name):
+    # 沙盒映像檔把 builtin/skills 複製到 /opt/skills，說明裡寫的每個腳本
+    # 路徑都要真的存在。
+    root = harness.builtin_skills()[name].root
+    text = (root / "SKILL.md").read_text(encoding="utf-8")
+    paths = set(re.findall(r"/opt/skills/([\w/.-]+\.(?:py|js))", text))
+
+    assert paths, "說明裡沒有提到任何腳本"
+    for path in paths:
+        assert (root.parent / path).is_file(), path
+
+
+def test_sandbox_image_installs_builtin_skills():
+    dockerfile = pathlib.Path(__file__).parents[2] / "docker"
+    text = (dockerfile / "sandbox.Dockerfile").read_text(encoding="utf-8")
+
+    assert "COPY python/src/harness/builtin/skills /opt/skills" in text
+
+
+def test_load_skill_summarizes_scripts_folder(tmp_path):
+    folder = tmp_path / "deck"
+    (folder / "scripts" / "office").mkdir(parents=True)
+    (folder / "SKILL.md").write_text("x", encoding="utf-8")
+    (folder / "guide.md").write_text("x", encoding="utf-8")
+    (folder / "scripts" / "build.py").write_text("x", encoding="utf-8")
+    (folder / "scripts" / "office" / "a.xsd").write_text("x", encoding="utf-8")
+    skill = harness.Skill(
+        name="deck", description="d", instructions="做簡報", root=folder
+    )
+    load, read = skills_lib.make_tools([skill])
+
+    text = load.func("deck")
+
+    assert "- guide.md" in text
+    assert "scripts/build.py" not in text
+    assert "scripts/：2 個腳本與資料檔" in text
+    # 沒列出來的腳本仍然可以讀。
+    assert read.func("deck", "scripts/build.py") == "x"

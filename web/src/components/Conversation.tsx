@@ -13,6 +13,7 @@ import {
   type SessionDetail,
   type SessionOptions,
 } from "../../../src/web/protocol.ts";
+import { agentEditPath, isDeletedAgent, sessionAgentLabel } from "../agents.ts";
 import { api } from "../api.ts";
 import { isMember } from "../auth.ts";
 import { activeFolder, folderLabel, withoutFolder } from "../folders.ts";
@@ -59,6 +60,7 @@ import { FilePanel, type PanelTab } from "./FilePanel.tsx";
 import {
   AlertIcon,
   ChevronDownIcon,
+  GearIcon,
   PanelIcon,
   RetryIcon,
   ShieldIcon,
@@ -84,7 +86,8 @@ export function Conversation({ id }: { id: string }) {
   const [source, setSource] = useState<KnowledgeSource>();
   const canOpenSources = project?.features?.knowledgeSources === true;
   const openCitation = useCallback(
-    (next: KnowledgeSource) => setSource(next),
+    // 複製一份：同一個引用再點一次也要重新閃一下（見 SourcePanel）。
+    (next: KnowledgeSource) => setSource({ ...next }),
     [],
   );
   // 新對話頁交過來、或剛在這裡送出的訊息；伺服器的事件到了就換掉。
@@ -319,11 +322,16 @@ export function Conversation({ id }: { id: string }) {
         summary.activity.kind === "thinking") &&
       !detail.partial);
   const canLoadFiles = Boolean(project?.features?.files);
+  const agentDeleted = isDeletedAgent(project, summary.agent);
+  const editAgent = agentEditPath(project, summary.agent);
+  const agentName = agentDeleted
+    ? `${sessionAgentLabel(project, summary)}（已刪除）`
+    : sessionAgentLabel(project, summary);
   const interrupted =
     summary.status === "stopped" &&
     summary.stopReason === INTERRUPTED_STOP_REASON;
   const approvalAgent =
-    (approval && findApprovalStep(turns, approval.id)?.agent) ?? summary.agent;
+    (approval && findApprovalStep(turns, approval.id)?.agent) ?? agentName;
 
   return (
     <FolderContext.Provider value={folder}>
@@ -332,10 +340,20 @@ export function Conversation({ id }: { id: string }) {
           <div className="main-title">
             <h1>{summary.title}</h1>
             <span className="subtle mono ch-hide-narrow">
-              {project?.name} · {summary.agent}
+              {project?.name} · {agentName}
               {folder && ` · ${folderLabel(project?.folders, folder)}`}
             </span>
           </div>
+          {editAgent && (
+            <Link
+              to={editAgent}
+              className="btn btn-outline btn-sm ch-edit-agent"
+              aria-label={`編輯「${agentName}」的設定`}
+            >
+              <GearIcon size={14} />
+              <span className="ch-hide-narrow">編輯 Agent</span>
+            </Link>
+          )}
           <button
             type="button"
             className="icon-btn"
@@ -452,55 +470,68 @@ export function Conversation({ id }: { id: string }) {
                 }}
               />
             )}
-            <Composer
-              placeholder="接著問，或請它修改"
-              busy={busy}
-              onSubmit={send}
-              onStop={() => void api.stop(id)}
-              onUpload={
-                project?.uploads
-                  ? (file) => api.upload(file, folder)
-                  : undefined
-              }
-              maxUploadBytes={project?.uploads?.maxBytes}
-              options={composerOptions}
-              folder={
-                folder
-                  ? {
-                      folders: project?.folders ?? [],
-                      value: folder,
-                    }
-                  : undefined
-              }
-              controls={
-                <>
-                  {!composerOptions && (
-                    <span className="select-chip">agent：{summary.agent}</span>
-                  )}
-                  <label className="select-chip">
-                    <ShieldIcon />
-                    <span className="ch-hide-narrow">{modeLabel}</span>
-                    <ChevronDownIcon />
-                    <select
-                      aria-label="這段對話的權限模式"
-                      value={detail.mode ?? ""}
-                      onChange={(event) => void changeMode(event.target.value)}
-                    >
-                      <option value="">
-                        跟著專案設定（{MODE_LABELS[projectMode]}）
-                      </option>
-                      <option value="ask">{MODE_LABELS.ask}</option>
-                      {(!member || detail.mode === "bypass") && (
-                        <option value="bypass" disabled={member}>
-                          {MODE_LABELS.bypass}
+            {agentDeleted ? (
+              <div className="notice ch-agent-deleted" role="status">
+                <span>
+                  這個 Agent 已經刪除了，這段對話只能看，不能再接著聊。
+                </span>
+                <Link to="/" className="btn btn-outline btn-sm">
+                  開新對話
+                </Link>
+              </div>
+            ) : (
+              <Composer
+                placeholder="接著問，或請它修改"
+                busy={busy}
+                onSubmit={send}
+                onStop={() => void api.stop(id)}
+                onUpload={
+                  project?.uploads
+                    ? (file) => api.upload(file, folder)
+                    : undefined
+                }
+                maxUploadBytes={project?.uploads?.maxBytes}
+                options={composerOptions}
+                folder={
+                  folder
+                    ? {
+                        folders: project?.folders ?? [],
+                        value: folder,
+                      }
+                    : undefined
+                }
+                controls={
+                  <>
+                    {!composerOptions && (
+                      <span className="select-chip">agent：{agentName}</span>
+                    )}
+                    <label className="select-chip">
+                      <ShieldIcon />
+                      <span className="ch-hide-narrow">{modeLabel}</span>
+                      <ChevronDownIcon />
+                      <select
+                        aria-label="這段對話的權限模式"
+                        value={detail.mode ?? ""}
+                        onChange={(event) =>
+                          void changeMode(event.target.value)
+                        }
+                      >
+                        <option value="">
+                          跟著專案設定（{MODE_LABELS[projectMode]}）
                         </option>
-                      )}
-                      <option value="dontAsk">{MODE_LABELS.dontAsk}</option>
-                    </select>
-                  </label>
-                </>
-              }
-            />
+                        <option value="ask">{MODE_LABELS.ask}</option>
+                        {(!member || detail.mode === "bypass") && (
+                          <option value="bypass" disabled={member}>
+                            {MODE_LABELS.bypass}
+                          </option>
+                        )}
+                        <option value="dontAsk">{MODE_LABELS.dontAsk}</option>
+                      </select>
+                    </label>
+                  </>
+                }
+              />
+            )}
             {(sendError || optionsError) && (
               <p className="inline-error" role="alert">
                 {sendError ?? optionsError}

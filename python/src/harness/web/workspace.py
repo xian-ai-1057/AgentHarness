@@ -2370,6 +2370,7 @@ class Workspace:
         store = self._require_user_agents()
         return {
             "agents": [item.info() for item in store.owned_by(user.id)],
+            "defaults": self._user_agent_defaults(user),
             "limits": {
                 "name": user_agents_lib.NAME_LIMIT,
                 "description": user_agents_lib.DESCRIPTION_LIMIT,
@@ -2438,6 +2439,38 @@ class Workspace:
         if found is None:
             raise WebError(404, "找不到這個 Agent")
         return found
+
+    def _user_agent_defaults(self, user: accounts_lib.User) -> dict[str, Any]:
+        """建立表單預設勾選的工具組與 skills。
+
+        工具組和這個人開新對話時預設的 agent 一樣（只留所屬群組開放的）；
+        skills 預設全部勾選，但沒有沙盒時，要在沙盒裡跑腳本的 skills 不勾。
+        """
+        access = self._access(user)
+        visible = self._visible_agents(access)
+        default = self.project.default_agent
+        if default not in visible and visible:
+            default = visible[0]
+        agent = self.project.agents.get(default)
+        if agent is None:
+            return {"toolsets": [], "skills": []}
+        names = {item.name for item in agent.tools}
+        toolsets = [
+            name
+            for name, items in self.project.toolsets.items()
+            if items
+            and access.allows("toolsets", name)
+            and {item.name for item in items} <= names
+        ]
+        skills = [
+            name
+            for name in self._available_skills()
+            if (
+                user_agents_lib.SANDBOX_TOOLSET in toolsets
+                or name not in user_agents_lib.SANDBOX_SKILLS
+            )
+        ]
+        return {"toolsets": toolsets, "skills": skills}
 
     def _check_agent_resources(
         self, user: accounts_lib.User, body: Any

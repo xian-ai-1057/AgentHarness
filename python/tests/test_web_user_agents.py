@@ -312,3 +312,33 @@ class TestLocalMode:
         assert status == 201
         system = h.model.requests[0]["messages"][0]["content"]
         assert "你是「合約小幫手」" in system
+
+
+class TestDefaults:
+    async def test_defaults_follow_main_agent_and_groups(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+
+        _, before = await alice.api("GET", "/agents")
+        await boss.api(
+            "PATCH", "/admin/groups/everyone", {"toolsets": ["files"]}
+        )
+        _, after = await alice.api("GET", "/agents")
+        _, project = await alice.api("GET", "/project")
+
+        main = next(a for a in project["agents"] if a["name"] == "main")
+        assert before["defaults"]["toolsets"]
+        assert "files" in before["defaults"]["toolsets"]
+        assert after["defaults"]["toolsets"] == ["files"]
+        # 技能預設全部勾選（專案的與內建的）。
+        all_skills = [item["name"] for item in project["skills"]]
+        assert after["defaults"]["skills"] == [
+            name
+            for name in all_skills
+            if name not in user_agents_lib.SANDBOX_SKILLS
+        ]
+        assert main["tools"]
+
+    def test_sandbox_skills_need_sandbox(self):
+        assert {"xlsx", "docx", "pptx", "pdf"} == user_agents_lib.SANDBOX_SKILLS

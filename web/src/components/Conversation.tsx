@@ -13,7 +13,7 @@ import {
   type SessionDetail,
   type SessionOptions,
 } from "../../../src/web/protocol.ts";
-import { isDeletedAgent, sessionAgentLabel } from "../agents.ts";
+import { agentEditPath, isDeletedAgent, sessionAgentLabel } from "../agents.ts";
 import { api } from "../api.ts";
 import { isMember } from "../auth.ts";
 import { activeFolder, folderLabel, withoutFolder } from "../folders.ts";
@@ -60,6 +60,7 @@ import { FilePanel, type PanelTab } from "./FilePanel.tsx";
 import {
   AlertIcon,
   ChevronDownIcon,
+  GearIcon,
   PanelIcon,
   RetryIcon,
   ShieldIcon,
@@ -321,6 +322,7 @@ export function Conversation({ id }: { id: string }) {
       !detail.partial);
   const canLoadFiles = Boolean(project?.features?.files);
   const agentDeleted = isDeletedAgent(project, summary.agent);
+  const editAgent = agentEditPath(project, summary.agent);
   const agentName = agentDeleted
     ? `${sessionAgentLabel(project, summary)}（已刪除）`
     : sessionAgentLabel(project, summary);
@@ -341,6 +343,16 @@ export function Conversation({ id }: { id: string }) {
               {folder && ` · ${folderLabel(project?.folders, folder)}`}
             </span>
           </div>
+          {editAgent && (
+            <Link
+              to={editAgent}
+              className="btn btn-outline btn-sm ch-edit-agent"
+              aria-label={`編輯「${agentName}」的設定`}
+            >
+              <GearIcon size={14} />
+              <span className="ch-hide-narrow">編輯 Agent</span>
+            </Link>
+          )}
           <button
             type="button"
             className="icon-btn"

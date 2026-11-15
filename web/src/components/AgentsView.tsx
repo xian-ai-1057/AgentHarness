@@ -33,13 +33,25 @@ import {
   AgentIcon,
   ArrowLeftIcon,
   CloseIcon,
+  GearIcon,
   PenIcon,
   TrashIcon,
+  WarnIcon,
 } from "./Icons.tsx";
 import { Link } from "./Sidebar.tsx";
 import { ConfirmDialog } from "./shell/Dialog.tsx";
 import { Field } from "./shell/Field.tsx";
 import { showToast } from "./shell/toast.tsx";
+
+/** 腳本要在沙盒裡執行的 skills（伺服器 user_agents.SANDBOX_SKILLS）。 */
+const SANDBOX_SKILLS = new Set(["xlsx", "docx", "pptx", "pdf"]);
+const SANDBOX_TOOLSET = "sandbox";
+
+function sandboxWarning(project: ProjectInfo): string {
+  return project.toolsets.some((set) => set.name === SANDBOX_TOOLSET)
+    ? "勾選的技能要用「執行 Python」才能產生檔案，請在上面的工具勾選「執行 Python」。"
+    : "勾選的技能要用「執行 Python」才能產生檔案，但管理者沒有開放這個工具給你，Agent 只能說明做法、做不出檔案。";
+}
 
 const DEFAULT_LIMITS: UserAgentList["limits"] = {
   name: 40,
@@ -212,10 +224,11 @@ function AgentCard({
         {agent.custom && (
           <Link
             to={`/agents/${agent.custom.id}`}
-            className="btn btn-ghost btn-sm"
-            aria-label={`編輯「${label}」`}
+            className="btn btn-outline btn-sm"
+            aria-label={`編輯「${label}」的設定`}
           >
-            編輯
+            <GearIcon size={14} />
+            編輯設定
           </Link>
         )}
       </div>
@@ -237,11 +250,24 @@ const EMPTY_DRAFT: Draft = {
   skills: [],
 };
 
-/** 新的 agent 預設只勾「讀寫檔案」，其他工具由使用者自己決定要不要開。 */
-function defaultToolsets(project: ProjectInfo): string[] {
-  return project.toolsets
-    .filter((set) => set.builtin && set.name === "files")
-    .map((set) => set.name);
+/**
+ * 新的 agent 一開始勾的工具與 skills（伺服器依群組算好：工具和一般對話
+ * 一樣，skills 全勾）。舊版伺服器沒有提供時只勾「讀寫檔案」。
+ */
+function startDraft(project: ProjectInfo, list: UserAgentList): Draft {
+  if (list.defaults) {
+    return {
+      ...EMPTY_DRAFT,
+      toolsets: list.defaults.toolsets,
+      skills: list.defaults.skills,
+    };
+  }
+  return {
+    ...EMPTY_DRAFT,
+    toolsets: project.toolsets
+      .filter((set) => set.builtin && set.name === "files")
+      .map((set) => set.name),
+  };
 }
 
 /** /agents/new 與 /agents/:id。 */
@@ -276,19 +302,9 @@ export function AgentEditor({ id }: { id: string }) {
         if (cancelled) return;
         setLimits(list.limits);
         if (creating) {
-          const start = { ...EMPTY_DRAFT, toolsets: defaultToolsets(project) };
+          const start = startDraft(project, list);
           setInitial(start);
-          // 讀取期間已經開始填的內容保留下來。
-          setDraft((current) =>
-            current
-              ? {
-                  ...current,
-                  toolsets: current.toolsets.length
-                    ? current.toolsets
-                    : start.toolsets,
-                }
-              : start,
-          );
+          setDraft(start);
           return;
         }
         const found = list.agents.find((item) => item.id === id);
@@ -602,8 +618,14 @@ export function AgentEditor({ id }: { id: string }) {
           {(options.skills.length > 0 || draft.skills.length > 0) && (
             <CheckList
               legend="技能"
-              help="遇到相關的工作時，Agent 會載入技能，照著裡面的步驟做。"
+              help="遇到相關的工作時，Agent 會載入技能，照著裡面的步驟做。製作 Excel、Word、PowerPoint 與 PDF 檔的技能要搭配「執行 Python」工具。"
               empty="這個專案沒有技能。"
+              warning={
+                draft.skills.some((name) => SANDBOX_SKILLS.has(name)) &&
+                !draft.toolsets.includes(SANDBOX_TOOLSET)
+                  ? sandboxWarning(project)
+                  : undefined
+              }
               items={withMissing(options.skills, draft.skills)}
               value={draft.skills}
               onChange={(skills) => edit({ skills })}
@@ -783,6 +805,7 @@ function CheckList({
   legend,
   help,
   empty,
+  warning,
   items,
   value,
   onChange,
@@ -790,6 +813,8 @@ function CheckList({
   legend: string;
   help: string;
   empty: string;
+  /** 目前的勾選有問題時顯示的提醒。 */
+  warning?: string;
   items: { name: string; label: string; hint?: string; missing?: boolean }[];
   value: string[];
   onChange: (value: string[]) => void;
@@ -804,6 +829,12 @@ function CheckList({
     <fieldset className="model-choices access-field">
       <legend>{legend}</legend>
       <div className="help">{help}</div>
+      {warning && (
+        <p className="agent-warning" role="status">
+          <WarnIcon size={14} />
+          {warning}
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="subtle">{empty}</p>
       ) : (

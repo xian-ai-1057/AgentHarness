@@ -33,6 +33,15 @@ export function sessionAgentLabel(
   return isUserAgent(summary.agent) ? "已刪除的 Agent" : summary.agent;
 }
 
+/** 自建 agent 的編輯頁網址；不是自己建立的 agent 時是 undefined。 */
+export function agentEditPath(
+  project: ProjectInfo | undefined,
+  name: string | undefined,
+): string | undefined {
+  const found = project?.agents.find((item) => item.name === name);
+  return found?.custom ? `/agents/${found.custom.id}` : undefined;
+}
+
 /** 這段對話用的自建 agent 已經被刪掉了（專案資訊還沒載入時不算）。 */
 export function isDeletedAgent(
   project: ProjectInfo | undefined,

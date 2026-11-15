@@ -33,7 +33,13 @@ import {
 } from "./chat/options.ts";
 import { handOff } from "./chat/pending.ts";
 import { Thinking } from "./chat/Thinking.tsx";
-import { AlertIcon, ChevronDownIcon, CloseIcon, FolderIcon } from "./Icons.tsx";
+import {
+  AlertIcon,
+  ChevronDownIcon,
+  CloseIcon,
+  FolderIcon,
+  GearIcon,
+} from "./Icons.tsx";
 import { Link } from "./Sidebar.tsx";
 
 /** 輸入框底下的建議：點了把文字填進輸入框。 */
@@ -271,6 +277,13 @@ export function NewChat() {
                     {agent.description && (
                       <p className="ch-agent-desc">{agent.description}</p>
                     )}
+                    <Link
+                      to={`/agents/${agent.custom.id}`}
+                      className="btn btn-ghost btn-sm ch-agent-edit"
+                    >
+                      <GearIcon size={14} />
+                      編輯這個 Agent
+                    </Link>
                   </div>
                 ) : (
                   <h1 className="ch-greeting anim-in">今天要做什麼？</h1>

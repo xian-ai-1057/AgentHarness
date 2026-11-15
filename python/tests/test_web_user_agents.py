@@ -102,7 +102,7 @@ class TestApi:
         assert alice_project["features"]["userAgents"] is True
         assert bob_patch == 404
         assert boss_delete == 404
-        assert bob_use == 400
+        assert bob_use == 404
 
     async def test_only_open_resources_can_be_chosen(self, site):
         s = await site(extra="models: [big-model]\n")

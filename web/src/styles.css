@@ -4471,3 +4471,8 @@ a.kb-card:focus-visible {
   flex-direction: column;
   gap: 2px;
 }
+
+/* 字數超過上限時，計數變成紅字。 */
+.agent-count-over {
+  color: var(--danger);
+}

@@ -250,6 +250,8 @@ export function AgentEditor({ id }: { id: string }) {
   const creating = id === "new";
   const [saved, setSaved] = useState<UserAgentInfo>();
   const [draft, setDraft] = useState<Draft>();
+  // 建立時一開始的表單（預設勾的工具）；和它一樣就不算有變更。
+  const [initial, setInitial] = useState<Draft>();
   const [limits, setLimits] = useState(DEFAULT_LIMITS);
   const [loadError, setLoadError] = useState<string>();
   const [error, setError] = useState<string>();
@@ -274,12 +276,19 @@ export function AgentEditor({ id }: { id: string }) {
         if (cancelled) return;
         setLimits(list.limits);
         if (creating) {
-          setDraft((current) => ({
-            ...(current ?? EMPTY_DRAFT),
-            toolsets: current?.toolsets.length
-              ? current.toolsets
-              : defaultToolsets(project),
-          }));
+          const start = { ...EMPTY_DRAFT, toolsets: defaultToolsets(project) };
+          setInitial(start);
+          // 讀取期間已經開始填的內容保留下來。
+          setDraft((current) =>
+            current
+              ? {
+                  ...current,
+                  toolsets: current.toolsets.length
+                    ? current.toolsets
+                    : start.toolsets,
+                }
+              : start,
+          );
           return;
         }
         const found = list.agents.find((item) => item.id === id);
@@ -345,8 +354,17 @@ export function AgentEditor({ id }: { id: string }) {
     setDraft({ ...draft, ...change });
     setError(undefined);
   };
+  const baseline = saved ? toDraft(saved) : (initial ?? EMPTY_DRAFT);
   const dirty =
-    !saved || JSON.stringify(toDraft(saved)) !== JSON.stringify(cleaned(draft));
+    JSON.stringify(cleaned(baseline)) !== JSON.stringify(cleaned(draft));
+  const tooLong = overflow(draft, limits);
+  const status =
+    error ??
+    (dirty
+      ? "有未儲存的變更"
+      : saved
+        ? "所有變更都已儲存"
+        : "填好名稱就可以建立");
   // 之前選的東西後來被收回（群組改了）時，仍然顯示出來讓人取消勾選。
   const withMissing = (
     items: { name: string; label: string; hint?: string }[],
@@ -367,6 +385,11 @@ export function AgentEditor({ id }: { id: string }) {
   const save = async (thenChat: boolean) => {
     if (!draft.name.trim()) {
       setError("請輸入名稱");
+      return;
+    }
+    const message = firstOverflow(tooLong);
+    if (message) {
+      setError(message);
       return;
     }
     setSaving(true);
@@ -402,7 +425,7 @@ export function AgentEditor({ id }: { id: string }) {
             className={error ? "inline-error" : "subtle"}
             role={error ? "alert" : undefined}
           >
-            {error ?? (dirty ? "有未儲存的變更" : "所有變更都已儲存")}
+            {status}
           </span>
           <div className="agent-editor-buttons">
             {saved && !dirty && (
@@ -454,14 +477,14 @@ export function AgentEditor({ id }: { id: string }) {
             <Field
               label="名稱"
               value={draft.name}
-              maxLength={limits.name}
+              error={tooLong.name}
               placeholder="例如：週報小幫手"
               onChange={(event) => edit({ name: event.target.value })}
             />
             <Field
               label="說明"
               value={draft.description}
-              maxLength={limits.description}
+              error={tooLong.description}
               placeholder="一句話說明它能幫你做什麼"
               onChange={(event) => edit({ description: event.target.value })}
             />
@@ -471,7 +494,7 @@ export function AgentEditor({ id }: { id: string }) {
                 id={instructionsId}
                 className="field agent-instructions"
                 value={draft.instructions}
-                maxLength={limits.instructions}
+                aria-invalid={tooLong.instructions ? true : undefined}
                 rows={9}
                 placeholder={INSTRUCTIONS_PLACEHOLDER}
                 aria-describedby={`${instructionsId}-hint`}
@@ -481,10 +504,19 @@ export function AgentEditor({ id }: { id: string }) {
                 <span>
                   它扮演什麼角色、要遵守哪些規則、回答的格式。大量的參考資料請放進知識庫。
                 </span>
-                <span className="mono">
-                  {draft.instructions.length} / {limits.instructions}
+                <span
+                  className={
+                    tooLong.instructions ? "mono agent-count-over" : "mono"
+                  }
+                >
+                  {length(draft.instructions)} / {limits.instructions}
                 </span>
               </div>
+              {tooLong.instructions && (
+                <div className="inline-error field-error" role="alert">
+                  {tooLong.instructions}
+                </div>
+              )}
             </div>
           </section>
 
@@ -501,7 +533,8 @@ export function AgentEditor({ id }: { id: string }) {
                   <input
                     className="field"
                     value={text}
-                    maxLength={limits.starter}
+                    aria-invalid={tooLong.starters[index] ? true : undefined}
+                    title={tooLong.starters[index]}
                     aria-label={`開場建議 ${index + 1}`}
                     placeholder={
                       index === 0
@@ -533,6 +566,11 @@ export function AgentEditor({ id }: { id: string }) {
                 </li>
               ))}
             </ul>
+            {Object.values(tooLong.starters)[0] && (
+              <div className="inline-error field-error" role="alert">
+                {Object.values(tooLong.starters)[0]}
+              </div>
+            )}
           </fieldset>
 
           <ModelField
@@ -657,6 +695,49 @@ function cleaned(draft: Draft): Draft {
     instructions: draft.instructions.trim(),
     starters: draft.starters.map((item) => item.trim()).filter(Boolean),
   };
+}
+
+/** 字數：和伺服器一樣用字元算（中文、表情符號都算一個字），頭尾空白不算。 */
+function length(text: string): number {
+  return Array.from(text.trim()).length;
+}
+
+type Overflow = {
+  name?: string;
+  description?: string;
+  instructions?: string;
+  starters: Record<number, string>;
+};
+
+/** 超過上限的欄位與提示。輸入框不擋字數，免得貼上長文時尾巴默默不見。 */
+function overflow(draft: Draft, limits: UserAgentList["limits"]): Overflow {
+  const over = (label: string, text: string, limit: number) => {
+    const count = length(text);
+    return count > limit
+      ? `${label}最多 ${limit} 個字，現在 ${count} 個字`
+      : undefined;
+  };
+  const starters: Record<number, string> = {};
+  draft.starters.forEach((text, index) => {
+    const message = over("開場建議", text, limits.starter);
+    if (message) starters[index] = message;
+  });
+  return {
+    name: over("名稱", draft.name, limits.name),
+    description: over("說明", draft.description, limits.description),
+    instructions: over("指示", draft.instructions, limits.instructions),
+    starters,
+  };
+}
+
+/** 第一個超過上限的提示，沒有就是 undefined。 */
+function firstOverflow(found: Overflow): string | undefined {
+  return (
+    found.name ??
+    found.description ??
+    found.instructions ??
+    Object.values(found.starters)[0]
+  );
 }
 
 function ModelField({

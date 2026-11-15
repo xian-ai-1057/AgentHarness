@@ -3246,6 +3246,39 @@ h3 {
   white-space: nowrap;
 }
 
+/* 拖對話時：每個專案用虛線框起來，游標停在上面的那個變成紅色。 */
+.side-drop-new > .side-item {
+  color: var(--muted);
+  cursor: copy;
+}
+
+.side-categories.dropping {
+  gap: 4px;
+}
+
+.side-categories.dropping .side-row > .side-item {
+  outline: 1px dashed var(--line-3);
+  outline-offset: -1px;
+}
+
+.side-categories .side-row.drop-over > .side-item {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.side-categories .side-row.drop-over > .side-item > svg {
+  color: var(--accent);
+}
+
+.side-drop-tip {
+  margin: 6px 0 0;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 .chats-page {
   gap: 16px;
 }

@@ -2,7 +2,8 @@
  * 對話紀錄與專案頁（features.categories）。
  *
  * 對話紀錄（/chats）列出所有對話，可以搜尋標題與內容、依專案篩選；
- * 勾選好幾段對話後可以一起刪除，或移到某個專案。專案頁（/p/:id）列出
+ * 勾選好幾段對話後可以一起刪除，或移到某個專案；也可以把一段對話拖到
+ * 側欄的專案上。專案頁（/p/:id）列出
  * 一個專案裡的對話，可以在這個專案開新對話、改名或刪除專案（刪除專案
  * 不刪對話）。
  */
@@ -15,6 +16,7 @@ import type {
 import { api } from "../api.ts";
 import { formatAgo, isBusy, useNow } from "../format.ts";
 import { navigate } from "../router.ts";
+import { startSessionDrag } from "../sessionDrag.ts";
 import {
   bulkSessions,
   deleteCategory,
@@ -468,7 +470,11 @@ function ChatRow({
           aria-label={`選取「${summary.title}」`}
         />
       </label>
-      <Link to={`/s/${summary.id}`} className="chats-main">
+      <Link
+        to={`/s/${summary.id}`}
+        className="chats-main"
+        onDragStart={(event) => startSessionDrag(event, summary.id)}
+      >
         <span className="chats-row-title">
           {summary.title}
           {busy && (

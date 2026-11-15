@@ -634,6 +634,10 @@ harness web --port 8080     # 換埠號
   核准都記在只能新增的紀錄裡（雜湊鏈防竄改），管理平台可以篩選、檢查
   完整性與匯出 CSV / JSON Lines（見
   [說明文件的「稽核紀錄」](https://agent-harness-docs-ten.vercel.app/guide/web#稽核紀錄)）。
+- **專案**（Python 版）：建立「專案」把對話分類整理，每個人只看得到自己的
+  專案。把側欄的對話拖到專案上就會移進去（拖曳時專案會標出來，也可以放到
+  「放到新專案」），或用對話的 ⋮ →「移到專案」（見
+  [說明文件的「專案」](https://agent-harness-docs-ten.vercel.app/guide/web#專案)）。
 
 Python 版的 `pyharness web` 另外支援：
 [上傳檔案](python/README.md#上傳檔案)（迴紋針、拖曳或貼上）、在空資料夾

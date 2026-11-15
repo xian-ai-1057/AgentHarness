@@ -18,6 +18,14 @@ import { useFolder } from "./chat/folder.ts";
 import { DownloadIcon, ExpandIcon, ShrinkIcon } from "./chat/icons.tsx";
 import { PanelResizer } from "./chat/PanelResizer.tsx";
 import {
+  type PreviewZoom,
+  usePreviewZoom,
+  useZoomGestures,
+  ZoomControls,
+  Zoomed,
+  ZoomProvider,
+} from "./chat/PreviewZoom.tsx";
+import {
   clampWidth,
   loadPanelWidth,
   savePanelWidth,
@@ -84,6 +92,10 @@ export function FilePanel({
     ...produced,
     ...attachments,
   ]).size;
+  // 預覽的縮放比例，換檔案時回到 100%。
+  const zoom = usePreviewZoom(previewPath);
+  const previewRef = useRef<HTMLDivElement>(null);
+  useZoomGestures(previewRef, zoom.value, zoom.available && tab === "preview");
 
   // 全螢幕時按 Esc 回到原本的大小。對話框、彈出框或選單開著時，Esc
   // 是關掉那一層，不能連全螢幕一起退出。
@@ -181,67 +193,74 @@ export function FilePanel({
           </div>
         </div>
 
-        <div key={tab} className="ch-tab-body">
-          {tab === "files" && (
-            <FileList
-              files={files}
-              attachments={attachments}
-              produced={produced}
-              total={total}
-              onOpen={(path) => {
-                onSelect(path);
-                onTab("preview");
-              }}
-            />
-          )}
+        <ZoomProvider value={zoom.value}>
+          <div key={tab} className="ch-tab-body">
+            {tab === "files" && (
+              <FileList
+                files={files}
+                attachments={attachments}
+                produced={produced}
+                total={total}
+                onOpen={(path) => {
+                  onSelect(path);
+                  onTab("preview");
+                }}
+              />
+            )}
 
-          {tab === "preview" &&
-            (previewPath ? (
-              <div className="scroll">
-                <PreviewHeader path={previewPath} canLoad={canLoad} />
-                <PreviewBody
-                  path={previewPath}
-                  change={files.find((file) => file.path === previewPath)}
-                  canLoad={canLoad}
-                />
-              </div>
-            ) : (
-              <Empty />
-            ))}
-
-          {tab === "diff" &&
-            (diffFile ? (
-              <div className="scroll">
-                {files.length > 1 && (
-                  <div className="file-switch">
-                    {files.map((file) => (
-                      <button
-                        key={file.path}
-                        type="button"
-                        aria-pressed={file.path === diffFile.path}
-                        onClick={() => onSelect(file.path)}
-                      >
-                        {file.path}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <FileHeader file={diffFile} />
-                <div
-                  className={`file-note ${diffFile.status === "pending" ? "pending" : ""}`}
-                >
-                  {NOTES[diffFile.status]}
-                  {diffFile.before === undefined &&
-                    "（從對話紀錄還原，沒有原本的內容可以比較）"}
-                  {diffFile.fragment &&
-                    "（從對話紀錄還原，只有被取代的那一段）"}
+            {tab === "preview" &&
+              (previewPath ? (
+                // tabIndex：點過預覽後，Ctrl（⌘）＋「+」「−」「0」縮放預覽。
+                <div className="scroll" ref={previewRef} tabIndex={-1}>
+                  <PreviewHeader
+                    path={previewPath}
+                    canLoad={canLoad}
+                    zoom={zoom.available ? zoom.value : undefined}
+                  />
+                  <PreviewBody
+                    path={previewPath}
+                    change={files.find((file) => file.path === previewPath)}
+                    canLoad={canLoad}
+                  />
                 </div>
-                <Diff file={diffFile} key={`d-${diffFile.callId}`} />
-              </div>
-            ) : (
-              <Empty />
-            ))}
-        </div>
+              ) : (
+                <Empty />
+              ))}
+
+            {tab === "diff" &&
+              (diffFile ? (
+                <div className="scroll">
+                  {files.length > 1 && (
+                    <div className="file-switch">
+                      {files.map((file) => (
+                        <button
+                          key={file.path}
+                          type="button"
+                          aria-pressed={file.path === diffFile.path}
+                          onClick={() => onSelect(file.path)}
+                        >
+                          {file.path}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <FileHeader file={diffFile} />
+                  <div
+                    className={`file-note ${diffFile.status === "pending" ? "pending" : ""}`}
+                  >
+                    {NOTES[diffFile.status]}
+                    {diffFile.before === undefined &&
+                      "（從對話紀錄還原，沒有原本的內容可以比較）"}
+                    {diffFile.fragment &&
+                      "（從對話紀錄還原，只有被取代的那一段）"}
+                  </div>
+                  <Diff file={diffFile} key={`d-${diffFile.callId}`} />
+                </div>
+              ) : (
+                <Empty />
+              ))}
+          </div>
+        </ZoomProvider>
       </aside>
     </>
   );
@@ -281,8 +300,17 @@ function Empty() {
   );
 }
 
-/** 預覽上方：檔名、路徑、下載。 */
-function PreviewHeader({ path, canLoad }: { path: string; canLoad: boolean }) {
+/** 預覽上方：檔名、路徑、縮放、下載。 */
+function PreviewHeader({
+  path,
+  canLoad,
+  zoom,
+}: {
+  path: string;
+  canLoad: boolean;
+  /** 內容可以縮放時才有。 */
+  zoom?: PreviewZoom;
+}) {
   const folder = useFolder();
   return (
     <div className="file-head ch-preview-head">
@@ -290,6 +318,7 @@ function PreviewHeader({ path, canLoad }: { path: string; canLoad: boolean }) {
         <span className="ch-preview-name">{fileName(path)}</span>
         <span className="mono subtle ch-preview-path">{path}</span>
       </div>
+      {zoom && <ZoomControls zoom={zoom.zoom} setZoom={zoom.setZoom} />}
       {canLoad && (
         <a
           className="btn btn-outline ch-btn-small"
@@ -326,13 +355,13 @@ function PreviewBody({
           {NOTES[change.status]}
           {change.fragment && "（只有修改後的那一段）"}
         </div>
-        <div className="preview-body anim-in">
+        <Zoomed className="preview-body anim-in">
           {markdown ? (
             <Markdown text={change.after} />
           ) : (
             <pre>{change.after}</pre>
           )}
-        </div>
+        </Zoomed>
       </>
     );
   }

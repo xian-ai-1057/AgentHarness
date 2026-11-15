@@ -1368,11 +1368,12 @@
 
 .ch-preview-media {
   padding: 16px;
-  display: grid;
-  place-items: center;
 }
 
+/* 比面板窄時置中；放大到比面板寬時從左邊開始，可以左右捲動。 */
 .ch-preview-media img {
+  display: block;
+  margin: 0 auto;
   max-width: 100%;
   height: auto;
   border-radius: var(--r-sm, 4px);
@@ -2202,4 +2203,89 @@ button.ch-cite:focus-visible {
   white-space: pre-wrap;
   font-size: 13px;
   line-height: 1.6;
+}
+
+/* ── 預覽縮放（見 chat/PreviewZoom.tsx）───────────────── */
+
+.ch-zoom {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 30px;
+  margin: 0 0 0 auto;
+  padding: 0 2px;
+  min-inline-size: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: var(--panel);
+}
+
+.ch-zoom-btn,
+.ch-zoom-value {
+  height: 26px;
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  display: inline-grid;
+  place-items: center;
+  transition:
+    background-color var(--dur-2) var(--ease-out),
+    color var(--dur-2) var(--ease-out);
+}
+
+.ch-zoom-btn {
+  width: 26px;
+}
+
+.ch-zoom-value {
+  min-width: 48px;
+  padding: 0 4px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ch-zoom-btn:hover:not(:disabled),
+.ch-zoom-value:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.ch-zoom-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 圖片在自己的捲動區裡放大，檔名列留在上方。 */
+.ch-tab-body .scroll:has(> .anim-in > .ch-preview-media) {
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-tab-body .scroll > .anim-in:has(> .ch-preview-media) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ch-tab-body .ch-preview-media {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 放大後超出面板：可以按住拖曳。 */
+.ch-preview-media:has(> img[style*="width"]) {
+  cursor: grab;
+}
+
+.ch-preview-media[data-dragging] {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* 點過預覽區才能用 Ctrl（⌘）＋「+」「−」縮放；滑鼠點擊不顯示外框。 */
+.ch-tab-body .scroll:focus:not(:focus-visible) {
+  outline: none;
 }

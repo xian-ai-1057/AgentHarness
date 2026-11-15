@@ -7,7 +7,7 @@
  * 卡片與下載按鈕。
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, fileUrl } from "../../api.ts";
 import { formatBytes } from "../../format.ts";
 import { fenced, Markdown } from "../Markdown.tsx";
@@ -17,6 +17,7 @@ import { fileName, languageOf, previewKind } from "./filetype.ts";
 import { useFolder } from "./folder.ts";
 import { DownloadIcon } from "./icons.tsx";
 import { SheetPreview, SlidesPreview, WordPreview } from "./OfficePreview.tsx";
+import { useDragPan, useZoomTarget, Zoomed } from "./PreviewZoom.tsx";
 
 /** 最多讀幾個位元組；大檔案只讀開頭，不整個下載。 */
 const TEXT_LIMIT = 300_000;
@@ -34,18 +35,14 @@ export function FilePreview({ path }: { path: string }) {
   const kind = previewKind(path);
   const name = fileName(path);
   if (kind === "image") {
-    return (
-      <div className="ch-preview-media">
-        <img src={fileUrl(path, false, folder)} alt={name} />
-      </div>
-    );
+    return <ImagePreview src={fileUrl(path, false, folder)} alt={name} />;
   }
   if (kind === "pdf") {
     return (
       <div className="ch-preview-pdf">
         {/* 不加 sandbox：Chromium 不在沙箱框架裡顯示 PDF。伺服器以
             application/pdf 加 nosniff 送出，PDF 由瀏覽器自己的檢視器開，
-            碰不到這個網頁。 */}
+            碰不到這個網頁。縮放也用檢視器自己的。 */}
         <iframe src={fileUrl(path, false, folder)} title={name} />
         <a
           className="ch-preview-open"
@@ -63,6 +60,33 @@ export function FilePreview({ path }: { path: string }) {
   if (kind === "sheet") return <SheetPreview key={path} path={path} />;
   if (kind === "binary") return <BinaryCard path={path} />;
   return <TextPreview path={path} kind={kind} />;
+}
+
+/**
+ * 圖片：100% 是符合面板寬度（小圖維持原本大小）。放大後超出面板時
+ * 可以捲動，或按住拖曳。
+ */
+function ImagePreview({ src, alt }: { src: string; alt: string }) {
+  const zoom = useZoomTarget();
+  const ref = useRef<HTMLDivElement>(null);
+  const [natural, setNatural] = useState<number>();
+  useDragPan(ref);
+  const style =
+    natural && zoom !== 1
+      ? { width: `calc(min(${natural}px, 100%) * ${zoom})`, maxWidth: "none" }
+      : undefined;
+  return (
+    <div ref={ref} className="ch-preview-media">
+      <img
+        data-zoom-target=""
+        src={src}
+        alt={alt}
+        style={style}
+        draggable={false}
+        onLoad={(event) => setNatural(event.currentTarget.naturalWidth)}
+      />
+    </div>
+  );
 }
 
 function TextPreview({
@@ -105,7 +129,9 @@ function TextPreview({
   if (kind === "markdown") {
     return (
       <div className="preview-body">
-        <Markdown text={loaded.text} />
+        <Zoomed>
+          <Markdown text={loaded.text} />
+        </Zoomed>
         {note}
       </div>
     );
@@ -113,11 +139,13 @@ function TextPreview({
   if (kind === "csv") return <CsvTable text={loaded.text} />;
   return (
     <div className="preview-body ch-preview-code">
-      {loaded.text.length > HIGHLIGHT_LIMIT ? (
-        <pre className="ch-preview-plain">{loaded.text}</pre>
-      ) : (
-        <Markdown text={fenced(loaded.text, languageOf(path))} />
-      )}
+      <Zoomed>
+        {loaded.text.length > HIGHLIGHT_LIMIT ? (
+          <pre className="ch-preview-plain">{loaded.text}</pre>
+        ) : (
+          <Markdown text={fenced(loaded.text, languageOf(path))} />
+        )}
+      </Zoomed>
       {note}
     </div>
   );
@@ -195,6 +223,7 @@ function rangeTotal(header: string | null): number | undefined {
 }
 
 function CsvTable({ text }: { text: string }) {
+  const zoom = useZoomTarget();
   const { rows, truncated } = parseCsv(text, CSV_ROWS + 1);
   const [head, ...body] = rows;
   if (!head) return <div className="ch-preview-state">這個檔案是空的。</div>;
@@ -202,7 +231,7 @@ function CsvTable({ text }: { text: string }) {
   return (
     <div className="ch-csv">
       <div className="ch-csv-scroll">
-        <table>
+        <table data-zoom-target="" style={zoom === 1 ? undefined : { zoom }}>
           <thead>
             <tr>
               {head.map((cell, index) => (

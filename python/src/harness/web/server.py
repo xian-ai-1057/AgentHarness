@@ -33,6 +33,8 @@
     DELETE /api/admin/groups/{id}        刪除存取群組（管理者）
     GET    /api/knowledge                知識庫與設定（管理者，或維護者看自己
                                          維護的）
+    GET    /api/knowledge/models         模型連線上的 embedding 與 rerank
+                                         模型（管理者，設定的下拉選單用）
     POST   /api/knowledge                新增知識庫（管理者）
     PATCH  /api/knowledge/{id}           改名稱、說明、檢索設定或維護者
                                          （管理者）
@@ -931,6 +933,11 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
     @routes.get("/api/knowledge")
     async def list_knowledge(request: web.Request) -> web.Response:
         return _json(await _ws(request).list_knowledge(_user(request)))
+
+    @routes.get("/api/knowledge/models")
+    async def knowledge_models(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(await _ws(request).knowledge_models())
 
     @routes.post("/api/knowledge")
     async def create_knowledge(request: web.Request) -> web.Response:

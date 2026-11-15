@@ -7,7 +7,10 @@ import type {
   SessionOptions,
 } from "../../src/web/protocol.ts";
 import {
+  applySearchChoice,
+  describeSearch,
   draftDirty,
+  searchChoice,
   settingsChanges,
   toSettingsDraft,
 } from "../../web/src/components/admin/knowledgeForm.ts";
@@ -67,6 +70,7 @@ const BASE: KnowledgeAdminBase = {
   documents: 2,
   settings: { name: "人資規章", chunkSize: 500 },
   retrieval: {
+    searchMode: "bm25",
     embeddingModel: null,
     chunkSize: 500,
     chunking: "paragraph",
@@ -134,5 +138,65 @@ describe("知識庫設定表單", () => {
     expect(
       draftDirty(base, { ...toSettingsDraft(base), maintainers: ["u2", "u1"] }),
     ).toBe(false);
+  });
+});
+
+describe("Embedding 模型下拉選單", () => {
+  const empty = { searchMode: "" as const, embeddingModel: "" };
+
+  it("沒有設定時：預設知識庫是演算法，其他知識庫是沿用", () => {
+    expect(searchChoice(empty, true, false)).toBe("bm25");
+    expect(searchChoice(empty, false, false)).toBe("");
+    expect(
+      searchChoice({ searchMode: "", embeddingModel: "bge-m3" }, false, false),
+    ).toBe("model:bge-m3");
+    expect(
+      searchChoice({ searchMode: "keyword", embeddingModel: "" }, true, false),
+    ).toBe("keyword");
+    expect(searchChoice(empty, false, true)).toBe("custom");
+  });
+
+  it("選了之後的 searchMode 與 embeddingModel", () => {
+    expect(applySearchChoice("keyword", true)).toEqual({
+      searchMode: "keyword",
+      embeddingModel: "",
+    });
+    // 預設知識庫本來就是 BM25；其他知識庫要寫明，才不會沿用預設的模型。
+    expect(applySearchChoice("bm25", true)).toEqual(empty);
+    expect(applySearchChoice("bm25", false)).toEqual({
+      searchMode: "bm25",
+      embeddingModel: "",
+    });
+    expect(applySearchChoice("model:text-embedding-3-small", false)).toEqual({
+      searchMode: "",
+      embeddingModel: "text-embedding-3-small",
+    });
+    expect(applySearchChoice("", false)).toEqual(empty);
+  });
+
+  it("選模型時送出模型、清掉檢索方式", () => {
+    const base = {
+      ...BASE,
+      settings: { ...BASE.settings, searchMode: "keyword" as const },
+    };
+    const draft = {
+      ...toSettingsDraft(base),
+      ...applySearchChoice("model:bge-m3", false),
+    };
+    expect(settingsChanges(base, draft)).toEqual({
+      changes: { searchMode: null, embeddingModel: "bge-m3" },
+    });
+  });
+
+  it("沿用時顯示預設知識庫實際的檢索方式", () => {
+    expect(
+      describeSearch({ searchMode: "keyword", embeddingModel: null }),
+    ).toBe("關鍵字");
+    expect(describeSearch({ searchMode: "bm25", embeddingModel: null })).toBe(
+      "演算法（BM25）",
+    );
+    expect(
+      describeSearch({ searchMode: "hybrid", embeddingModel: "bge-m3" }),
+    ).toBe("bge-m3");
   });
 });

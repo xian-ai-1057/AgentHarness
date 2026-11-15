@@ -615,6 +615,7 @@ class Workspace:
                 "documents": len(knowledge.files()),
                 "settings": knowledge_admin.describe_settings(spec),
                 "retrieval": {
+                    "searchMode": knowledge.search_mode,
                     "embeddingModel": knowledge.embedding_model,
                     "chunkSize": knowledge.chunk_size,
                     "chunking": knowledge.chunking,
@@ -645,6 +646,28 @@ class Workspace:
                 or knowledge_lib.DEFAULT_PARSERS
             ),
         }
+
+    async def knowledge_models(self) -> dict[str, Any]:
+        """知識庫設定的下拉選單：模型連線上的 embedding 與 rerank 模型。
+
+        查不到時不算錯誤（選單仍然可以選關鍵字、演算法或自行輸入），
+        原因放在 error 給畫面顯示。
+
+        Returns:
+            {"embedding": [{"name", "label"}], "rerank": [...],
+             "source": "model_info" | "names" | "none" | "error",
+             "error"?: str}
+        """
+        try:
+            found = await model_catalog.list_retrieval_models()
+        except model_catalog.CatalogError as error:
+            return {
+                "embedding": [],
+                "rerank": [],
+                "source": "error",
+                "error": str(error),
+            }
+        return found.to_json()
 
     def create_knowledge(self, body: dict[str, Any]) -> dict[str, Any]:
         """新增知識庫：寫進 harness.yaml 的 knowledgeBases，建立資料夾。
@@ -774,6 +797,7 @@ class Workspace:
             stats = await base.knowledge.stats()
             index = {
                 "chunks": stats["chunks"],
+                "searchMode": base.knowledge.search_mode,
                 "embedding": stats["embedding"],
                 "reranker": stats["reranker"],
                 "warnings": stats["warnings"],

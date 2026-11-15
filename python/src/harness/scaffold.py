@@ -46,7 +46,8 @@ permissions:
 # memory: true
 
 # 知識庫：把文件放進 knowledge/ 資料夾，再在 agent 設定 knowledge: true。
-# 不設定 embeddingModel 時只用關鍵字檢索，不需要任何模型。
+# 不設定 embeddingModel 時只用關鍵字檢索（BM25），不需要任何模型；
+# searchMode: keyword 改成精確比對。
 # knowledge:
 #   path: knowledge
 #   embeddingModel: openai/text-embedding-3-small

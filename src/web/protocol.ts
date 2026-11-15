@@ -469,10 +469,18 @@ export interface PersonalKnowledgeLimits {
   maxTotalBytes: number;
 }
 
+/**
+ * 檢索方式：keyword 精確比對（只看字詞有沒有出現、出現幾次）、bm25 用
+ * BM25 演算法排序、hybrid 是 BM25 加上 embedding 模型的語意檢索。沒寫時
+ * 有 embeddingModel 就是 hybrid，沒有就是 bm25。
+ */
+export type KnowledgeSearchMode = "keyword" | "bm25" | "hybrid";
+
 /** 知識庫的檢索設定（和 harness.yaml 的鍵相同）。 */
 export interface KnowledgeSettings {
   name?: string;
   description?: string;
+  searchMode?: KnowledgeSearchMode | null;
   embeddingModel?: string | null;
   chunkSize?: number | null;
   /** 切片方式：paragraph（依段落，預設）或 regulation（法規一條一片）。 */
@@ -514,6 +522,19 @@ export interface KnowledgeAdminBase extends KnowledgeBaseInfo {
   maintainers?: string[];
 }
 
+/**
+ * 知識庫設定的下拉選單：模型連線上的 embedding 與 rerank 模型（管理者）。
+ *   GET /api/knowledge/models → KnowledgeModelChoices
+ * source：model_info 是 LiteLLM 的 /model/info 標明了用途；names 是依
+ * 模型名稱判斷；none 是沒有可以查的端點；error 是查詢失敗（看 error）。
+ */
+export interface KnowledgeModelChoices {
+  embedding: ModelChoice[];
+  rerank: ModelChoice[];
+  source: "model_info" | "names" | "none" | "error";
+  error?: string;
+}
+
 export interface KnowledgeAdminList {
   bases: KnowledgeAdminBase[];
   /** 能不能新增、刪除知識庫與修改設定（管理者）。 */
@@ -544,6 +565,8 @@ export interface KnowledgeDocuments {
   index:
     | {
         chunks: number;
+        /** 實際的檢索方式（見 KnowledgeSearchMode）。 */
+        searchMode: KnowledgeSearchMode;
         embedding: boolean;
         reranker: boolean;
         /** 略過的檔案與原因。 */

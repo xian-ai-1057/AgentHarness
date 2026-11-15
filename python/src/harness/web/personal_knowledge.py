@@ -12,7 +12,7 @@
   2026-11-15 決定：要給別人用的資料請管理者建成公司知識庫）。管理者
   可以在 harness.yaml 的 personalKnowledge 區塊關掉整個功能，並調整
   數量與容量上限。
-- 檢索設定（embedding 模型、reranker、門檻等）沿用 harness.yaml 的
+- 檢索設定（檢索方式、embedding 模型、reranker、門檻等）沿用 harness.yaml 的
   knowledge 區塊，只有切片方式（依段落或依條文）由擁有者選。
 """
 
@@ -48,6 +48,7 @@ DEFAULT_LIMITS = {
     "maxTotalMB": 200,
 }
 _RETRIEVAL_KEYS = (
+    "searchMode",
     "embeddingModel",
     "chunkSize",
     "reranker",
@@ -401,14 +402,9 @@ class PersonalKnowledgeStore:
             description=base.description,
             knowledge=knowledge_lib.Knowledge(
                 folder,
-                embedding_model=retrieval.get("embeddingModel"),
-                chunk_size=retrieval.get("chunkSize") or 800,
+                **project_lib.retrieval_options(retrieval, "knowledge"),
                 chunking=base.chunking,
                 cache_dir=self.root / CACHE_DIR / base.id,
-                reranker=retrieval.get("reranker"),
-                rerank_candidates=retrieval.get("rerankCandidates") or 20,
-                min_similarity=retrieval.get("minSimilarity"),
-                min_rerank_score=retrieval.get("minRerankScore"),
             ),
         )
         self._loaded[base.id] = (signature, made)

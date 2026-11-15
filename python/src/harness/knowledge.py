@@ -6,8 +6,11 @@
        是可以替換的一步（Knowledge(parsers=...)），之後要換成更好的
        文件解析服務時，只要換掉這一步。
     2. 依段落切成片段，記下來源檔案、所在標題或頁碼。
-    3. 搜尋時用關鍵字比對（BM25，不需要任何模型）；有設定 embedding
-       模型時再加上語意檢索，兩者的排名合併（hybrid search）。
+    3. 搜尋時用關鍵字比對，不需要任何模型：預設用 BM25 演算法排序
+       （考慮詞的稀有度與片段長度），也可以改成精確比對（片段裡原樣
+       出現查詢字詞的排前面，再依命中幾個詞、出現幾次排序）。有設定
+       embedding 模型時再加上語意檢索，和 BM25 的排名合併（hybrid
+       search）。
     4. 有設定相似度門檻時，丟掉與問題不夠相似的片段。
     5. 有設定 reranker 時，用它重新評估前幾名候選的相關度並重新排序。
     6. 以 search_knowledge 工具提供給 agent，結果附上來源讓 agent 引用。
@@ -62,6 +65,9 @@ LABELS_FILE = "labels.yaml"
 # 切片方式：paragraph 依段落合併到 chunk_size；regulation 一條（一點）一片，
 # 不像法規的文件仍依段落（見 regulation 模組）。
 CHUNKING_MODES = ("paragraph", "regulation")
+# 關鍵字比對方式：exact 精確比對（只看字詞有沒有出現、出現幾次）；bm25
+# 用 BM25 演算法排序（預設）。
+KEYWORD_MODES = ("exact", "bm25")
 # RunContext.state 裡記錄這一輪已經用掉幾個引用編號。
 _NUMBER_KEY = "knowledge.cited"
 TOOL_NAME = "search_knowledge"
@@ -182,6 +188,8 @@ class Knowledge:
         path: 文件資料夾，None 表示只用 add_text 加入的內容。
         embedding_model: litellm 的 embedding 模型名稱，None 表示只用
             關鍵字檢索。
+        keyword_search: 關鍵字比對方式，"bm25"（預設，BM25 演算法）或
+            "exact"（精確比對）。精確比對不能和 embedding 一起用。
         chunk_size: 每個片段的目標字數。
         chunking: 切片方式，"paragraph"（預設，依段落）或 "regulation"
             （法規、內規一條一片，見 regulation 模組）。
@@ -207,6 +215,7 @@ class Knowledge:
         path: str | pathlib.Path | None = None,
         *,
         embedding_model: str | None = None,
+        keyword_search: str = "bm25",
         chunk_size: int = 800,
         chunking: str = "paragraph",
         cache_dir: str | pathlib.Path | None = None,
@@ -229,6 +238,14 @@ class Knowledge:
             )
         if rerank_candidates < 1:
             raise ValueError("rerank_candidates 至少要 1")
+        if keyword_search not in KEYWORD_MODES:
+            raise ValueError(
+                f"keyword_search 必須是 {'、'.join(KEYWORD_MODES)} 其中之一"
+            )
+        if keyword_search == "exact" and (embedding_model or embed_fn):
+            raise ValueError(
+                "精確比對（keyword_search=exact）不能和 embedding 一起用"
+            )
         if min_similarity is not None:
             if not (embedding_model or embed_fn):
                 raise ValueError(
@@ -242,6 +259,7 @@ class Knowledge:
             )
         self.path = pathlib.Path(path) if path is not None else None
         self.embedding_model = embedding_model
+        self.keyword_search = keyword_search
         self.chunk_size = chunk_size
         self.chunking = chunking
         self.cache_dir = pathlib.Path(cache_dir) if cache_dir else None
@@ -448,6 +466,7 @@ class Knowledge:
             "sources": len({chunk.source for chunk in self._chunks}),
             "chunks": len(self._chunks),
             "embedding": bool(self._keys),
+            "keyword_search": self.keyword_search,
             "reranker": bool(self.reranker or self._rerank_fn),
             "min_similarity": self.min_similarity,
             "min_rerank_score": self.min_rerank_score,
@@ -654,7 +673,50 @@ class Knowledge:
         total = sum(sum(counts.values()) for counts in self._tokens)
         self._avg_length = total / len(chunks) if chunks else 0.0
 
+    @property
+    def search_mode(self) -> str:
+        """檢索方式：keyword（精確比對）、bm25 或 hybrid（BM25 + 語意）。"""
+        if self.keyword_search == "exact":
+            return "keyword"
+        if self.embedding_model or self._embed_fn:
+            return "hybrid"
+        return "bm25"
+
     def _keyword_ranking(self, query: str, visible: list[int]) -> list[int]:
+        """依關鍵字排序，只回傳至少有一個詞命中的片段。"""
+        if self.keyword_search == "exact":
+            return self._exact_ranking(query, visible)
+        return self._bm25_ranking(query, visible)
+
+    def _exact_ranking(self, query: str, visible: list[int]) -> list[int]:
+        """精確比對：不算詞的稀有度，也不依片段長度調整。
+
+        排序依序看：查詢裡以空白分開的每一段有幾段原樣出現在片段裡、
+        命中幾個不同的詞、這些詞總共出現幾次。中日韓文字只用相鄰兩字
+        比對（單字太容易誤中），只有一個字時才用單字。
+        """
+        phrases = [
+            phrase
+            for phrase in (part.strip() for part in query.lower().split())
+            if phrase
+        ]
+        terms = set(exact_terms(query))
+        scores: dict[int, tuple[int, int, int]] = {}
+        for index in visible:
+            counts = self._tokens[index]
+            matched = [term for term in terms if counts.get(term)]
+            if not matched:
+                continue
+            chunk = self._chunks[index]
+            text = f"{chunk.source} {chunk.location} {chunk.text}".lower()
+            scores[index] = (
+                sum(1 for phrase in phrases if phrase in text),
+                len(matched),
+                sum(counts[term] for term in matched),
+            )
+        return sorted(scores, key=lambda index: scores[index], reverse=True)
+
+    def _bm25_ranking(self, query: str, visible: list[int]) -> list[int]:
         """用 BM25 排序，只回傳至少有一個詞命中的片段。"""
         terms = set(tokenize(query))
         total = len(self._tokens)
@@ -975,6 +1037,28 @@ def tokenize(text: str) -> list[str]:
             tokens.append(word)
             continue
         tokens.extend(word)
+        tokens.extend(word[i : i + 2] for i in range(len(word) - 1))
+    return tokens
+
+
+def exact_terms(text: str) -> list[str]:
+    """精確比對用的詞：英文與數字以單字為單位，中日韓文字取相鄰兩字。
+
+    和 tokenize 不同，中日韓文字不取單字（一個字太容易在不相關的段落
+    出現），只有整段只有一個字時才用那個字。
+
+    Args:
+        text: 要切的文字。
+
+    Returns:
+        詞的列表（可能重複）。
+    """
+    tokens: list[str] = []
+    for match in _WORD.finditer(text.lower()):
+        word = match.group(0)
+        if word[0].isascii() or len(word) == 1:
+            tokens.append(word)
+            continue
         tokens.extend(word[i : i + 2] for i in range(len(word) - 1))
     return tokens
 

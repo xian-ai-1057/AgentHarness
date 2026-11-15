@@ -29,6 +29,7 @@ from harness.web import uploads as uploads_lib
 SETTING_KEYS = (
     "name",
     "description",
+    "searchMode",
     "embeddingModel",
     "chunkSize",
     "chunking",
@@ -38,7 +39,10 @@ SETTING_KEYS = (
     "minRerankScore",
 )
 _TEXT_KEYS = ("name", "description", "embeddingModel", "reranker")
-_CHOICE_KEYS = {"chunking": knowledge_lib.CHUNKING_MODES}
+_CHOICE_KEYS = {
+    "chunking": knowledge_lib.CHUNKING_MODES,
+    "searchMode": project_lib.SEARCH_MODES,
+}
 _INT_KEYS = ("chunkSize", "rerankCandidates")
 _FLOAT_KEYS = ("minSimilarity", "minRerankScore")
 _NAME_LIMIT = 40

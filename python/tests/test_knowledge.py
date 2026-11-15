@@ -107,6 +107,37 @@ class TestSearch:
 
         assert _sources(hits)[0] == "hr/leave.md › 請假規定 › 特休"
 
+    async def test_exact_match_ranks_literal_phrases_first(self, tmp_path):
+        root = tmp_path / "kb"
+        root.mkdir()
+        # BM25 偏好短的片段；精確比對只看字詞有沒有出現、出現幾次。
+        (root / "a.md").write_text("規定：請假、請假、請假", encoding="utf-8")
+        (root / "b.md").write_text(
+            "員工請假規定在第三章。" + "其他說明。" * 40, encoding="utf-8"
+        )
+        bm25 = harness.Knowledge(root)
+        exact = harness.Knowledge(root, keyword_search="exact")
+
+        assert _sources(await bm25.search("請假規定"))[0] == "a.md"
+        assert _sources(await exact.search("請假規定")) == ["b.md", "a.md"]
+        assert exact.search_mode == "keyword"
+        assert bm25.search_mode == "bm25"
+
+    async def test_exact_match_ignores_single_cjk_characters(self, kb_dir):
+        kb = harness.Knowledge(kb_dir, keyword_search="exact")
+
+        # 「容」「量」單字不算，「容量」兩個字一起出現才算。
+        assert await kb.search("量容") == []
+        assert _sources(await kb.search("容量"))[0].startswith("product.md")
+
+    def test_exact_match_cannot_use_embeddings(self, kb_dir):
+        with pytest.raises(ValueError, match="精確比對"):
+            harness.Knowledge(
+                kb_dir, keyword_search="exact", embedding_model="x/emb"
+            )
+        with pytest.raises(ValueError, match="keyword_search"):
+            harness.Knowledge(kb_dir, keyword_search="fuzzy")
+
     async def test_search_returns_nothing_without_matches(self, kb_dir):
         kb = harness.Knowledge(kb_dir)
 
@@ -558,6 +589,46 @@ class TestKnowledgeInProject:
         assert kb.vector_store.path == (
             project_dir / ".harness/knowledge" / knowledge.VECTOR_FILE
         )
+
+    @pytest.mark.parametrize(
+        ("mode", "embedding", "keyword", "similarity"),
+        [
+            ("keyword", None, "exact", None),
+            ("bm25", None, "bm25", None),
+            ("hybrid", "openai/emb", "bm25", 0.3),
+            (None, "openai/emb", "bm25", 0.3),
+        ],
+    )
+    def test_search_mode_from_harness_yaml(
+        self, project_dir, mode, embedding, keyword, similarity
+    ):
+        config = project_dir / "harness.yaml"
+        line = f"  searchMode: {mode}\n" if mode else ""
+        config.write_text(
+            config.read_text(encoding="utf-8")
+            + "knowledge:\n"
+            + line
+            # 不用 embedding 時，embeddingModel 與 minSimilarity 都不生效。
+            + "  embeddingModel: openai/emb\n  minSimilarity: 0.3\n",
+            encoding="utf-8",
+        )
+
+        kb = harness.load_project(project_dir).knowledge
+
+        assert kb.embedding_model == embedding
+        assert kb.keyword_search == keyword
+        assert kb.min_similarity == similarity
+
+    def test_hybrid_needs_an_embedding_model(self, project_dir):
+        config = project_dir / "harness.yaml"
+        config.write_text(
+            config.read_text(encoding="utf-8")
+            + "knowledge:\n  searchMode: hybrid\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="需要 embeddingModel"):
+            harness.load_project(project_dir)
 
     def test_unknown_knowledge_setting_is_an_error(self, project_dir):
         config = project_dir / "harness.yaml"

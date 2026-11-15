@@ -265,6 +265,26 @@ class TestProjectConfig:
         assert [base.id for base in tool.bases] == ["it"]
         assert tool.labels == ("x",) and tool.top_k == 3
 
+    def test_own_embedding_model_overrides_inherited_mode(self, tmp_path):
+        root = project_with(
+            tmp_path,
+            "knowledge:\n  searchMode: keyword\n"
+            "knowledgeBases:\n"
+            "  hr: {embeddingModel: x/emb}\n"
+            "  it: {}\n"
+            "  legal: {searchMode: bm25}\n",
+        )
+        add_documents(root)
+        (root / "knowledge" / "legal").mkdir()
+
+        bases = project_lib.load_project(root).knowledge_bases
+
+        assert bases["default"].knowledge.search_mode == "keyword"
+        # 自己選了模型就用模型；沒寫的沿用預設知識庫的關鍵字。
+        assert bases["hr"].knowledge.search_mode == "hybrid"
+        assert bases["it"].knowledge.search_mode == "keyword"
+        assert bases["legal"].knowledge.search_mode == "bm25"
+
     @pytest.mark.parametrize(
         ("config", "agent", "message"),
         [
@@ -272,6 +292,7 @@ class TestProjectConfig:
             ("knowledgeBases:\n  default: {}\n", "", "保留"),
             ("knowledgeBases:\n  hr: {foo: 1}\n", "", "不認得"),
             ("knowledgeBases:\n  none: {}\n", "", "找不到"),
+            ("knowledge:\n  searchMode: fuzzy\n", "", "searchMode"),
             (BASES, "knowledge: [nope]\n", "不存在的知識庫"),
         ],
     )
@@ -411,7 +432,12 @@ class TestAdmin:
         boss = await s.login("boss", password_of("boss"))
 
         edited, _ = await boss.api(
-            "PATCH", "/knowledge/hr", {"name": "人資", "chunkSize": 300}
+            "PATCH",
+            "/knowledge/hr",
+            {"name": "人資", "chunkSize": 300, "searchMode": "keyword"},
+        )
+        bad_mode, _ = await boss.api(
+            "PATCH", "/knowledge/hr", {"searchMode": "fuzzy"}
         )
         bad, error = await boss.api("PATCH", "/knowledge/hr", {"chunkSize": 10})
         default, _ = await boss.api(
@@ -426,9 +452,26 @@ class TestAdmin:
         assert bad == 400 and "chunk_size" in error["error"]
         assert keep_default == 400
         assert hr["name"] == "人資" and hr["retrieval"]["chunkSize"] == 300
+        assert hr["retrieval"]["searchMode"] == "keyword"
+        assert hr["settings"]["searchMode"] == "keyword"
+        assert bad_mode == 400
         assert [b["id"] for b in listed["bases"]] == ["default", "hr"]
         # 拿掉知識庫不刪文件。
         assert (s.root / "knowledge" / "it" / "vpn.md").exists()
+
+    async def test_model_choices_for_the_settings_form(self, site, monkeypatch):
+        monkeypatch.delenv("HARNESS_BASE_URL", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        s = await site(extra=BASES, prepare=add_documents)
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+
+        status, found = await boss.api("GET", "/knowledge/models")
+        denied, _ = await alice.api("GET", "/knowledge/models")
+
+        assert status == 200
+        assert found == {"embedding": [], "rerank": [], "source": "none"}
+        assert denied == 403
 
     async def test_changes_are_audited(self, site):
         s = await site(extra=BASES, prepare=add_documents)

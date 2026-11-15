@@ -512,6 +512,13 @@ def _command_knowledge(
     )
 
 
+_SEARCH_LABELS = {
+    "keyword": "關鍵字（精確比對）",
+    "bm25": "演算法（BM25）",
+    "hybrid": "BM25 + 語意（embedding）",
+}
+
+
 async def _show_knowledge(
     bases: list[knowledge_lib.KnowledgeBase],
     query: str | None,
@@ -520,7 +527,7 @@ async def _show_knowledge(
     """印出每個知識庫的概況與搜尋結果。"""
     for base in bases:
         stats = await base.knowledge.stats()
-        mode = "關鍵字 + 語意（embedding）" if stats["embedding"] else "關鍵字"
+        mode = _SEARCH_LABELS[base.knowledge.search_mode]
         if stats["reranker"]:
             mode += "，再用 reranker 重新排序"
         if len(bases) > 1:

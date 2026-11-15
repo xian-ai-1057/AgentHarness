@@ -589,3 +589,30 @@ class TestSource:
         _, project = await alice.api("GET", "/project")
 
         assert project["features"]["knowledgeSources"] is True
+
+    async def test_text_of_the_document_in_chunks(self, site):
+        s = await site(extra=BASES, prepare=self.prepare)
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        await boss.api(
+            "PATCH",
+            "/admin/groups/everyone",
+            {"knowledgeBases": ["default", "hr"], "knowledge": []},
+        )
+
+        status, found = await alice.api(
+            "GET", "/knowledge/source/text?base=hr&path=leave.md"
+        )
+        hidden, _ = await alice.api(
+            "GET", "/knowledge/source/text?base=default&path=secret.md"
+        )
+        closed, _ = await alice.api(
+            "GET", "/knowledge/source/text?base=it&path=vpn.md"
+        )
+
+        assert status == 200
+        assert found == {
+            "path": "leave.md",
+            "sections": [{"location": "", "text": "特休計算：滿半年三天。"}],
+        }
+        assert hidden == 404 and closed == 404

@@ -2289,3 +2289,92 @@ button.ch-cite:focus-visible {
 .ch-tab-body .scroll:focus:not(:focus-visible) {
   outline: none;
 }
+
+/* ── 出處原文：引用的段落螢光標示、閃一下（見 SourcePanel.tsx）──── */
+
+.ch-source-number {
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+
+.ch-source-doc {
+  padding: 4px 16px 24px;
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.ch-source-section {
+  padding: 2px 0;
+  border-radius: 6px;
+  scroll-margin: 24px;
+}
+
+.ch-source-section p,
+.ch-source-mark {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ch-source-loc {
+  margin: 14px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ch-source-mark {
+  display: block;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent);
+  border-radius: 4px;
+  background: var(--highlight, #fff1a8);
+  color: inherit;
+}
+
+.ch-source-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@keyframes ch-source-flash {
+  0%,
+  40% {
+    box-shadow: 0 0 0 4px rgba(215, 12, 24, 0.35);
+    background: var(--highlight-strong, #ffe066);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+.ch-source-flash .ch-source-mark {
+  animation: ch-source-flash 1.4s ease-out 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-source-flash .ch-source-mark {
+    animation: none;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ch-source-mark {
+    --highlight: rgba(255, 214, 0, 0.22);
+    --highlight-strong: rgba(255, 214, 0, 0.4);
+  }
+}
+
+:root[data-theme="dark"] .ch-source-mark {
+  --highlight: rgba(255, 214, 0, 0.22);
+  --highlight-strong: rgba(255, 214, 0, 0.4);
+}
+
+/* 捲動原文時，檔名與下載按鈕留在上方。 */
+.ch-source-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--panel);
+}

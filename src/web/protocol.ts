@@ -485,6 +485,16 @@ export interface KnowledgeDocuments {
     | { error: string };
 }
 
+/**
+ * 出處文件讀出來的文字，依索引的片段排列（Python 版）：
+ *   GET /api/knowledge/source/text?base&path → KnowledgeSourceText
+ * 網頁在裡面標出引用的片段。只有搜尋得到這份文件的人拿得到。
+ */
+export interface KnowledgeSourceText {
+  path: string;
+  sections: { location: string; text: string }[];
+}
+
 export interface KnowledgeHit {
   source: string;
   location: string;

@@ -84,7 +84,8 @@ export function Conversation({ id }: { id: string }) {
   const [source, setSource] = useState<KnowledgeSource>();
   const canOpenSources = project?.features?.knowledgeSources === true;
   const openCitation = useCallback(
-    (next: KnowledgeSource) => setSource(next),
+    // 複製一份：同一個引用再點一次也要重新閃一下（見 SourcePanel）。
+    (next: KnowledgeSource) => setSource({ ...next }),
     [],
   );
   // 新對話頁交過來、或剛在這裡送出的訊息；伺服器的事件到了就換掉。

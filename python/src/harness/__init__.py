@@ -38,6 +38,7 @@ from harness.permissions import Permissions
 from harness.project import Project
 from harness.project import builtin_skills
 from harness.project import load_project
+from harness.sandbox import PRODUCED_MARKER
 from harness.sandbox import Sandbox
 from harness.sessions import Session
 from harness.skills import Skill
@@ -48,6 +49,7 @@ from harness.vectorstore import SqliteVectorStore
 from harness.vectorstore import VectorStore
 
 __all__ = [
+    "PRODUCED_MARKER",
     "Agent",
     "Compaction",
     "CompactionResult",

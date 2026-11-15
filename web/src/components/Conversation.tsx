@@ -41,6 +41,7 @@ import { Composer } from "./Composer.tsx";
 import type { KnowledgeSource } from "./chat/citations.ts";
 import { FolderContext } from "./chat/folder.ts";
 import {
+  agentDefaultSkills,
   agentKnowledge,
   agentTools,
   type ComposerOptions,
@@ -277,6 +278,7 @@ export function Conversation({ id }: { id: string }) {
       ? {
           models,
           skills: project.skills ?? [],
+          defaultSkills: agentDefaultSkills(project, agentInfo),
           tools: agentInfo ? agentTools(project, agentInfo) : [],
           knowledgeBases: project.knowledgeBases ?? [],
           defaultKnowledge: agentKnowledge(project, agentInfo),

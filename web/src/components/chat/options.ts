@@ -13,6 +13,8 @@ import type {
 export interface ComposerOptions {
   models: ModelOption[];
   skills: SkillInfo[];
+  /** 這個 agent 預設開啟的 skills（能執行程式時才有）。 */
+  defaultSkills?: string[];
   /** 這個 agent 可以用的工具名稱與說明。 */
   tools: { name: string; description: string }[];
   /** 可以勾選的知識庫（群組開放的）。 */
@@ -112,4 +114,54 @@ export function modelLabel(
 ): string | undefined {
   if (!name) return undefined;
   return models?.find((model) => model.name === name)?.label || name;
+}
+
+/** 執行程式的工具；有它時預設 skills 才會開啟。 */
+const RUN_TOOL = "run_python";
+
+/** agent 預設開啟的 skills：專案有設定而且 agent 能執行程式時才有。 */
+export function agentDefaultSkills(
+  project: ProjectInfo,
+  agent: AgentInfo | undefined,
+): string[] {
+  if (!agent?.tools.includes(RUN_TOOL)) return [];
+  const known = new Set((project.skills ?? []).map((skill) => skill.name));
+  return (project.defaultSkills ?? []).filter((name) => known.has(name));
+}
+
+/**
+ * 這段對話實際開著的預設 skills：扣掉關掉的；工具裡取消了 run_python 時
+ * 一個都沒有（和伺服器的判斷一樣）。
+ */
+export function activeDefaultSkills(options: ComposerOptions): string[] {
+  const defaults = options.defaultSkills ?? [];
+  const tools = options.value.tools;
+  if (tools && !tools.includes(RUN_TOOL)) return [];
+  const off = options.value.disabledSkills ?? [];
+  return defaults.filter((name) => !off.includes(name));
+}
+
+/**
+ * 在 ＋ 選單勾選或取消一個 skill 後要存的值。預設 skill 改的是
+ * disabledSkills；其他 skill 改的是一定要用的 skills。
+ */
+export function toggleSkill(
+  options: ComposerOptions,
+  name: string,
+): Partial<SessionOptions> {
+  const { value } = options;
+  if ((options.defaultSkills ?? []).includes(name)) {
+    const off = value.disabledSkills ?? [];
+    return off.includes(name)
+      ? { disabledSkills: off.filter((item) => item !== name) }
+      : {
+          disabledSkills: [...off, name],
+          skills: value.skills.filter((item) => item !== name),
+        };
+  }
+  return {
+    skills: value.skills.includes(name)
+      ? value.skills.filter((item) => item !== name)
+      : [...value.skills, name],
+  };
 }

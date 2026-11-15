@@ -203,8 +203,12 @@ async def start(tmp_path, fake_model):
     """建立專案並啟動伺服器；回傳啟動用的函式。"""
     started = []
 
-    async def launch(script=None, model=None, static_dir=None, extra=""):
+    async def launch(
+        script=None, model=None, static_dir=None, extra="", agent=None
+    ):
         root = make_project(tmp_path / f"p{len(started)}", extra)
+        if agent is not None:
+            (root / "agents" / "main.md").write_text(agent, encoding="utf-8")
         loaded = project_lib.load_project(root)
         model = model or fake_model(script or [])
         app = server_lib.create_app(
@@ -1066,17 +1070,6 @@ class TestZeroConfigStart:
         names = {item.name for item in served[0].agents["main"].tools}
         assert "run_python" in names
         assert served[0].sandbox is not None
-        # 有沙盒時，處理 Office 檔與 PDF 的 skills 一併開啟。
-        skills = [item.name for item in served[0].agents["main"].skills]
-        assert {"xlsx", "docx", "pptx", "pdf"} <= set(skills)
-
-    def test_assistant_without_sandbox_skips_office_skills(
-        self, tmp_path, served
-    ):
-        cli.main(["web", "-p", str(tmp_path / "fresh")])
-
-        skills = [item.name for item in served[0].agents["main"].skills]
-        assert skills == ["planning", "web-research"]
 
     def test_existing_project_is_left_alone(self, tmp_path, served):
         root = make_project(tmp_path / "mine")
@@ -1710,6 +1703,120 @@ class TestProjectChoices:
         assert planning["description"]
 
 
+SANDBOX_AGENT = AGENT.replace("  - files\n", "  - files\n  - sandbox\n")
+OFFICE = ["xlsx", "docx", "pptx", "pdf"]
+
+
+def listed_skills(request: dict) -> list[str]:
+    """system prompt 技能清單裡的 skill 名稱。"""
+    system = request["messages"][0]["content"]
+    if "# 可用的技能（skills）" not in system:
+        return []
+    section = system.split("# 可用的技能（skills）", 1)[1].split("\n# ", 1)[0]
+    return [
+        line[2:].split("：")[0]
+        for line in section.splitlines()
+        if line.startswith("- ") and "：" in line
+    ]
+
+
+class TestDefaultSkills:
+    """和 Claude 一樣，能執行程式時每段對話預設開啟文件 skills。"""
+
+    async def test_agent_with_sandbox_gets_office_skills(self, start):
+        h = await start(
+            [conftest.text_response("好")],
+            extra="sandbox: true\n",
+            agent=SANDBOX_AGENT,
+        )
+
+        _, info = await h.api("GET", "/project")
+        await h.api("POST", "/sessions", {"text": "嗨"})
+        await h.wait_for("run_end")
+
+        assert info["defaultSkills"] == OFFICE
+        request = h.model.requests[0]
+        assert listed_skills(request) == OFFICE
+        assert "load_skill" in tool_names(request)
+        # 預設開啟只是可以用，不像使用者指定的 skill 會要求先載入。
+        assert "使用者指定" not in request["messages"][0]["content"]
+
+    async def test_agent_without_sandbox_does_not_get_them(self, start):
+        h = await start([conftest.text_response("好")], extra="sandbox: true\n")
+
+        await h.api("POST", "/sessions", {"text": "嗨"})
+        await h.wait_for("run_end")
+
+        assert listed_skills(h.model.requests[0]) == []
+
+    async def test_project_without_sandbox_advertises_none(self, start):
+        h = await start()
+
+        _, info = await h.api("GET", "/project")
+
+        assert info["defaultSkills"] == []
+
+    async def test_turning_off_run_python_drops_them(self, start):
+        h = await start(
+            [conftest.text_response("好")],
+            extra="sandbox: true\n",
+            agent=SANDBOX_AGENT,
+        )
+
+        only_read = {"tools": ["read_file"]}
+        await h.api("POST", "/sessions", {"text": "嗨", "options": only_read})
+        await h.wait_for("run_end")
+
+        assert listed_skills(h.model.requests[0]) == []
+
+    async def test_user_can_turn_some_off(self, start):
+        h = await start(
+            [conftest.text_response("一"), conftest.text_response("二")],
+            extra="sandbox: true\n",
+            agent=SANDBOX_AGENT,
+        )
+        status, created = await h.api(
+            "POST",
+            "/sessions",
+            {"text": "嗨", "options": {"disabledSkills": ["pptx"]}},
+        )
+        await h.wait_for("run_end")
+        path = f"/sessions/{created['id']}/options"
+
+        assert status == 201
+        assert listed_skills(h.model.requests[0]) == ["xlsx", "docx", "pdf"]
+        _, options = await h.api("PUT", path, {"disabledSkills": []})
+        assert options["disabledSkills"] == []
+
+    async def test_config_can_change_the_list(self, start):
+        h = await start(
+            [conftest.text_response("好")],
+            extra="sandbox: true\nweb:\n  defaultSkills: [pdf, nope]\n",
+            agent=SANDBOX_AGENT,
+        )
+
+        _, info = await h.api("GET", "/project")
+        await h.api("POST", "/sessions", {"text": "嗨"})
+        await h.wait_for("run_end")
+
+        assert info["defaultSkills"] == ["pdf"]
+        assert listed_skills(h.model.requests[0]) == ["pdf"]
+
+    async def test_only_default_skills_can_be_turned_off(self, start):
+        h = await start([conftest.text_response("好")], extra="sandbox: true\n")
+        _, created = await h.api("POST", "/sessions", {"text": "嗨"})
+        await h.wait_for("run_end")
+
+        status, error = await h.api(
+            "PUT",
+            f"/sessions/{created['id']}/options",
+            {"disabledSkills": ["planning"]},
+        )
+
+        assert status == 400
+        assert "planning" in error["error"]
+
+
 class TestSessionOptions:
     """每段對話自己選的模型、工具與 skills。"""
 
@@ -1749,6 +1856,7 @@ class TestSessionOptions:
             "model": "other-model",
             "tools": ["read_file"],
             "skills": ["planning"],
+            "disabledSkills": [],
             "folder": "private",
             "knowledge": None,
         }
@@ -1887,6 +1995,7 @@ class TestSessionOptions:
             "model": "m2",
             "tools": ["read_file"],
             "skills": [],
+            "disabledSkills": [],
             "folder": "private",
             "knowledge": None,
         }

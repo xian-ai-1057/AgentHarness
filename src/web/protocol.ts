@@ -155,6 +155,11 @@ export interface SessionOptions {
   /** 這段對話一定要用的 skill 名稱，會在送給模型的訊息裡提示它先讀取。 */
   skills: string[];
   /**
+   * 這段對話關掉的預設 skill（ProjectInfo.defaultSkills 裡的名稱）。沒有或
+   * 空陣列時，預設 skill 全部開著。
+   */
+  disabledSkills?: string[];
+  /**
    * 這段對話要搜尋的知識庫（KnowledgeBaseInfo.id）；null 或沒有時跟著 agent
    * 的設定（AgentInfo.knowledge）。只能選 ProjectInfo.knowledgeBases 裡的。
    * 空陣列表示這段對話不搜尋知識庫。
@@ -710,6 +715,11 @@ export interface ProjectInfo {
   models?: ModelOption[];
   /** ＋ 選單可以選的 skills（Python 版）。 */
   skills?: SkillInfo[];
+  /**
+   * 每段對話預設開啟的 skills（Python 版）：agent 能執行程式（有
+   * run_python）時才會套用，使用者可以在 ＋ 選單逐一關閉。
+   */
+  defaultSkills?: string[];
   /** 這個人在對話裡可以勾選的知識庫（Python 版，群組開放的）。 */
   knowledgeBases?: KnowledgeBaseInfo[];
   /** 這個人能不能打開管理平台的知識庫頁（管理者或知識庫的維護者）。 */

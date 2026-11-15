@@ -113,15 +113,29 @@ Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown �
 - **用自己的映像檔時**，把 `python/src/harness/builtin/skills` 複製到映像檔的
   `/opt/skills`，並裝好上面的工具；`pyharness sandbox` 會列出缺少的項目。
 
-**開啟：** 新建立的助手在有沙盒時會自動列在 `agents/main.md` 的 `skills`。
-既有的專案要自己加上：
+**在網頁上預設開啟。** 和 Claude 一樣，網頁上的每段對話預設就能用這四個
+skill，不用在 agent 的 `skills` 裡列出：只要專案有開沙盒，而且這段對話的
+agent 能執行程式（工具有 `run_python`，沒有被群組或這段對話關掉），伺服器
+就把它們加進技能清單。agent 只在工作需要時才載入，不會每次都讀。
+
+- 使用者可以在「＋ → Skills」取消勾選（標「預設」的項目），只影響這段
+  對話；輸入框會顯示「已關閉 N 個預設 skill」，按 × 全部開回來。
+- 群組沒有開放沙盒工具、或在「＋ → 工具」關掉 `run_python` 時，預設 skill
+  也一起不見。
+- 要換成別的清單或全部關掉，在 `harness.yaml` 設定（只能列內建或專案裡
+  有的 skill）：
+
+```yaml
+web:
+  defaultSkills: [xlsx, pdf]   # [] 表示不預設開啟任何 skill
+```
+
+命令列（`pyharness chat`）與 API 不套用預設，要用的話在 agent 列出：
 
 ```yaml
 tools: [files, plan, web, sandbox]
 skills: [planning, web-research, xlsx, docx, pptx, pdf]
 ```
-
-也可以在網頁上每段對話的「＋ → Skills」臨時選用。
 
 **目前的限制：**
 

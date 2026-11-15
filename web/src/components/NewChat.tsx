@@ -25,6 +25,7 @@ import { Composer } from "./Composer.tsx";
 import { PendingView } from "./Conversation.tsx";
 import { FolderContext } from "./chat/folder.ts";
 import {
+  agentDefaultSkills,
   agentKnowledge,
   agentTools,
   type ComposerOptions,
@@ -183,6 +184,7 @@ export function NewChat() {
     ? {
         models: project.models ?? [],
         skills: project.skills ?? [],
+        defaultSkills: agentDefaultSkills(project, agent),
         tools: agentTools(project, agent),
         knowledgeBases: project.knowledgeBases ?? [],
         defaultKnowledge: agentKnowledge(project, agent),

@@ -368,6 +368,7 @@ web:
 
 - **模型**：輸入框右下角的模型名稱，點開可以搜尋，並標出「看得懂圖片」與「預設」。對話進行到一半也可以換。
 - **＋ 選單**：輸入框左下角的 ＋ 可以上傳檔案，或在「Skills」、「工具」、「知識庫」裡勾選這段對話要用的項目。選好的 skill、關掉的工具與改過的知識庫會以標籤顯示在輸入框裡，按 × 取消。
+- **預設開啟的 skills**：有沙盒而且 agent 能執行程式時，處理 Excel、Word、PowerPoint、PDF 的 `xlsx`、`docx`、`pptx`、`pdf` 每段對話都開著（「＋ → Skills」裡標「預設」），agent 需要時自己載入；取消勾選就不用，輸入框顯示「已關閉 N 個預設 skill」。清單可以用 `harness.yaml` 的 `web.defaultSkills` 換掉，見[內建 skills](/advanced/skills#office-文件與-pdf-的-skills)。
   - 工具只能在 agent 原本就有的範圍內關閉，不能多加。
   - 勾選的 skill 會在送給模型的系統提示裡註明「先讀取這些 skill」。
 

@@ -936,15 +936,23 @@ Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown �
 - **用自己的映像檔時**，把 `python/src/harness/builtin/skills` 複製到映像檔的
   `/opt/skills`，並裝好上面的工具；`pyharness sandbox` 會列出缺少的項目。
 
-**開啟：** 新建立的助手在有沙盒時會自動列在 `agents/main.md` 的 `skills`。
-既有的專案要自己加上：
+**在網頁上預設開啟。** 和 Claude 一樣，網頁上的每段對話預設就能用這四個
+skill：專案有開沙盒、而且 agent 能執行程式（工具有 `run_python`，沒有被
+群組或這段對話關掉）時，伺服器自動把它們加進技能清單，agent 需要時才載入。
+使用者可以在「＋ → Skills」取消勾選標「預設」的項目（只影響這段對話）。
+要換成別的清單或全部關掉：
+
+```yaml
+web:
+  defaultSkills: [xlsx, pdf]   # [] 表示不預設開啟任何 skill
+```
+
+命令列與 API 不套用預設，要用的話在 agent 列出：
 
 ```yaml
 tools: [files, plan, web, sandbox]
 skills: [planning, web-research, xlsx, docx, pptx, pdf]
 ```
-
-也可以在網頁上每段對話的「＋ → Skills」臨時選用。
 
 **目前的限制：**
 
@@ -1428,7 +1436,8 @@ Python 版另外會處理：
 - **連接模型**：在網頁上選供應商、填金鑰與模型，不需要設定環境變數
   （見下方的[在網頁上連接模型](#在網頁上連接模型)）。
 - **每段對話選模型、工具與 skills**：輸入框右下角選模型，左下角的 ＋
-  勾選 skills 與工具，下一則訊息開始生效。要多開放幾個模型給使用者選，
+  勾選 skills 與工具，下一則訊息開始生效。有沙盒時處理 Office 檔與 PDF 的
+  skills 預設開啟，可以在這裡關掉（見 [Skills](#skills)）。要多開放幾個模型給使用者選，
   在 `harness.yaml` 寫 `models: [openai/gpt-5, ...]`（每一項也可以是
   `{name, label}`）。
 - **帳號與工作資料夾**：讓其他人使用時每個人用自己的帳號登入，對話、

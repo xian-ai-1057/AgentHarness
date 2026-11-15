@@ -106,7 +106,7 @@ tools:
 # skills 是 skills/ 底下的資料夾名稱；整個欄位不寫的話可以使用全部 skill。
 # 也可以列出內建的 skill：skill-creator、code-review、debugging、
 # planning、web-research、git-commit，以及處理 Office 檔與 PDF 的 xlsx、
-# docx、pptx、pdf（需要沙盒）。
+# docx、pptx、pdf（需要沙盒；網頁對話裡能執行程式時預設就會開啟）。
 # skills: [refund, code-review]
 # 搜尋預設知識庫（knowledge/ 資料夾）；[hr, it] 搜尋這幾個知識庫，
 # {bases: [hr], labels: [manager]} 再限定可搜尋的標籤。
@@ -213,7 +213,6 @@ tools:
 skills:
   - planning
   - web-research
-{office_skills}
 ---
 你是一位通用的工作助手。
 
@@ -232,14 +231,6 @@ _FILE_HINT_SANDBOX = """\
 - 要解析 Excel、PDF、Word 或計算數字時，寫 Python 程式用 run_python
   執行，不要自己心算或猜測檔案內容。"""
 _FILE_HINT_PLAIN = "- 文字檔用 read_file 讀取。"
-# 改寫自 Anthropic 官方的文件 skills，腳本要在沙盒裡執行。
-_OFFICE_SKILLS_ON = """\
-  - xlsx
-  - docx
-  - pptx
-  - pdf"""
-_OFFICE_SKILLS_OFF = """\
-  # 開啟沙盒後可以加上：xlsx、docx、pptx、pdf（處理 Office 檔與 PDF）"""
 
 
 def create_project(path: str | pathlib.Path) -> list[pathlib.Path]:
@@ -273,17 +264,10 @@ def create_assistant(
     config = _ASSISTANT_CONFIG.replace(
         "{sandbox}", _SANDBOX_ON if sandbox else _SANDBOX_OFF
     )
-    agent = (
-        _ASSISTANT_AGENT.replace(
-            "{sandbox_tool}", "- sandbox" if sandbox else "# - sandbox"
-        )
-        .replace(
-            "{file_hint}", _FILE_HINT_SANDBOX if sandbox else _FILE_HINT_PLAIN
-        )
-        .replace(
-            "{office_skills}",
-            _OFFICE_SKILLS_ON if sandbox else _OFFICE_SKILLS_OFF,
-        )
+    agent = _ASSISTANT_AGENT.replace(
+        "{sandbox_tool}", "- sandbox" if sandbox else "# - sandbox"
+    ).replace(
+        "{file_hint}", _FILE_HINT_SANDBOX if sandbox else _FILE_HINT_PLAIN
     )
     created = _write_files(
         root,

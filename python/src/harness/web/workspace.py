@@ -108,6 +108,10 @@ WEB_INSTRUCTIONS = "\n".join(
         "- 引用資料裡的數字時，只用你的程式實際印出來的值。",
     )
 )
+# 和 Claude 一樣：agent 能執行程式（有沙盒）時，每段對話預設開啟處理 Office
+# 檔與 PDF 的 skills，需要時由 agent 自己載入；使用者可以在對話裡關掉。
+# harness.yaml 的 web.defaultSkills 可以換成別的清單，[] 表示都不開。
+DEFAULT_SKILLS = ("xlsx", "docx", "pptx", "pdf")
 _UNTITLED = "新對話"
 _TITLE_LENGTH = 40
 _PREVIEW_LIMIT = 200_000
@@ -478,6 +482,12 @@ class Workspace:
                 }
                 for item, builtin_skill in self._available_skills().values()
             ],
+            # 能執行程式（工具有 run_python）的 agent 預設開啟的 skills。
+            "defaultSkills": (
+                self._default_skill_names()
+                if project.sandbox is not None
+                else []
+            ),
             "model": {
                 "config": dict(self._settings),
                 "env": {
@@ -3096,6 +3106,17 @@ class Workspace:
             if unknown:
                 raise WebError(400, f"沒有這些 skill：{'、'.join(unknown)}")
             options["skills"] = chosen
+        if "disabledSkills" in changes:
+            off = _string_list(
+                changes["disabledSkills"] or [], "disabledSkills"
+            )
+            defaults = self._default_skill_names()
+            unknown = [name for name in off if name not in defaults]
+            if unknown:
+                raise WebError(
+                    400, f"這些不是預設開啟的 skill：{'、'.join(unknown)}"
+                )
+            options["disabledSkills"] = off
         if "folder" in changes:
             folder_id = changes["folder"] or folders_lib.PRIVATE_ID
             if self.folders.find(user, folder_id) is None:
@@ -3311,9 +3332,10 @@ class Workspace:
             # 繞過使用者關掉的工具。
             copy.skills = [_limit_tools(item, allowed) for item in agent.skills]
         available = self._available_skills()
+        copy.skills = self._with_default_skills(state, copy, available)
         chosen = [available[n][0] for n in options["skills"] if n in available]
         if chosen:
-            own = {item.name for item in agent.skills}
+            own = {item.name for item in copy.skills}
             # 使用者挑的 skill 不能帶進 agent 原本沒有的工具。
             tools = {item.name for item in copy.tools}
             copy.skills = [
@@ -3348,6 +3370,56 @@ class Workspace:
             for target in agent.handoffs
         ]
         return copy
+
+    def _default_skill_names(self) -> list[str]:
+        """每段對話預設開啟的 skill 名稱（只留存在的）。"""
+        names: Any = DEFAULT_SKILLS
+        web = config_lib.read_config(self.project.root).get("web")
+        if isinstance(web, dict) and "defaultSkills" in web:
+            names = web["defaultSkills"]
+            if not isinstance(names, list):
+                names = []
+        available = self._available_skills()
+        return [str(name) for name in names if str(name) in available]
+
+    def _with_default_skills(
+        self,
+        state: _State,
+        agent: agents_lib.Agent,
+        available: dict[str, tuple[skills_lib.Skill, bool]],
+    ) -> list[skills_lib.Skill]:
+        """agent 的 skills 加上預設開啟的，扣掉這段對話關掉的。
+
+        只有 agent 這一輪真的能執行程式時才加：專案有沙盒、agent 的工具
+        （套用對話選的工具之後）有 run_python、使用者的群組有開放，而且
+        不是不能執行程式的「舊資料」資料夾。預設 skill 只開放 agent 原本
+        就有的工具。
+        """
+        defaults = self._default_skill_names()
+        off = set(state.options.get("disabledSkills") or []) & set(defaults)
+        kept = [item for item in agent.skills if item.name not in off]
+        if not self._runs_code(state, agent.tools):
+            return kept
+        present = {item.name for item in kept}
+        tools = {item.name for item in agent.tools}
+        added = [
+            _limit_tools(available[name][0], tools)
+            for name in defaults
+            if name not in off and name not in present
+        ]
+        return [*kept, *added]
+
+    def _runs_code(self, state: _State, tools: list[tools_lib.Tool]) -> bool:
+        """這一輪 agent 能不能在沙盒裡執行程式。"""
+        if self.project.sandbox is None:
+            return False
+        if state.run_folder is not None and state.run_folder.is_legacy:
+            return False
+        hidden = self._hidden_tools(state.run_user or accounts_lib.LOCAL_USER)
+        return any(
+            item.name == sandbox_lib.TOOL_NAME and id(item) not in hidden
+            for item in tools
+        )
 
     def _chosen_knowledge(
         self,
@@ -3881,12 +3953,14 @@ def _restore_meta(state: _State, meta: dict[str, Any]) -> None:
         model = options.get("model")
         tools = options.get("tools")
         chosen = options.get("skills")
+        off = options.get("disabledSkills")
         folder = options.get("folder")
         bases = options.get("knowledge")
         state.options = {
             "model": model if isinstance(model, str) else None,
             "tools": tools if _is_string_list(tools) else None,
             "skills": chosen if _is_string_list(chosen) else [],
+            "disabledSkills": off if _is_string_list(off) else [],
             "folder": folder
             if isinstance(folder, str) and folder
             else folders_lib.PRIVATE_ID,
@@ -3992,6 +4066,8 @@ def _default_options() -> dict[str, Any]:
         "model": None,
         "tools": None,
         "skills": [],
+        # 這段對話關掉的預設 skill（見 DEFAULT_SKILLS）。
+        "disabledSkills": [],
         "folder": folders_lib.PRIVATE_ID,
         # 這段對話要搜尋的知識庫；None 表示跟著 agent 的設定。
         "knowledge": None,

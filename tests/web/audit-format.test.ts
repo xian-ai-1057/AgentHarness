@@ -91,6 +91,20 @@ describe("describeDetail", () => {
     ).toBe("修改了：切片長度、維護者");
   });
 
+  it("個人知識庫的紀錄和公司知識庫用同樣的說明", () => {
+    expect(
+      describeDetail(entry("knowledge.personal_create", { name: "筆記" })),
+    ).toBe("名稱：筆記");
+    expect(
+      describeDetail(entry("knowledge.personal_upload", { files: ["a.md"] })),
+    ).toBe("a.md");
+    expect(
+      describeDetail(
+        entry("knowledge.personal_document_delete", { path: "a.md" }),
+      ),
+    ).toBe("a.md");
+  });
+
   it("登入失敗顯示原因", () => {
     expect(
       describeDetail(entry("auth.login_failed", { reason: "throttled" })),

@@ -49,6 +49,18 @@
                                          同一份文件讀出來的文字，依片段
                                          排列（網頁用來標出引用的段落）
     POST   /api/knowledge/{id}/search    搜尋測試，{"query", "topK"?}
+    GET    /api/my/knowledge             知識庫頁：可以用的公司知識庫與自己的
+                                         個人知識庫、上限與已用空間
+    POST   /api/my/knowledge             建立個人知識庫，{"name",
+                                         "description"?, "chunking"?}
+    PATCH  /api/my/knowledge/{id}        改自己知識庫的名稱、說明或切片方式
+    DELETE /api/my/knowledge/{id}        刪除自己的知識庫（含文件）
+    GET    /api/my/knowledge/{id}/documents
+                                         自己知識庫的文件與索引概況
+    POST   /api/my/knowledge/{id}/documents
+                                         上傳文件（multipart；?replace=）
+    DELETE /api/my/knowledge/{id}/documents?path=
+                                         刪除文件
 
 登入方式（見 auth_mode）：
 
@@ -127,7 +139,7 @@ UPLOAD_PATH = "/api/uploads"
 # 腳本因此無法借用使用者的登入狀態上傳檔案。
 UPLOAD_HEADER = "X-Harness-Upload"
 # 上傳文件到知識庫也是 multipart（和 UPLOAD_PATH 一樣的檢查）。
-_KNOWLEDGE_UPLOAD = re.compile(r"^/api/knowledge/[\w-]+/documents$")
+_KNOWLEDGE_UPLOAD = re.compile(r"^/api/(my/)?knowledge/[\w-]+/documents$")
 _UPLOAD_CHUNK = 256 * 1024
 _FILE_CHUNK = 256 * 1024
 COOKIE = "harness_session"
@@ -370,6 +382,7 @@ def create_app(
     _group_routes(routes)
     _user_agent_routes(routes)
     _knowledge_routes(routes)
+    _personal_knowledge_routes(routes)
     _settings_routes(routes)
     _audit_routes(routes)
 
@@ -1031,6 +1044,105 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
                 _user(request), request.match_info["base_id"], body
             )
         )
+
+
+def _personal_knowledge_routes(routes: web.RouteTableDef) -> None:
+    """一般使用者的知識庫頁：瀏覽可以用的知識庫、管理自己的個人知識庫。
+
+    個人知識庫只有擁有者能看、能改；別人的一律回 404。
+    """
+    base = "/api/my/knowledge/{base_id:[\\w-]+}"
+
+    @routes.get("/api/my/knowledge")
+    async def list_mine(request: web.Request) -> web.Response:
+        return _json(_ws(request).my_knowledge(_user(request)))
+
+    @routes.post("/api/my/knowledge")
+    async def create_mine(request: web.Request) -> web.Response:
+        body = await _body(request)
+        created = _ws(request).create_personal_knowledge(_user(request), body)
+        _audit(
+            request,
+            "knowledge.personal_create",
+            target=created["id"],
+            detail={"name": created["name"]},
+        )
+        return _json(created, status=201)
+
+    @routes.patch(base)
+    async def update_mine(request: web.Request) -> web.Response:
+        body = await _body(request)
+        base_id = request.match_info["base_id"]
+        updated = _ws(request).update_personal_knowledge(
+            _user(request), base_id, body
+        )
+        _audit(
+            request,
+            "knowledge.personal_update",
+            target=base_id,
+            detail={"changes": body},
+        )
+        return _json(updated)
+
+    @routes.delete(base)
+    async def delete_mine(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        deleted = _ws(request).delete_personal_knowledge(
+            _user(request), base_id
+        )
+        _audit(
+            request,
+            "knowledge.personal_delete",
+            target=base_id,
+            detail={"name": deleted["name"]},
+        )
+        return _json({"ok": True})
+
+    @routes.get(f"{base}/documents")
+    async def list_my_documents(request: web.Request) -> web.Response:
+        return _json(
+            await _ws(request).personal_documents(
+                _user(request), request.match_info["base_id"]
+            )
+        )
+
+    @routes.post(f"{base}/documents")
+    async def upload_my_documents(request: web.Request) -> web.Response:
+        workspace = _ws(request)
+        user = _user(request)
+        base_id = request.match_info["base_id"]
+        replace = request.query.get("replace") or None
+        saved = []
+        async for filename, chunks in _iter_files(request):
+            saved.append(
+                await workspace.save_personal_document(
+                    user, base_id, filename, chunks, replace=replace
+                )
+            )
+            if replace is not None:
+                break
+        if not saved:
+            raise workspace_lib.WebError(400, "沒有收到檔案")
+        detail: dict[str, Any] = {"files": [item["path"] for item in saved]}
+        if replace is not None:
+            detail["replace"] = replace
+        _audit(
+            request, "knowledge.personal_upload", target=base_id, detail=detail
+        )
+        return _json({"files": saved}, status=201)
+
+    @routes.delete(f"{base}/documents")
+    async def delete_my_document(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        path = request.query.get("path", "")
+        _ws(request).delete_personal_document(_user(request), base_id, path)
+        _audit(
+            request,
+            "knowledge.personal_document_delete",
+            target=base_id,
+            detail={"path": path},
+        )
+        return _json({"ok": True})
 
 
 def _settings_routes(routes: web.RouteTableDef) -> None:

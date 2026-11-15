@@ -12,7 +12,7 @@
  * agent 時，上方顯示它的名稱與說明，建議換成它的開場建議。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionOptions } from "../../../src/web/protocol.ts";
 import { agentInitial, agentLabel } from "../agents.ts";
 import { api } from "../api.ts";
@@ -76,6 +76,25 @@ export function NewChat() {
     setAgentName(agentParam);
     setOptions((current) => ({ ...current, tools: null }));
   }, [agentParam]);
+  // 從知識庫頁開的新對話（?knowledge=）：在 agent 預設的知識庫之外再勾
+  // 選那個知識庫。每個知識庫只套用一次，之後使用者自己改的不會被蓋掉。
+  const knowledgeId = useSearchParam("knowledge");
+  const appliedKnowledge = useRef<string>(undefined);
+  useEffect(() => {
+    if (!project || !knowledgeId || appliedKnowledge.current === knowledgeId)
+      return;
+    if (!project.knowledgeBases?.some((base) => base.id === knowledgeId))
+      return;
+    appliedKnowledge.current = knowledgeId;
+    const first =
+      project.agents.find((item) => item.name === project.defaultAgent) ??
+      project.agents[0];
+    const defaults = agentKnowledge(project, first);
+    setOptions((current) => ({
+      ...current,
+      knowledge: [...defaults.filter((id) => id !== knowledgeId), knowledgeId],
+    }));
+  }, [project, knowledgeId]);
 
   const agent = useMemo(
     () =>

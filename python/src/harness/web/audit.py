@@ -56,6 +56,11 @@ ACTIONS = {
     "agent.create": "建立自己的 Agent",
     "agent.update": "修改自己的 Agent",
     "agent.delete": "刪除自己的 Agent",
+    "knowledge.personal_create": "建立個人知識庫",
+    "knowledge.personal_update": "修改個人知識庫",
+    "knowledge.personal_delete": "刪除個人知識庫",
+    "knowledge.personal_upload": "上傳個人知識庫文件",
+    "knowledge.personal_document_delete": "刪除個人知識庫文件",
     "approval.decide": "工具核准",
     "audit.export": "匯出稽核紀錄",
 }

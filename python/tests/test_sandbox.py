@@ -383,6 +383,8 @@ class TestRun:
         assert tool.name == "run_python"
         assert "沒有網路" in tool.description
         assert "30 秒" in tool.description
+        # 自己檢查用的截圖等暫存檔不要留在使用者的資料夾。
+        assert "寫在 /tmp" in tool.description
         assert tool.description.endswith("已安裝 pandas。")
         assert not tool.needs_approval
 

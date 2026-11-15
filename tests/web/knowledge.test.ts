@@ -10,6 +10,7 @@ import {
   applySearchChoice,
   describeSearch,
   draftDirty,
+  embeddingWarning,
   searchChoice,
   settingsChanges,
   toSettingsDraft,
@@ -198,5 +199,41 @@ describe("Embedding 模型下拉選單", () => {
     expect(
       describeSearch({ searchMode: "hybrid", embeddingModel: "bge-m3" }),
     ).toBe("bge-m3");
+  });
+});
+
+describe("Embedding 模型的提醒", () => {
+  const found = (
+    embedding: string[],
+    source: "model_info" | "names" | "none" | "error" = "model_info",
+  ) => ({
+    embedding: embedding.map((name) => ({ name, label: name })),
+    rerank: [],
+    source,
+  });
+
+  it("模型網址上沒有 embedding 模型時提醒", () => {
+    expect(embeddingWarning(found([]), "")).toContain("沒有 embedding 模型");
+    expect(embeddingWarning(found([], "names"), "")).toContain(
+      "沒有 embedding 模型",
+    );
+  });
+
+  it("查詢失敗時提醒原因", () => {
+    expect(
+      embeddingWarning({ ...found([], "error"), error: "金鑰不正確" }, ""),
+    ).toContain("金鑰不正確");
+  });
+
+  it("目前設定的模型不在網址上時提醒（只信 LiteLLM 標明的用途）", () => {
+    expect(embeddingWarning(found(["bge-m3"]), "old-emb")).toContain("old-emb");
+    expect(embeddingWarning(found(["bge-m3"], "names"), "old-emb")).toBe("");
+  });
+
+  it("有模型、還在查詢或沒有端點時不提醒", () => {
+    expect(embeddingWarning(found(["bge-m3"]), "bge-m3")).toBe("");
+    expect(embeddingWarning(found(["bge-m3"]), "")).toBe("");
+    expect(embeddingWarning(undefined, "")).toBe("");
+    expect(embeddingWarning(found([], "none"), "")).toBe("");
   });
 });

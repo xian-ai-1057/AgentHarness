@@ -2,6 +2,7 @@
 
 import type {
   KnowledgeAdminBase,
+  KnowledgeModelChoices,
   KnowledgeSearchMode,
   KnowledgeSettings,
 } from "../../../../src/web/protocol.ts";
@@ -183,4 +184,30 @@ export function describeSearch(retrieval: {
     return retrieval.embeddingModel ?? "embedding";
   }
   return "演算法（BM25）";
+}
+
+/**
+ * 「Embedding 模型」下方的提醒：模型網址上沒有 embedding 模型、查詢失敗，
+ * 或目前設定的模型不在網址上。沒有要提醒的時候回傳 ""。
+ */
+export function embeddingWarning(
+  found: KnowledgeModelChoices | undefined,
+  current: string,
+): string {
+  if (!found || found.source === "none") return "";
+  if (found.source === "error") {
+    return `列不出模型網址上的 embedding 模型（${found.error ?? "查詢失敗"}），目前只能選關鍵字或演算法，或選「其他」自行輸入模型名稱。`;
+  }
+  if (found.embedding.length === 0) {
+    return "這個模型網址上沒有 embedding 模型，只能選關鍵字或演算法（BM25）。要用語意檢索，請先在模型中台加上 embedding 模型（LiteLLM 請在 model_info 標明 mode: embedding），或選「其他」自行輸入。";
+  }
+  // 依名稱猜的清單可能漏掉，只有 LiteLLM 標明用途時才提醒不在清單上。
+  if (
+    found.source === "model_info" &&
+    current &&
+    !found.embedding.some((model) => model.name === current)
+  ) {
+    return `目前設定的「${current}」不在這個模型網址上，搜尋時可能會失敗，請改選清單裡的模型。`;
+  }
+  return "";
 }

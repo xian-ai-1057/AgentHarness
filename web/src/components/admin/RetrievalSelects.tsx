@@ -16,6 +16,7 @@ import { Field } from "../shell/Field.tsx";
 import {
   applySearchChoice,
   CUSTOM_CHOICE,
+  embeddingWarning,
   MODEL_PREFIX,
   type SettingsDraft,
   searchChoice,
@@ -53,9 +54,8 @@ export function useKnowledgeModels(): Loaded {
 
 function listNote(found: Loaded): string {
   if ("loading" in found) return "正在查詢模型連線上的模型…";
-  if (found.source === "error") {
-    return `列不出模型連線上的模型（${found.error ?? "查詢失敗"}），可以選「其他」自行輸入。`;
-  }
+  // 查詢失敗另外用醒目的提醒顯示（見 embeddingWarning）。
+  if (found.source === "error") return "";
   if (found.source === "none") {
     return "沒有設定模型端點，列不出模型；可以選「其他」自行輸入。";
   }
@@ -63,6 +63,17 @@ function listNote(found: Loaded): string {
     return "依模型名稱判斷用途，清單裡沒有的請選「其他」自行輸入。";
   }
   return "";
+}
+
+function rerankNote(found: Loaded): string {
+  if ("loading" in found) return listNote(found);
+  if (found.source === "error") {
+    return `列不出模型網址上的 rerank 模型（${found.error ?? "查詢失敗"}），可以選「其他」自行輸入。`;
+  }
+  if (found.source !== "none" && found.rerank.length === 0) {
+    return "這個模型網址上沒有 rerank 模型。";
+  }
+  return listNote(found);
 }
 
 function ModelOptions({
@@ -96,12 +107,15 @@ function SelectRow({
   label,
   value,
   hint,
+  warning = "",
   onChange,
   children,
 }: {
   label: string;
   value: string;
   hint: string;
+  /** 醒目的提醒，例如模型網址上沒有可以選的模型。 */
+  warning?: string;
   onChange: (value: string) => void;
   children: React.ReactNode;
 }) {
@@ -113,11 +127,20 @@ function SelectRow({
         id={id}
         className="field"
         value={value}
-        aria-describedby={hint ? `${id}-hint` : undefined}
+        aria-describedby={
+          [warning ? `${id}-warning` : "", hint ? `${id}-hint` : ""]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
         onChange={(event) => onChange(event.target.value)}
       >
         {children}
       </select>
+      {warning && (
+        <div id={`${id}-warning`} className="field-warning" role="status">
+          {warning}
+        </div>
+      )}
       {hint && (
         <div id={`${id}-hint`} className="help">
           {hint}
@@ -169,6 +192,10 @@ export function EmbeddingSelect({
         label="Embedding 模型"
         value={choice}
         hint={hint}
+        warning={embeddingWarning(
+          "loading" in models ? undefined : models,
+          custom ? "" : fields.embeddingModel,
+        )}
         onChange={(value) => {
           setCustom(value === CUSTOM_CHOICE);
           onChange(applySearchChoice(value, builtin));
@@ -230,7 +257,7 @@ export function RerankerSelect({
     : `沿用預設知識庫（目前：${inherited || "不重新排序"}）`;
   const hint = [
     "用 rerank 模型重新評估前幾名候選的相關度，選填。",
-    listNote(models),
+    rerankNote(models),
   ]
     .filter(Boolean)
     .join(" ");

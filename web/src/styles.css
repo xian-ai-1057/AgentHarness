@@ -4501,3 +4501,13 @@ a.kb-card:focus-visible {
   color: var(--warn-ink);
   font-size: 13px;
 }
+
+/* 下拉選單下方的提醒，例如模型網址上沒有 embedding 模型。 */
+.field-warning {
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: 13px;
+}

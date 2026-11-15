@@ -42,6 +42,7 @@ import logging
 import os
 import pathlib
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -583,6 +584,72 @@ class Workspace:
         self.refresh_project()
         assert group is not None
         return group.info()
+
+    def check_group_ids(self, group_ids: Any) -> None:
+        """group_ids 是存在的群組（不含「所有人」）的識別碼清單。
+
+        Raises:
+            WebError: 不是帳號模式、格式不對，或有不存在的群組。
+        """
+        store = self._require_groups()
+        with _group_errors():
+            groups_lib.check_ids(store, group_ids)
+
+    def set_member_groups(self, user_id: str, group_ids: Any) -> list[str]:
+        """從成員那一邊調整所屬群組，回傳調整後的群組識別碼（不含「所有人」）。"""
+        store = self._require_groups()
+        with _group_errors():
+            groups = store.set_groups_of(user_id, group_ids)
+        self.refresh_project()
+        return [item.id for item in groups if not item.builtin]
+
+    def group_names(self) -> dict[str, str]:
+        """群組識別碼 → 名稱（稽核紀錄用）。"""
+        if self._groups is None:
+            return {}
+        return {item.id: item.name for item in self._groups.list_groups()}
+
+    def member_groups(self) -> dict[str, list[str]]:
+        """每位成員另外加入的群組（不含「所有人」）；不是帳號模式時是空的。"""
+        if self._groups is None:
+            return {}
+        found: dict[str, list[str]] = {}
+        for group in self._groups.list_groups():
+            for user_id in group.members:
+                found.setdefault(user_id, []).append(group.id)
+        return found
+
+    def purge_member(self, user: accounts_lib.User) -> None:
+        """清掉已刪除帳號的所有資料。
+
+        帳號本身由 AccountStore.delete_user 刪除；這裡清掉這個人的對話、
+        記憶、「我的檔案」、個人知識庫、自建 agent，以及群組與知識庫維護
+        者的記錄。稽核紀錄不動。
+        """
+        for session_id, state in list(self._states.items()):
+            if state.owner != user.id:
+                continue
+            if state.task is not None:
+                state.stop_notice = ACCOUNT_CHANGED_NOTICE
+                state.task.cancel()
+            del self._states[session_id]
+        if self._groups is not None:
+            self._groups.remove_member(user.id)
+        if self._maintainers is not None:
+            self._maintainers.forget_user(user.id)
+        if self._user_agents is not None:
+            for agent in self._user_agents.owned_by(user.id):
+                self._user_agents.delete(agent.id)
+        for base in self.personal.owned_by(user.id):
+            self.personal.delete(base.id)
+        self._model_access.pop(user.username, None)
+        if self.auth_mode != "local":
+            for directory in (
+                migration.user_dir(self.project.root, user.id),
+                self.folders.private(user).path,
+            ):
+                shutil.rmtree(directory, ignore_errors=True)
+        self.refresh_project()
 
     async def list_knowledge(self, user: accounts_lib.User) -> dict[str, Any]:
         """管理平台的知識庫頁：這個人可以管理的知識庫。

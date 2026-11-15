@@ -134,6 +134,14 @@ class MaintainerStore:
         """刪除知識庫時一併清掉它的維護者。"""
         self.replace(base_id, [])
 
+    def forget_user(self, user_id: str) -> None:
+        """刪除帳號時，把這個人從所有知識庫的維護者移除。"""
+        with self._connect() as db:
+            db.execute(
+                "DELETE FROM knowledge_maintainers WHERE user_id = ?",
+                (user_id,),
+            )
+
     def _connect(self):
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         return accounts_lib._Transaction(db)

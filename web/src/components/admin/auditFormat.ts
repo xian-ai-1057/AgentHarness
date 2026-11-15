@@ -111,8 +111,15 @@ export function describeDetail(entry: AuditEntry): string {
   switch (entry.action) {
     case "auth.login_failed":
       return FAILURE_LABELS[String(detail.reason)] ?? "";
-    case "member.create":
-      return `角色：${roleLabel(detail.role)}`;
+    case "member.create": {
+      const role = `角色：${roleLabel(detail.role)}`;
+      const groups = nameList(detail.groups);
+      return groups ? `${role} · 群組：${groups}` : role;
+    }
+    case "member.groups":
+      return `群組：${nameList(detail.before) || "（無）"} → ${nameList(detail.after) || "（無）"}`;
+    case "member.delete":
+      return `${String(detail.displayName ?? "")} · 角色：${roleLabel(detail.role)}`;
     case "member.update":
       return describeChanges(detail.changes);
     case "group.update":
@@ -163,6 +170,10 @@ export function describeDetail(entry: AuditEntry): string {
     default:
       return "";
   }
+}
+
+function nameList(value: unknown): string {
+  return Array.isArray(value) ? value.map(String).join("、") : "";
 }
 
 function roleLabel(role: unknown): string {

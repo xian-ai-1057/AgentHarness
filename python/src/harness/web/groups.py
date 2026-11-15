@@ -295,6 +295,33 @@ class GroupStore:
             )
             db.execute("DELETE FROM access_groups WHERE id = ?", (group_id,))
 
+    def set_groups_of(self, user_id: str, group_ids: Any) -> list[Group]:
+        """把這個人所屬的群組換成 group_ids（不含「所有人」）。
+
+        從成員那一邊調整群組用；回傳調整後所屬的群組（含「所有人」）。
+
+        Raises:
+            GroupError: group_ids 不是字串清單，或有不存在的群組。
+        """
+        ids = check_ids(self, group_ids)
+        with self._connect() as db:
+            db.execute(
+                "DELETE FROM group_members WHERE user_id = ?", (user_id,)
+            )
+            db.executemany(
+                "INSERT OR IGNORE INTO group_members (group_id, user_id) "
+                "VALUES (?, ?)",
+                [(group_id, user_id) for group_id in ids],
+            )
+        return self.groups_of(user_id)
+
+    def remove_member(self, user_id: str) -> None:
+        """把這個人移出所有群組（刪除帳號時）。"""
+        with self._connect() as db:
+            db.execute(
+                "DELETE FROM group_members WHERE user_id = ?", (user_id,)
+            )
+
     def groups_of(self, user_id: str) -> list[Group]:
         """這個人所屬的群組，包含「所有人」。"""
         return [
@@ -319,6 +346,19 @@ class GroupStore:
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         return accounts_lib._Transaction(db)
+
+
+def check_ids(store: GroupStore, group_ids: Any) -> list[str]:
+    """檢查群組識別碼清單（不能含「所有人」），回傳去掉重複的清單。
+
+    Raises:
+        GroupError: 不是字串清單，或有不存在的群組。
+    """
+    ids = list(dict.fromkeys(_checked_list(group_ids, "groups")))
+    known = {item.id for item in store.list_groups() if not item.builtin}
+    if any(group_id not in known for group_id in ids):
+        raise GroupError("找不到這個群組", 404)
+    return ids
 
 
 def union(groups: list[Group]) -> Access:

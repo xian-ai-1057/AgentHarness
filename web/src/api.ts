@@ -19,6 +19,7 @@ import type {
   KnowledgeDocuments,
   KnowledgeHit,
   KnowledgeSettings,
+  KnowledgeSourceText,
   MemberInfo,
   ModelChoice,
   ModelTestResult,
@@ -245,6 +246,12 @@ export const api = {
       query,
       topK,
     }),
+  /** 出處文件的文字，網頁用來標出引用的片段（features.knowledgeSources）。 */
+  knowledgeSourceText: (base: string, path: string) =>
+    request<KnowledgeSourceText>(
+      "GET",
+      `/knowledge/source/text?${new URLSearchParams({ base, path })}`,
+    ),
   // 稽核紀錄（features.audit）。
   audit: (filters: AuditFilters, before?: number) =>
     request<AuditPage>(

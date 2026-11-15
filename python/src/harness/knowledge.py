@@ -501,6 +501,15 @@ class Knowledge:
                     item["labels"].append(label)
         return found
 
+    async def document_chunks(self, source: str) -> list[Chunk]:
+        """建立索引並回傳某份文件的所有片段（依在文件裡的順序）。
+
+        Args:
+            source: 文件的相對路徑（Chunk.source）。
+        """
+        await self._ensure_index()
+        return [chunk for chunk in self._chunks if chunk.source == source]
+
     def _current_signature(self) -> tuple[Any, ...]:
         """用檔案的修改時間與大小判斷內容有沒有變。"""
         files = []

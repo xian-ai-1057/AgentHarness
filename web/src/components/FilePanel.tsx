@@ -25,11 +25,7 @@ import {
   Zoomed,
   ZoomProvider,
 } from "./chat/PreviewZoom.tsx";
-import {
-  clampWidth,
-  loadPanelWidth,
-  savePanelWidth,
-} from "./chat/panelWidth.ts";
+import { usePanelWidth } from "./chat/usePanelWidth.ts";
 import { CloseIcon } from "./Icons.tsx";
 import { Markdown } from "./Markdown.tsx";
 
@@ -79,9 +75,9 @@ export function FilePanel({
   onClose: () => void;
 }) {
   const [full, setFull] = useState(false);
-  // 拖曳分隔線調整過的寬度；null 時用 CSS 的預設寬度。
-  const [width, setWidth] = useState<number | null>(loadPanelWidth);
   const panelRef = useRef<HTMLElement>(null);
+  // 拖曳分隔線調整過的寬度；null 時用 CSS 的預設寬度。
+  const { shown, changeWidth } = usePanelWidth(panelRef);
   const change = files.find((file) => file.path === selected);
   const diffFile = change ?? files[0];
   // 預覽的對象：選到的路徑，沒有時是最新的變更或附件。
@@ -116,30 +112,6 @@ export function FilePanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [full]);
-
-  // 視窗變窄時，記住的寬度可能讓對話區太擠：跟著縮回可用範圍（不改記
-  // 住的值，視窗再放大時回到原本的寬度）。
-  const [available, setAvailable] = useState(Number.POSITIVE_INFINITY);
-  useEffect(() => {
-    const measure = () => {
-      const panel = panelRef.current;
-      const chat = panel?.parentElement?.querySelector(":scope > .main");
-      if (!panel || !chat) return;
-      setAvailable(
-        panel.getBoundingClientRect().width +
-          chat.getBoundingClientRect().width,
-      );
-    };
-    measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, []);
-  const shown = width === null ? null : clampWidth(width, available);
-
-  function changeWidth(next: number | null) {
-    setWidth(next);
-    savePanelWidth(next);
-  }
 
   return (
     <>

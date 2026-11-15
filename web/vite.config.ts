@@ -1,3 +1,6 @@
+import { cpSync, createReadStream, existsSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
@@ -25,11 +28,55 @@ function katexWoff2Only(): Plugin {
   };
 }
 
+/**
+ * PDF.js 顯示中文 PDF 需要的字元對照表（cmaps）與標準字型
+ * （standard_fonts），讀 PDF 時才用網址載入（見 PdfViewer.tsx 的
+ * PDFJS_ASSETS）。打包時複製到 pdfjs/ 底下，開發時直接從 node_modules 送出。
+ */
+function pdfjsAssets(): Plugin {
+  const root = dirname(
+    createRequire(import.meta.url).resolve("pdfjs-dist/package.json"),
+  );
+  const folders = ["cmaps", "standard_fonts"];
+  let outDir = "";
+  return {
+    name: "pdfjs-assets",
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
+    configureServer(server) {
+      server.middlewares.use("/pdfjs/", (request, response, next) => {
+        const path = normalize(decodeURIComponent(request.url ?? "/"))
+          .replace(/^[/\\]+/, "")
+          .split("?")[0];
+        const file = path ? join(root, path) : "";
+        if (
+          !file ||
+          !folders.some((folder) => path?.startsWith(`${folder}/`)) ||
+          !existsSync(file) ||
+          !statSync(file).isFile()
+        ) {
+          next();
+          return;
+        }
+        createReadStream(file).pipe(response);
+      });
+    },
+    closeBundle() {
+      for (const folder of folders) {
+        cpSync(join(root, folder), join(outDir, "pdfjs", folder), {
+          recursive: true,
+        });
+      }
+    },
+  };
+}
+
 // 開發時：先在專案資料夾執行 `harness web`，再執行 `npm run dev:web`，
 // Vite 會把 /api 轉給 harness web（預設 4321 埠）。
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),
-  plugins: [katexWoff2Only(), react()],
+  plugins: [katexWoff2Only(), pdfjsAssets(), react()],
   build: {
     outDir: fileURLToPath(new URL("../dist/public", import.meta.url)),
     emptyOutDir: true,

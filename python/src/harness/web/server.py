@@ -45,6 +45,9 @@
     GET    /api/knowledge/source?base=&path=
                                          搜尋結果出處的原文（搜尋得到這份
                                          文件的人都可以看）
+    GET    /api/knowledge/source/text?base=&path=
+                                         同一份文件讀出來的文字，依片段
+                                         排列（網頁用來標出引用的段落）
     POST   /api/knowledge/{id}/search    搜尋測試，{"query", "topK"?}
 
 登入方式（見 auth_mode）：
@@ -1010,6 +1013,15 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
         download = request.query.get("download") == "1"
         headers = files_lib.response_headers(name, download)
         return await _send_file(request, fd, info.st_size, headers)
+
+    @routes.get("/api/knowledge/source/text")
+    async def knowledge_source_text(request: web.Request) -> web.Response:
+        found = await _ws(request).knowledge_source_text(
+            _user(request),
+            request.query.get("base", ""),
+            request.query.get("path", ""),
+        )
+        return _json(found)
 
     @routes.post(f"{base}/search")
     async def try_search(request: web.Request) -> web.Response:

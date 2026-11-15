@@ -762,12 +762,12 @@ class Workspace:
             item["labels"] = found["labels"] if found else []
         return {"documents": documents, "index": index}
 
-    async def knowledge_source(
+    async def _source_document(
         self, user: accounts_lib.User, base_ref: str, path: str
-    ) -> tuple[int, os.stat_result]:
-        """打開搜尋結果出處的文件，讓網頁預覽原文。
+    ) -> knowledge_lib.Knowledge:
+        """找出這個人可以看的那份出處文件所在的知識庫。
 
-        只送得出這個人搜尋得到的文件：知識庫要開放給他（群組），文件要
+        只找得到這個人搜尋得到的文件：知識庫要開放給他（群組），文件要
         在那個知識庫的索引裡（屬於子知識庫的資料夾不算），有標籤的文件
         要和他可以搜尋的標籤有交集。
 
@@ -776,9 +776,6 @@ class Workspace:
             base_ref: 出處上的知識庫名稱或識別碼；空字串時（只搜尋一個
                 知識庫，出處沒有名稱）依序找這個人可以搜尋的知識庫。
             path: 出處上的檔案路徑（相對於知識庫資料夾）。
-
-        Returns:
-            (fd, stat)；fd 用完要自己關閉。
 
         Raises:
             WebError: 找不到，或這個人不能看這份文件（一律 404，不透露
@@ -801,11 +798,45 @@ class Workspace:
             labels = found["labels"]
             if allowed is not None and labels and not allowed & set(labels):
                 continue
-            try:
-                return files_lib.open_file(knowledge.path, path)
-            except files_lib.FileError as error:
-                raise WebError(error.status, str(error)) from error
+            return knowledge
         raise WebError(404, "找不到這份文件，或你沒有權限查看")
+
+    async def knowledge_source(
+        self, user: accounts_lib.User, base_ref: str, path: str
+    ) -> tuple[int, os.stat_result]:
+        """打開搜尋結果出處的原始檔案，讓網頁預覽或下載。
+
+        權限見 _source_document。
+
+        Returns:
+            (fd, stat)；fd 用完要自己關閉。
+        """
+        knowledge = await self._source_document(user, base_ref, path)
+        assert knowledge.path is not None
+        try:
+            return files_lib.open_file(knowledge.path, path)
+        except files_lib.FileError as error:
+            raise WebError(error.status, str(error)) from error
+
+    async def knowledge_source_text(
+        self, user: accounts_lib.User, base_ref: str, path: str
+    ) -> dict[str, Any]:
+        """出處文件讀出來的文字，依索引的片段排列。
+
+        網頁在這份文字裡標出引用的片段（螢光標示並捲過去），每種格式都
+        一樣，不必依賴瀏覽器的 PDF 檢視器。權限見 _source_document。
+
+        Returns:
+            {"path", "sections": [{"location", "text"}]}。
+        """
+        knowledge = await self._source_document(user, base_ref, path)
+        return {
+            "path": path,
+            "sections": [
+                {"location": chunk.location, "text": chunk.text}
+                for chunk in await knowledge.document_chunks(path)
+            ],
+        }
 
     async def save_knowledge_document(
         self,

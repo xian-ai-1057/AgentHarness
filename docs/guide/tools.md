@@ -69,6 +69,26 @@ def my_orders(context: harness.RunContext) -> list[dict]:
 使用者身分應該從 `context.deps` 取得，不要做成工具的參數，否則模型可以填別人的 ID。
 :::
 
+### 讓產生的檔案出現在對話裡
+
+工具寫出檔案（報表、審查結果）時，在回傳的文字最後加上一行
+`harness.PRODUCED_MARKER` 加檔案路徑（相對於 `context.workdir`），網頁版
+就會在回覆底下顯示這個檔案的卡片，使用者可以直接預覽與下載，不用去
+找檔案存在哪裡：
+
+```python
+@harness.tool
+def export_report(context: harness.RunContext, month: str) -> str:
+    """把某個月份的報告存成 Excel。"""
+    path = f"報表/{month}.xlsx"
+    (context.workdir / path).parent.mkdir(parents=True, exist_ok=True)
+    (context.workdir / path).write_bytes(reports.to_xlsx(month))
+    return f"已存成 {path}\n{harness.PRODUCED_MARKER}{path}"
+```
+
+網頁顯示工具結果時會拿掉這一行、改成檔案卡片（模型仍然看得到）；一個檔案一行，可以有好幾行。
+沙盒（`run_python`）產生的檔案也是用同一個方式顯示。
+
 ## TypeScript 版：`tools/*.ts`
 
 `tools/` 底下每個 `.ts` 檔匯出的工具會自動載入，檔名就是 toolset 名稱。Node.js 會直接執行 TypeScript，不需要先編譯。

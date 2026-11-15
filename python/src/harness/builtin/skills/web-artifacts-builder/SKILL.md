@@ -4,9 +4,9 @@
 # 修改內容：說明翻成繁體中文；沙盒沒有網路，改用建置映像檔時就建好的專案
 # 範本（/opt/web-artifact），新增 offline/init-artifact.sh 與
 # offline/bundle-artifact.sh 取代需要下載套件的步驟；成品是交給使用者下載的
-# HTML 檔。scripts/ 未修改（建置映像檔時用它建立範本）。
+# HTML 檔；描述寫清楚和 frontend-design 的分工。scripts/ 未修改（建置映像檔時用它建立範本）。
 name: web-artifacts-builder
-description: 用 React、TypeScript、Tailwind CSS 與 shadcn/ui 建構多元件、較複雜的網頁應用，最後打包成單一 HTML 檔。需要狀態管理、路由或 shadcn/ui 元件的複雜互動頁面（儀表板、小工具、互動式報告）時使用；簡單的單檔 HTML 不要用。
+description: 用 React、TypeScript、Tailwind CSS 與 shadcn/ui 建構多元件、較複雜的網頁應用，最後打包成單一 HTML 檔。使用者要用 React 或 shadcn/ui，或頁面需要多個畫面共用的複雜狀態、路由時使用（例如多步驟的小工具、可編輯資料的應用）；單一 HTML 就做得到的頁面（包括有分頁、篩選、圖表的儀表板）不要用，改用 frontend-design。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
 requires: [run_python]
@@ -47,6 +47,8 @@ shadcn/ui
   時間上限。
 - 使用者下載 HTML 後用瀏覽器開啟（網頁的檔案預覽只會顯示原始碼）。打包後
   的檔案不需要網路。
+- 用 Playwright 自我檢查時，截圖寫在 `/tmp` 或專案資料夾裡，不要存在工作
+  資料夾的一般位置（那裡的檔案都會顯示給使用者）。
 
 ## 設計與樣式準則
 

@@ -1,10 +1,10 @@
 ---
 # 改寫自 Anthropic 官方 skills 的 frontend-design（https://github.com/anthropics/skills
 # ，commit 1780c5e），授權 Apache License 2.0，完整條款見 LICENSE.txt。
-# 修改內容：說明翻成繁體中文；補上 Agent Harness 裡的限制（看不到截圖、
+# 修改內容：說明翻成繁體中文；補上 Agent Harness 裡的限制（看不到截圖、檢查用截圖不留在工作資料夾、與 web-artifacts-builder 的分工、
 # 沙盒沒有網路所以不要引用外部字型與 CDN、產出存在工作資料夾）。
 name: frontend-design
-description: 製作新的介面或改造既有介面時，提供有辨識度、經過思考的視覺設計指引：美感方向、字型、配色與版面，避免做出看起來像範本的預設設計。使用者要做網頁、登陸頁、儀表板、元件或 HTML 頁面，或要求「設計得好看一點」時使用。
+description: 製作新的介面或改造既有介面時，提供有辨識度、經過思考的視覺設計指引：美感方向、字型、配色與版面，避免做出看起來像範本的預設設計。使用者要做網頁、登陸頁、儀表板、元件或 HTML 頁面，或要求「設計得好看一點」時使用。需要 React、shadcn/ui 或複雜狀態的網頁應用，另外載入 web-artifacts-builder。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
 ---
@@ -26,7 +26,12 @@ tools: [files]
   sans-serif`），或依使用者指示使用公司內部的資源。
 - **你看不到截圖。** 下面提到「截圖檢查」的地方，改成仔細檢查程式碼的
   結構與 CSS，並請使用者開啟頁面確認；有 webapp-testing skill 與沙盒時，
-  可以用 Playwright 檢查 DOM、版面尺寸與主控台錯誤。
+  可以用 Playwright 檢查 DOM、版面尺寸與主控台錯誤。自己檢查用的截圖不要
+  存在工作資料夾（那裡的檔案都會顯示給使用者），寫在 `/tmp`，或乾脆不截；
+  使用者要看畫面時，才把一張截圖存到工作資料夾。
+- **選哪個 skill：** 單一 HTML 檔就做得到的頁面（包括有分頁、篩選、圖表的
+  儀表板）用這個 skill 手寫；需要 React 元件、shadcn/ui、多頁路由或較複雜
+  的狀態管理時，改用 web-artifacts-builder，視覺方向仍照這裡的原則。
 
 ## 設計要從主題出發
 

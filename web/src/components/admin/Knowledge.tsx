@@ -739,6 +739,31 @@ function SettingsForm({
           "只用關鍵字",
         )}
         {field("chunkSize", "切片長度（字）", "每個片段的目標字數，至少 100。")}
+        <div className="form-row field-row">
+          <label htmlFor="kb-chunking">切片方式</label>
+          <select
+            id="kb-chunking"
+            className="field"
+            value={draft.chunking}
+            aria-describedby="kb-chunking-hint"
+            onChange={(event) =>
+              edit({
+                chunking: event.target.value as SettingsDraft["chunking"],
+              })
+            }
+          >
+            <option value="">
+              沒有設定（目前：
+              {effective.chunking === "regulation" ? "依條文" : "依段落"}）
+            </option>
+            <option value="paragraph">依段落</option>
+            <option value="regulation">依條文（法規、內規）</option>
+          </select>
+          <div id="kb-chunking-hint" className="help">
+            依條文時，「第 N
+            條」或「一、二、」一條一片，出處標出條號；不像法規的文件仍依段落。
+          </div>
+        </div>
         {field(
           "reranker",
           "Reranker",

@@ -5,7 +5,7 @@
  * 對話前選定，之後不能換；這段對話裡讀取的檔案都在這個資料夾裡。
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type Feedback,
   INTERRUPTED_STOP_REASON,
@@ -37,6 +37,7 @@ import {
 import { ApprovalCard } from "./ApprovalCard.tsx";
 import "./chat/chat.css";
 import { Composer } from "./Composer.tsx";
+import type { KnowledgeSource } from "./chat/citations.ts";
 import { FolderContext } from "./chat/folder.ts";
 import {
   agentKnowledge,
@@ -63,6 +64,7 @@ import {
   ShieldIcon,
 } from "./Icons.tsx";
 import { Link } from "./Sidebar.tsx";
+import { SourcePanel } from "./SourcePanel.tsx";
 import { AttachmentChip, TurnView } from "./Transcript.tsx";
 
 type Pending = PendingMessage & { sent: boolean };
@@ -78,6 +80,13 @@ export function Conversation({ id }: { id: string }) {
     open: null,
   });
   const [tab, setTab] = useState<PanelTab>("diff");
+  // 點了回覆裡的知識庫出處：右側面板改顯示原文，關掉或打開檔案時收起。
+  const [source, setSource] = useState<KnowledgeSource>();
+  const canOpenSources = project?.features?.knowledgeSources === true;
+  const openCitation = useCallback(
+    (next: KnowledgeSource) => setSource(next),
+    [],
+  );
   // 新對話頁交過來、或剛在這裡送出的訊息；伺服器的事件到了就換掉。
   const [pending, setPending] = useState<Pending | undefined>(() => {
     const handed = peekHandoff(id);
@@ -207,10 +216,12 @@ export function Conversation({ id }: { id: string }) {
 
   const panelOpen = panel.open ?? false;
   const openFile = (change: FileChange, nextTab: PanelTab = "preview") => {
+    setSource(undefined);
     setPanel({ open: true, path: change.path });
     setTab(nextTab);
   };
   const openPath = (path: string) => {
+    setSource(undefined);
     setPanel({ open: true, path });
     setTab("preview");
   };
@@ -357,6 +368,7 @@ export function Conversation({ id }: { id: string }) {
                   turn={turn}
                   onOpenFile={openFile}
                   onOpenPath={canLoadFiles ? openPath : undefined}
+                  onOpenCitation={canOpenSources ? openCitation : undefined}
                   canLoadFiles={canLoadFiles}
                   reply={
                     reply?.text
@@ -497,7 +509,10 @@ export function Conversation({ id }: { id: string }) {
           </div>
         </div>
       </main>
-      {panelOpen && (
+      {source && (
+        <SourcePanel source={source} onClose={() => setSource(undefined)} />
+      )}
+      {panelOpen && !source && (
         <FilePanel
           files={files}
           attachments={attachments}

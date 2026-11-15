@@ -34,6 +34,7 @@ const FIELD_LABELS: Record<string, string> = {
   maintainers: "維護者",
   embeddingModel: "Embedding 模型",
   chunkSize: "切片長度",
+  chunking: "切片方式",
   reranker: "Reranker",
   rerankCandidates: "候選數",
   minSimilarity: "相似度門檻",

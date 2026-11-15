@@ -69,6 +69,7 @@ const BASE: KnowledgeAdminBase = {
   retrieval: {
     embeddingModel: null,
     chunkSize: 500,
+    chunking: "paragraph",
     reranker: null,
     rerankCandidates: 20,
     minSimilarity: null,
@@ -101,6 +102,22 @@ describe("知識庫設定表單", () => {
         maintainers: ["u2"],
       },
     });
+  });
+
+  it("切片方式：選了送出值，改回沒有設定送 null", () => {
+    expect(
+      settingsChanges(BASE, {
+        ...toSettingsDraft(BASE),
+        chunking: "regulation",
+      }),
+    ).toEqual({ changes: { chunking: "regulation" } });
+    const base = {
+      ...BASE,
+      settings: { ...BASE.settings, chunking: "regulation" as const },
+    };
+    expect(
+      settingsChanges(base, { ...toSettingsDraft(base), chunking: "" }),
+    ).toEqual({ changes: { chunking: null } });
   });
 
   it("名稱不能空白，整數欄位不能有小數", () => {

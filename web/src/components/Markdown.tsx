@@ -15,15 +15,31 @@
  *
  * 外部網站的圖片不載入（index.html 的 CSP 也會擋），改顯示成連結
  * 「外部圖片：主機名稱」，被誘導的回覆就不能藉圖片網址把資料送出去。
+ *
+ * 有 citations 時（這一輪搜尋過知識庫），文字裡的 [編號] 變成出處標籤：
+ * 對得到搜尋結果的可以點，點了打開原文；對不到的標成「找不到出處」
+ * （見 chat/citations.ts）。程式碼與連結裡的 [編號] 不處理。
  */
 
-import { memo, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { fileUrl } from "../api.ts";
 import "./chat/chat.css";
 import { CodeBlock } from "./chat/CodeBlock.tsx";
+import {
+  type CitationMap,
+  type KnowledgeSource,
+  splitCitations,
+} from "./chat/citations.ts";
 import { externalImageHost, projectPath } from "./chat/filetype.ts";
 import { useFolder } from "./chat/folder.ts";
 import { displayMath } from "./chat/math.ts";
@@ -36,6 +52,105 @@ const remarkPlugins = [
   remarkGfm,
   [remarkMath, { singleDollarTextMath: false }],
 ] as NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]>;
+
+const CITE_PREFIX = "#cite-";
+
+/** mdast 的節點（只用到的欄位）。 */
+interface MdNode {
+  type: string;
+  value?: string;
+  url?: string;
+  children?: MdNode[];
+}
+
+// 這些節點裡的 [編號] 不是引用（程式碼、連結文字、HTML）。
+const NOT_CITATION = new Set([
+  "code",
+  "inlineCode",
+  "link",
+  "linkReference",
+  "definition",
+  "html",
+  "math",
+  "inlineMath",
+]);
+
+/** 把文字裡的 [編號] 換成指向 #cite-編號 的連結，再由 CitationLink 顯示。 */
+function remarkCitations() {
+  const walk = (node: MdNode) => {
+    if (!node.children) return;
+    const children: MdNode[] = [];
+    for (const child of node.children) {
+      if (child.type === "text" && child.value) {
+        for (const part of splitCitations(child.value)) {
+          if (typeof part === "string") {
+            children.push({ type: "text", value: part });
+            continue;
+          }
+          for (const number of part) {
+            children.push({
+              type: "link",
+              url: `${CITE_PREFIX}${number}`,
+              children: [{ type: "text", value: String(number) }],
+            });
+          }
+        }
+        continue;
+      }
+      if (!NOT_CITATION.has(child.type)) walk(child);
+      children.push(child);
+    }
+    node.children = children;
+  };
+  return (tree: MdNode) => walk(tree);
+}
+
+const citationPlugins = [...remarkPlugins, remarkCitations] as NonNullable<
+  Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]
+>;
+
+interface CitationState {
+  citations: CitationMap;
+  /** 點了出處；沒有時出處不能點（例如伺服器不提供原文）。 */
+  onOpen?: (source: KnowledgeSource) => void;
+}
+
+const CitationContext = createContext<CitationState | undefined>(undefined);
+
+/** 回覆裡的一個 [編號]。 */
+function CitationLink({ number }: { number: number }) {
+  const state = useContext(CitationContext);
+  const source = state?.citations.get(number);
+  if (!source) {
+    return (
+      <span
+        className="ch-cite ch-cite-missing"
+        title={`這一輪搜尋到的資料裡沒有第 ${number} 筆，這個引用可能不正確，請自行查證`}
+      >
+        {number}?
+      </span>
+    );
+  }
+  const onOpen = state?.onOpen;
+  if (!onOpen) {
+    return (
+      <span className="ch-cite" title={source.citation}>
+        {number}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="ch-cite"
+      title={`打開原文：${source.citation}`}
+      aria-label={`出處 ${number}：${source.citation}`}
+      onClick={() => onOpen(source)}
+    >
+      {number}
+    </button>
+  );
+}
 
 const MATH = /\$\$/;
 // 縮排在清單或引用（>）底下的程式碼區塊也要算進去。
@@ -148,11 +263,14 @@ function PlainImage({
 }
 
 const components: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer noopener">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) =>
+    href?.startsWith(CITE_PREFIX) ? (
+      <CitationLink number={Number(href.slice(CITE_PREFIX.length))} />
+    ) : (
+      <a href={href} target="_blank" rel="noreferrer noopener">
+        {children}
+      </a>
+    ),
   img: ({ src, alt, title }) => (
     <PlainImage src={src} alt={alt} title={title} />
   ),
@@ -201,26 +319,38 @@ export const Markdown = memo(function Markdown({
   text,
   streaming = false,
   localFiles = false,
+  citations,
+  onOpenCitation,
 }: {
   text: string;
   streaming?: boolean;
   /** 伺服器可以讀取工作資料夾的檔案（features.files）。 */
   localFiles?: boolean;
+  /** 這段文字可以引用的知識庫出處；沒有時 [編號] 照原樣顯示。 */
+  citations?: CitationMap;
+  /** 點了出處（打開原文）。 */
+  onOpenCitation?: (source: KnowledgeSource) => void;
 }) {
   const rehypePlugins = useRehypePlugins(text, streaming);
   const source = useMemo(
     () => (streaming ? text : displayMath(text)),
     [text, streaming],
   );
+  const state = useMemo(
+    () => (citations ? { citations, onOpen: onOpenCitation } : undefined),
+    [citations, onOpenCitation],
+  );
   return (
     <div className="md">
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={localFiles ? localComponents : components}
-      >
-        {source}
-      </ReactMarkdown>
+      <CitationContext.Provider value={state}>
+        <ReactMarkdown
+          remarkPlugins={state ? citationPlugins : remarkPlugins}
+          rehypePlugins={rehypePlugins}
+          components={localFiles ? localComponents : components}
+        >
+          {source}
+        </ReactMarkdown>
+      </CitationContext.Provider>
       {streaming && (
         <span className="caret" aria-hidden="true">
           ▍

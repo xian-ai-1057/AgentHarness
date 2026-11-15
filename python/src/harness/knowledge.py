@@ -51,6 +51,7 @@ import yaml
 
 from harness import datatypes
 from harness import llm
+from harness import regulation
 from harness import tools as tools_lib
 from harness import vectorstore
 
@@ -58,6 +59,9 @@ TEXT_SUFFIXES = (".md", ".markdown", ".txt")
 PDF_SUFFIX = ".pdf"
 OFFICE_SUFFIXES = (".docx", ".pptx", ".xlsx")
 LABELS_FILE = "labels.yaml"
+# 切片方式：paragraph 依段落合併到 chunk_size；regulation 一條（一點）一片，
+# 不像法規的文件仍依段落（見 regulation 模組）。
+CHUNKING_MODES = ("paragraph", "regulation")
 TOOL_NAME = "search_knowledge"
 VECTOR_FILE = "vectors.sqlite3"
 # 舊版把 embedding 存成 JSON 的檔名，讀到時搬進向量資料庫。
@@ -177,6 +181,8 @@ class Knowledge:
         embedding_model: litellm 的 embedding 模型名稱，None 表示只用
             關鍵字檢索。
         chunk_size: 每個片段的目標字數。
+        chunking: 切片方式，"paragraph"（預設，依段落）或 "regulation"
+            （法規、內規一條一片，見 regulation 模組）。
         cache_dir: 存放向量資料庫的資料夾，None 表示不存檔。
         vector_store: 存放 embedding 的向量資料庫。
         reranker: litellm 的 rerank 模型名稱，None 表示不重新排序。
@@ -200,6 +206,7 @@ class Knowledge:
         *,
         embedding_model: str | None = None,
         chunk_size: int = 800,
+        chunking: str = "paragraph",
         cache_dir: str | pathlib.Path | None = None,
         vector_store: vectorstore.VectorStore | None = None,
         reranker: str | None = None,
@@ -214,6 +221,10 @@ class Knowledge:
     ) -> None:
         if chunk_size < 100:
             raise ValueError("chunk_size 至少要 100")
+        if chunking not in CHUNKING_MODES:
+            raise ValueError(
+                f"chunking 必須是 {'、'.join(CHUNKING_MODES)} 其中之一"
+            )
         if rerank_candidates < 1:
             raise ValueError("rerank_candidates 至少要 1")
         if min_similarity is not None:
@@ -230,6 +241,7 @@ class Knowledge:
         self.path = pathlib.Path(path) if path is not None else None
         self.embedding_model = embedding_model
         self.chunk_size = chunk_size
+        self.chunking = chunking
         self.cache_dir = pathlib.Path(cache_dir) if cache_dir else None
         if vector_store is None:
             location = self.cache_dir / VECTOR_FILE if self.cache_dir else None
@@ -567,6 +579,24 @@ class Knowledge:
         self, sections: list[Section], source: str, labels: list[str]
     ) -> list[Chunk]:
         """把解析出的段落切成片段，標上 labels.yaml 與文件自己的標籤。"""
+        if self.chunking == "regulation":
+            pieces = regulation.split_regulation(
+                [(section.location, section.text) for section in sections],
+                self.chunk_size,
+            )
+            if pieces is not None:
+                merged = tuple(
+                    sorted(
+                        {
+                            *labels,
+                            *(tag for part in sections for tag in part.labels),
+                        }
+                    )
+                )
+                return [
+                    Chunk(source, location, text, merged)
+                    for location, text in pieces
+                ]
         chunks = []
         for section in sections:
             merged = tuple(sorted({*labels, *section.labels}))

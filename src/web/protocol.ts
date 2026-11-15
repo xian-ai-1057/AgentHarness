@@ -261,6 +261,11 @@ export interface ServerFeatures {
    */
   knowledgeBases?: boolean;
   /**
+   * GET /api/knowledge/source?base=&path=（Python 版）：回覆裡的知識庫出處
+   * 可以點，打開原文（PDF 跳到出處的頁碼）。只送得出這個人搜尋得到的文件。
+   */
+  knowledgeSources?: boolean;
+  /**
    * 稽核紀錄（Python 版）：管理平台可以查詢與匯出登入、成員、群組、設定
    * 與工具核准的紀錄（見 AuditEntry）。
    */
@@ -405,6 +410,8 @@ export interface KnowledgeSettings {
   description?: string;
   embeddingModel?: string | null;
   chunkSize?: number | null;
+  /** 切片方式：paragraph（依段落，預設）或 regulation（法規一條一片）。 */
+  chunking?: "paragraph" | "regulation" | null;
   reranker?: string | null;
   rerankCandidates?: number | null;
   minSimilarity?: number | null;

@@ -11,6 +11,8 @@ export interface SettingsDraft {
   description: string;
   embeddingModel: string;
   chunkSize: string;
+  /** "" 表示沒有設定（沿用預設或 knowledge 區塊）。 */
+  chunking: "" | "paragraph" | "regulation";
   reranker: string;
   rerankCandidates: string;
   minSimilarity: string;
@@ -24,6 +26,7 @@ const FLOAT_KEYS = ["minSimilarity", "minRerankScore"] as const;
 
 const LABELS: Record<string, string> = {
   chunkSize: "切片長度",
+  chunking: "切片方式",
   rerankCandidates: "候選數",
   minSimilarity: "相似度門檻",
   minRerankScore: "Rerank 分數門檻",
@@ -38,6 +41,7 @@ export function toSettingsDraft(base: KnowledgeAdminBase): SettingsDraft {
     description: base.description,
     embeddingModel: text(own.embeddingModel),
     chunkSize: text(own.chunkSize),
+    chunking: own.chunking ?? "",
     reranker: text(own.reranker),
     rerankCandidates: text(own.rerankCandidates),
     minSimilarity: text(own.minSimilarity),
@@ -64,6 +68,9 @@ export function settingsChanges(
   }
   if (draft.description.trim() !== initial.description) {
     changes.description = draft.description.trim();
+  }
+  if (draft.chunking !== initial.chunking) {
+    changes.chunking = draft.chunking || null;
   }
   for (const key of TEXT_KEYS) {
     const value = draft[key].trim();

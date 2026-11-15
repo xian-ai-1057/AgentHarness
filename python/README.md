@@ -646,6 +646,12 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 群組決定成員能搜尋哪些知識庫（見
 [說明文件的「分成好幾個知識庫」](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#分成好幾個知識庫)）。
 
+放法規、內規的知識庫可以設定 `chunking: regulation`，依「第 N 條」或
+「一、二、」一條一片，出處標到第幾條（見
+[依條文切片](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#依條文切片)）。
+網頁版回覆裡的 `[1]` 可以點，在右側打開原文（PDF 跳到那一頁）；對不到
+搜尋結果的編號會標成「可能不正確」。
+
 - **檢索方式。** 預設用關鍵字比對（BM25），不需要任何模型，中文也能
   用（以單字與相鄰兩字比對，不用另外斷詞）。設定 `embeddingModel` 後
   再加上語意檢索，兩者的排名合併（hybrid search），同義詞、換句話說

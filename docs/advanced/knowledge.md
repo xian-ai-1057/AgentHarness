@@ -36,6 +36,7 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
   相似的片段丟掉；也可以用 reranker 重新評估前幾名的相關度（見
   [相似度門檻與 reranker](#相似度門檻與-reranker)）。
 - **切片。** 依段落切成約 `chunkSize` 字的片段，不會從段落中間切開。
+  法規、內規類的文件可以改成一條一片（見[依條文切片](#依條文切片)）。
 - 支援 `.md`、`.txt`、`.pdf`、`.docx`、`.pptx`、`.xlsx`；其他格式會略過，
   用 `pyharness knowledge` 可以看到哪些檔案被略過。Word、PowerPoint、
   Excel 用 Python 內建的套件讀取，不需要另外安裝；讀取 PDF 需要 pypdf：
@@ -53,6 +54,7 @@ knowledge:
   path: knowledge                              # 預設
   embeddingModel: openai/text-embedding-3-small  # 省略時只用關鍵字
   chunkSize: 800                               # 預設
+  chunking: paragraph           # 預設；regulation 是依條文切片
   minSimilarity: 0.3            # 選用，語意相似度門檻（需要 embeddingModel）
   reranker: cohere/rerank-v3.5  # 選用，重新排序用的模型
   rerankCandidates: 20          # 交給 reranker 的候選數，預設 20
@@ -98,8 +100,8 @@ knowledge/
 ```
 
 - **每個知識庫是獨立的。** 有自己的名稱、說明、資料夾與檢索設定
-  （`embeddingModel`、`chunkSize`、`reranker`、`rerankCandidates`、
-  `minSimilarity`、`minRerankScore`）；沒寫的檢索設定沿用 `knowledge`
+  （`embeddingModel`、`chunkSize`、`chunking`、`reranker`、
+  `rerankCandidates`、`minSimilarity`、`minRerankScore`）；沒寫的檢索設定沿用 `knowledge`
   區塊的。
 - **原本的 `knowledge/` 就是預設知識庫**（識別碼 `default`），舊的設定
   不用改。其他知識庫的資料夾放在 `knowledge/` 裡面時，預設知識庫不會
@@ -140,6 +142,34 @@ pyharness knowledge -b hr,it "特休怎麼算"
 文件、調整設定與試搜尋，不必手動改 `harness.yaml`；每個知識庫還可以
 指定維護者，讓部門自己更新文件。群組決定成員可以搜尋哪些知識庫，成員
 在對話裡勾選這次要搜尋的知識庫（見[網頁版的知識庫](/guide/web#知識庫)）。
+
+## 依條文切片
+
+法規、自律規範與公司內規通常一條（或一點）講一件事。依段落與字數切片
+時，一條可能被切成兩半或和下一條黏在一起，回答時就引不準是哪一條。
+放法規類文件的知識庫可以設定 `chunking: regulation`：
+
+```yaml
+knowledgeBases:
+  regs:
+    name: 主管機關規範
+    chunking: regulation
+```
+
+- **條文**：文件裡有 3 條以上依序出現的「第 N 條」（法律、法規命令、
+  自律規範），每條一片，出處記成 `第二章 總則 › 第五條`。「第五條之一」
+  也算一條；全形數字、中文數字都可以。
+- **要點**：沒有條文、但有 3 點以上依序出現的「一、」「二、」（行政
+  規則、公司內規的要點、辦法），每點一片，出處記成 `第五點`。
+- **其他文件照舊依段落切。** 同一個知識庫裡混放會議紀錄、說明文件也
+  沒關係。
+- 條號必須不倒退、一次最多跳 5 條（要點必須剛好是下一點），內文提到
+  「依第三條規定」不會被當成新的一條。PDF 的出處會加上這一條開始的
+  頁碼，例如 `第五條（第 3 頁）`。單一條文超過 `chunkSize` 時依句號再
+  切，出處相同。
+
+網頁版在「管理平台 → 知識庫 → 設定」的「切片方式」選擇；改了之後會
+重建這個知識庫的索引。
 
 ## 文件解析
 

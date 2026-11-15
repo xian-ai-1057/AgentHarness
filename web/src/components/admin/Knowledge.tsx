@@ -39,11 +39,34 @@ import { ConfirmDialog, Modal } from "../shell/Dialog.tsx";
 import { Field } from "../shell/Field.tsx";
 import { showToast } from "../shell/toast.tsx";
 import {
+  describeSearch,
   draftDirty,
   type SettingsDraft,
   settingsChanges,
   toSettingsDraft,
 } from "./knowledgeForm.ts";
+import {
+  EmbeddingSelect,
+  RerankerSelect,
+  useKnowledgeModels,
+} from "./RetrievalSelects.tsx";
+
+const SEARCH_LABELS = {
+  keyword: "關鍵字（精確比對）",
+  bm25: "演算法（BM25）",
+  hybrid: "BM25 + 語意（embedding）",
+} as const;
+
+/** 其他知識庫沒設定時沿用的值：預設知識庫實際生效的檢索設定。 */
+function inheritedRetrieval(list: KnowledgeAdminList) {
+  const builtin = list.bases.find((item) => item.builtin);
+  return builtin
+    ? {
+        search: describeSearch(builtin.retrieval),
+        reranker: builtin.retrieval.reranker,
+      }
+    : { search: "演算法（BM25）", reranker: null };
+}
 
 export function Knowledge() {
   const [list, setList] = useState<KnowledgeAdminList>();
@@ -172,6 +195,7 @@ export function Knowledge() {
       {adding &&
         createPortal(
           <AddKnowledgeDialog
+            inherited={list ? inheritedRetrieval(list) : undefined}
             onClose={() => setAdding(false)}
             onAdded={async (id) => {
               setAdding(false);
@@ -186,9 +210,11 @@ export function Knowledge() {
 }
 
 function AddKnowledgeDialog({
+  inherited,
   onClose,
   onAdded,
 }: {
+  inherited?: ReturnType<typeof inheritedRetrieval>;
   onClose: () => void;
   onAdded: (id: string) => void;
 }) {
@@ -197,6 +223,11 @@ function AddKnowledgeDialog({
   const [name, setName] = useState("");
   const [id, setId] = useState("");
   const [description, setDescription] = useState("");
+  const [search, setSearch] = useState<
+    Pick<SettingsDraft, "searchMode" | "embeddingModel">
+  >({ searchMode: "", embeddingModel: "" });
+  const [reranker, setReranker] = useState("");
+  const models = useKnowledgeModels();
   const [error, setError] = useState<{ name?: string; id?: string }>({});
   const [busy, setBusy] = useState(false);
 
@@ -215,6 +246,12 @@ function AddKnowledgeDialog({
         id: id.trim(),
         name: name.trim(),
         description: description.trim(),
+        // 沒選的不寫，沿用預設知識庫。
+        ...(search.searchMode && { searchMode: search.searchMode }),
+        ...(search.embeddingModel.trim() && {
+          embeddingModel: search.embeddingModel.trim(),
+        }),
+        ...(reranker.trim() && { reranker: reranker.trim() }),
       });
       onAdded(created.id);
     } catch (failure) {
@@ -271,6 +308,20 @@ function AddKnowledgeDialog({
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />
+          <EmbeddingSelect
+            builtin={false}
+            inherited={inherited?.search}
+            fields={search}
+            models={models}
+            onChange={setSearch}
+          />
+          <RerankerSelect
+            builtin={false}
+            inherited={inherited?.reranker}
+            value={reranker}
+            models={models}
+            onChange={setReranker}
+          />
         </div>
         <div className="dialog-actions">
           <button type="button" className="btn btn-outline" onClick={onClose}>
@@ -325,6 +376,7 @@ function KnowledgeEditor({
       {admin && (
         <SettingsForm
           base={base}
+          inherited={inheritedRetrieval(list)}
           members={members}
           maintainers={list.maintainers}
           onSaved={onChanged}
@@ -477,7 +529,7 @@ function Documents({
       {index && !("error" in index) && (
         <p className="member-meta">
           {index.chunks} 個片段 · 檢索方式：
-          {index.embedding ? "關鍵字 + 語意（embedding）" : "關鍵字"}
+          {SEARCH_LABELS[index.searchMode] ?? "關鍵字"}
           {index.reranker ? "，再用 reranker 重新排序" : ""}
         </p>
       )}
@@ -651,11 +703,13 @@ function SearchTest({ base }: { base: KnowledgeAdminBase }) {
 
 function SettingsForm({
   base,
+  inherited,
   members,
   maintainers,
   onSaved,
 }: {
   base: KnowledgeAdminBase;
+  inherited: ReturnType<typeof inheritedRetrieval>;
   members: MemberInfo[];
   maintainers: boolean;
   onSaved: () => Promise<void>;
@@ -664,6 +718,7 @@ function SettingsForm({
   const [draft, setDraft] = useState<SettingsDraft>(initial);
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
+  const models = useKnowledgeModels();
   const dirty = draftDirty(base, draft);
 
   const edit = (changes: Partial<SettingsDraft>) => {
@@ -736,12 +791,13 @@ function SettingsForm({
       <div className="dialog-fields">
         {field("name", "名稱", "顯示在對話的知識庫選單與搜尋結果的出處。")}
         {field("description", "說明", "agent 會看到這段說明，判斷要不要搜尋。")}
-        {field(
-          "embeddingModel",
-          "Embedding 模型",
-          "設定後加上語意檢索；留空只用關鍵字。",
-          "只用關鍵字",
-        )}
+        <EmbeddingSelect
+          builtin={base.builtin}
+          inherited={inherited.search}
+          fields={draft}
+          models={models}
+          onChange={edit}
+        />
         {field("chunkSize", "切片長度（字）", "每個片段的目標字數，至少 100。")}
         <div className="form-row field-row">
           <label htmlFor="kb-chunking">切片方式</label>
@@ -768,12 +824,13 @@ function SettingsForm({
             條」或「一、二、」一條一片，出處標出條號；不像法規的文件仍依段落。
           </div>
         </div>
-        {field(
-          "reranker",
-          "Reranker",
-          "重新排序用的模型，選填。",
-          "不重新排序",
-        )}
+        <RerankerSelect
+          builtin={base.builtin}
+          inherited={inherited.reranker}
+          value={draft.reranker}
+          models={models}
+          onChange={(reranker) => edit({ reranker })}
+        />
         {field("rerankCandidates", "交給 reranker 的候選數", "預設 20。")}
         {field(
           "minSimilarity",

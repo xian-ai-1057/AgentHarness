@@ -18,6 +18,7 @@ import type {
   KnowledgeAdminList,
   KnowledgeDocuments,
   KnowledgeHit,
+  KnowledgeModelChoices,
   KnowledgeSettings,
   KnowledgeSourceText,
   MemberInfo,
@@ -219,6 +220,9 @@ export const api = {
 
   // 知識庫（features.knowledgeBases）。
   knowledge: () => request<KnowledgeAdminList>("GET", "/knowledge"),
+  /** 設定的下拉選單：模型連線上的 embedding 與 rerank 模型。 */
+  knowledgeModels: () =>
+    request<KnowledgeModelChoices>("GET", "/knowledge/models"),
   createKnowledge: (base: { id: string } & KnowledgeSettings) =>
     request<{ id: string }>("POST", "/knowledge", base),
   updateKnowledge: (

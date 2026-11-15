@@ -3,6 +3,9 @@
 用本機的假伺服器代替各家的 API，記下收到的網址與標頭。
 """
 
+import asyncio
+import json
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
@@ -49,6 +52,27 @@ RESPONSES = {
     "/openrouter": {"data": [{"id": "meta/llama-4", "name": "Llama 4"}]},
     "/api/tags": {"models": [{"name": "hermes3:latest"}, {"name": "qwen3"}]},
 }
+# Anthropic 的清單分兩頁：第一頁 has_more，第二頁用 after_id 取。
+ANTHROPIC_PAGES = {
+    None: {
+        "data": [{"id": "claude-opus-5-5", "display_name": "Claude Opus 5.5"}],
+        "has_more": True,
+        "first_id": "claude-opus-5-5",
+        "last_id": "claude-opus-5-5",
+    },
+    "claude-opus-5-5": {
+        "data": [
+            {"id": "claude-haiku-5-5", "display_name": "Claude Haiku 5.5"}
+        ],
+        "has_more": False,
+        "first_id": "claude-haiku-5-5",
+        "last_id": "claude-haiku-5-5",
+    },
+}
+ANTHROPIC_ERROR = {
+    "type": "error",
+    "error": {"type": "authentication_error", "message": "invalid x-api-key"},
+}
 
 
 @pytest.fixture
@@ -57,11 +81,39 @@ async def fake(monkeypatch):
     seen = []
 
     async def handle(request: web.Request) -> web.Response:
-        seen.append((request.path, dict(request.headers)))
+        seen.append((request.path_qs, dict(request.headers)))
         if request.path == "/broken/models":
-            return web.Response(text="<html>not json</html>")
+            return web.Response(
+                text="<html>not json</html>", content_type="text/html"
+            )
         if request.path == "/denied/models":
             return web.Response(status=401)
+        if request.path == "/badkey/models":
+            return web.json_response(ANTHROPIC_ERROR, status=401)
+        if request.path == "/forbidden/models":
+            return web.json_response(
+                {"error": {"message": "Key not allowed to list models"}},
+                status=403,
+            )
+        if request.path == "/litellm-down/models":
+            return web.json_response({"detail": "upstream down"}, status=500)
+        if request.path == "/paged/v1/models":
+            if request.headers.get("x-api-key") != "k":
+                return web.json_response(ANTHROPIC_ERROR, status=401)
+            return web.json_response(
+                ANTHROPIC_PAGES[request.query.get("after_id")]
+            )
+        if request.path == "/chunked/models":
+            # 分好幾段送出，模擬真實 API 的 chunked 回應。
+            response = web.StreamResponse()
+            response.content_type = "application/json"
+            await response.prepare(request)
+            body = json.dumps(RESPONSES["/v1/models"]).encode()
+            for start in range(0, len(body), 20):
+                await response.write(body[start : start + 20])
+                await asyncio.sleep(0.01)
+            await response.write_eof()
+            return response
         body = RESPONSES.get(request.path)
         if body is None:
             return web.Response(status=404)
@@ -169,7 +221,10 @@ async def test_ollama_lists_local_models(fake):
         ("anthropic", "", "", "請先填上金鑰"),
         (providers.ENDPOINT, "", "", "請先填上端點網址"),
         (providers.ENDPOINT, "/denied", "k", "金鑰不正確"),
-        (providers.ENDPOINT, "/broken", "k", "不是模型清單"),
+        (providers.ENDPOINT, "/badkey", "k", "金鑰不正確.*invalid x-api-key"),
+        (providers.ENDPOINT, "/forbidden", "k", "沒有權限.*Key not allowed"),
+        (providers.ENDPOINT, "/litellm-down", "k", "HTTP 500.*upstream down"),
+        (providers.ENDPOINT, "/broken", "k", "不是模型清單.*網頁"),
         (providers.ENDPOINT, "/missing/v1", "k", "不支援列出模型"),
         ("nope", "", "", "不認得"),
     ],
@@ -191,3 +246,63 @@ async def test_unreachable_endpoints_are_explained():
         await model_catalog.list_models(
             providers.ENDPOINT, "http://127.0.0.1:9", "k"
         )
+
+
+async def test_responses_sent_in_pieces_are_read_in_full(fake):
+    base, _ = fake
+
+    found = await model_catalog.list_models(
+        providers.ENDPOINT, f"{base}/chunked", "k"
+    )
+
+    assert names(found) == ["gpt-oss-120b", "qwen3-32b"]
+
+
+async def test_anthropic_follows_pages(fake, monkeypatch):
+    base, seen = fake
+    monkeypatch.setitem(
+        model_catalog._OFFICIAL, "anthropic", f"{base}/paged/v1/models"
+    )
+
+    found = await model_catalog.list_models("anthropic", api_key="k")
+
+    assert names(found) == [
+        "anthropic/claude-haiku-5-5",
+        "anthropic/claude-opus-5-5",
+    ]
+    assert [path for path, _ in seen] == [
+        "/paged/v1/models?limit=1000",
+        "/paged/v1/models?limit=1000&after_id=claude-opus-5-5",
+    ]
+    assert seen[0][1]["anthropic-version"] == model_catalog.ANTHROPIC_VERSION
+    assert "Authorization" not in seen[0][1]
+
+
+@pytest.mark.parametrize("suffix", ["", "/v1", "/v1/"])
+async def test_anthropic_as_an_endpoint_uses_its_own_api(
+    fake, monkeypatch, suffix
+):
+    """端點填 https://api.anthropic.com 時，用 x-api-key 而不是 Bearer。"""
+    base, seen = fake
+    monkeypatch.setattr(model_catalog, "ANTHROPIC_HOST", "127.0.0.1")
+
+    found = await model_catalog.list_models(
+        providers.ENDPOINT, f"{base}/paged{suffix}", "k"
+    )
+
+    # 端點的名稱原樣使用，不加 anthropic/。
+    assert names(found) == ["claude-haiku-5-5", "claude-opus-5-5"]
+    assert [item.label for item in found] == [
+        "Claude Haiku 5.5",
+        "Claude Opus 5.5",
+    ]
+    assert seen[0][1]["x-api-key"] == "k"
+    assert "Authorization" not in seen[0][1]
+
+
+async def test_anthropic_endpoint_needs_a_key(fake, monkeypatch):
+    base, _ = fake
+    monkeypatch.setattr(model_catalog, "ANTHROPIC_HOST", "127.0.0.1")
+
+    with pytest.raises(model_catalog.CatalogError, match="Anthropic 的金鑰"):
+        await model_catalog.list_models(providers.ENDPOINT, f"{base}/v1", "")

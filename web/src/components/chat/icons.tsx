@@ -33,6 +33,12 @@ export const PlusIcon = (p: IconProps) => (
   </Svg>
 );
 
+export const MinusIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 12h14" />
+  </Svg>
+);
+
 export const CopyIcon = (p: IconProps) => (
   <Svg {...p}>
     <rect x="9" y="9" width="12" height="12" rx="2" />

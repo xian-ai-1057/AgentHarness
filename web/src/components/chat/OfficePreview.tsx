@@ -20,6 +20,7 @@ import { formatBytes } from "../../format.ts";
 import { useStore } from "../../store.ts";
 import { columnName } from "./columns.ts";
 import { useFolder } from "./folder.ts";
+import { listenZoom, useZoomContext, useZoomTarget } from "./PreviewZoom.tsx";
 import type { Sheet } from "./xlsx.ts";
 
 /** 超過這個大小就不在瀏覽器裡轉換，請使用者下載。 */
@@ -118,6 +119,7 @@ async function readSheets(data: ArrayBuffer): Promise<Sheet[]> {
 export function SheetPreview({ path }: { path: string }) {
   const load = useDownload(path, readSheets);
   const [active, setActive] = useState(0);
+  const zoom = useZoomTarget(load.state === "ready");
   if (load.state !== "ready") return <Status load={load} />;
   const sheets = load.value;
   if (sheets.length === 0) {
@@ -150,7 +152,7 @@ export function SheetPreview({ path }: { path: string }) {
         <div className="ch-preview-state">這個工作表是空的。</div>
       ) : (
         <div className="ch-csv-scroll ch-sheet-scroll">
-          <table>
+          <table data-zoom-target="" style={zoom === 1 ? undefined : { zoom }}>
             <thead>
               <tr>
                 <th className="ch-sheet-corner" />
@@ -306,12 +308,12 @@ function Converted({
 const FRAME_STYLE = `
 html, body { margin: 0; background: #e9e9ec; }
 body { padding: 16px 0; font-family: system-ui, sans-serif; }
-.docx-wrapper { background: transparent !important; padding: 0 !important; }
+.docx-wrapper { background: transparent !important; padding: 0 !important; align-items: safe center !important; }
 .docx-wrapper > section.docx {
   margin: 0 auto 16px !important;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
 }
-.ch-slides { display: flex; flex-direction: column; align-items: center; }
+.ch-slides { display: flex; flex-direction: column; align-items: safe center; }
 .ch-slides .pptx-preview-wrapper { background: transparent !important; overflow: visible !important; height: auto !important; }
 .ch-slides .pptx-preview-slide-wrapper { margin: 0 auto 16px !important; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18); }
 `;
@@ -330,13 +332,22 @@ type Render = (
 function IsolatedFrame({
   title,
   render,
+  selector,
 }: {
   title: string;
   render: Render | undefined;
+  /** 轉好的內容（頁面或投影片的外框），縮放時調整它的 CSS zoom。 */
+  selector: string;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string>();
+  const [rendered, setRendered] = useState(0);
+  const zoom = useZoomTarget(rendered > 0 && !error);
+  const context = useZoomContext();
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const setZoom = context?.setZoom;
 
   useEffect(() => {
     const doc = ref.current?.contentDocument;
@@ -344,14 +355,39 @@ function IsolatedFrame({
     let alive = true;
     doc.body.replaceChildren();
     setError(undefined);
+    setRendered(0);
     const width = Math.max(320, doc.documentElement.clientWidth - 32);
-    render(doc.body, doc.head, width).catch((failed: Error) => {
-      if (alive) setError(failure(failed));
-    });
+    render(doc.body, doc.head, width)
+      .then(() => {
+        if (!alive) return;
+        fitWidth(doc.body, selector);
+        setRendered((count) => count + 1);
+      })
+      .catch((failed: Error) => {
+        if (alive) setError(failure(failed));
+      });
     return () => {
       alive = false;
     };
-  }, [loaded, render]);
+  }, [loaded, render, selector]);
+
+  // 縮放：符合寬度的比例乘上使用者選的比例。
+  useEffect(() => {
+    const body = ref.current?.contentDocument?.body;
+    if (!body || rendered === 0) return;
+    const content = body.querySelector<HTMLElement>(selector);
+    if (!content) return;
+    const fit = Number(content.dataset.fit ?? 1);
+    content.style.zoom = String(fit * zoom);
+  }, [rendered, selector, zoom]);
+
+  // 滑鼠在文件上時，Ctrl（⌘）＋滾輪等事件在 iframe 裡，要在那裡接手。
+  // iframe 不能執行程式，這些監聽是這個網頁加上去的。
+  useEffect(() => {
+    const doc = ref.current?.contentDocument;
+    if (!doc || !setZoom || rendered === 0) return;
+    return listenZoom(doc, () => zoomRef.current, setZoom);
+  }, [rendered, setZoom]);
 
   return (
     <div className="ch-office">
@@ -386,11 +422,16 @@ function WordSimple({ path, title }: { path: string; title: string }) {
       // altChunk 是嵌在 Word 檔裡的整段 HTML，不顯示。
       renderAltChunks: false,
     });
+    // docx-preview 會清空 head，把頁面置中與灰底的樣式放回去。
+    const style = head.ownerDocument.createElement("style");
+    style.textContent = FRAME_STYLE;
+    head.prepend(style);
     safeLinks(body);
-    fitWidth(body, ".docx-wrapper");
   });
   if (load.state !== "ready") return <Status load={load} />;
-  return <IsolatedFrame title={title} render={render} />;
+  return (
+    <IsolatedFrame title={title} render={render} selector=".docx-wrapper" />
+  );
 }
 
 function SlidesSimple({ path, title }: { path: string; title: string }) {
@@ -408,10 +449,9 @@ function SlidesSimple({ path, title }: { path: string; title: string }) {
     });
     await previewer.preview(data);
     safeLinks(body);
-    fitWidth(body, ".ch-slides");
   });
   if (load.state !== "ready") return <Status load={load} />;
-  return <IsolatedFrame title={title} render={render} />;
+  return <IsolatedFrame title={title} render={render} selector=".ch-slides" />;
 }
 
 /**
@@ -433,16 +473,18 @@ function safeLinks(body: HTMLElement) {
 }
 
 /**
- * 頁面比面板寬時整個縮小（CSS zoom），不必左右捲動，左邊也不會被切掉。
+ * 頁面比面板寬時整個縮小（CSS zoom），100% 時不必左右捲動，左邊也不會
+ * 被切掉。比例記在 data-fit，使用者縮放時乘上去。
  */
 function fitWidth(body: HTMLElement, selector: string) {
   const content = body.querySelector<HTMLElement>(selector);
   if (!content) return;
+  content.style.zoom = "";
   const available = body.clientWidth - 16;
   const width = content.scrollWidth;
-  if (width > available) {
-    content.style.zoom = String(available / width);
-  }
+  const fit = width > available ? available / width : 1;
+  content.dataset.fit = String(fit);
+  content.style.zoom = String(fit);
 }
 
 /** 檔案下載好之後，產生把它畫進 iframe 的函式。 */

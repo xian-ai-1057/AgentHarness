@@ -41,10 +41,15 @@ services:
       HARNESS_SANDBOX_IMAGE: harness-sandbox
       HARNESS_SANDBOX_VOLUME: harness-data
       HARNESS_SANDBOX_NOTES: >-
-        已安裝 pandas、numpy、openpyxl、pdfplumber、python-docx、python-pptx
-        （製作簡報 pptx）、matplotlib（圖表可以直接使用中文）、LibreOffice
-        （soffice --headless --convert-to pdf 檔名，可以把 Word、PowerPoint
-        轉成 PDF）。
+        已安裝 pandas、numpy、openpyxl、pdfplumber、pypdf、reportlab、
+        python-docx、python-pptx、markitdown、matplotlib（圖表可以直接使用
+        中文）、LibreOffice（soffice --headless --convert-to pdf 檔名，可以把
+        Word、PowerPoint 轉成 PDF）、pandoc、qpdf、poppler-utils、tesseract
+        （OCR，含繁中 chi_tra），以及 Node.js 與 pptxgenjs、docx、pdf-lib
+        （node 腳本直接 require，不用安裝）。要執行 shell 指令時在程式裡用
+        subprocess。處理 Excel、Word、PowerPoint、PDF 檔之前，先用 load_skill
+        載入對應的 xlsx、docx、pptx、pdf 技能（有的話），它們的腳本在
+        /opt/skills/。
     volumes:
       # 專案、帳號、每個人的對話紀錄、上傳的檔案與金鑰都在這個 volume 裡。
       - harness-data:/assistant
@@ -55,8 +60,10 @@ services:
   # 只用來建置沙盒的映像檔，本身不會持續執行。
   sandbox-image:
     build:
-      context: docker
-      dockerfile: sandbox.Dockerfile
+      # 建置目錄是 repo 根目錄：內建 skills 的腳本（python/src/harness/
+      # builtin/skills）要一併裝進映像檔的 /opt/skills。
+      context: .
+      dockerfile: docker/sandbox.Dockerfile
       args: *proxy-args
     image: harness-sandbox
     command: ["true"]

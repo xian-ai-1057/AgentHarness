@@ -1039,8 +1039,7 @@ class Workspace:
             if agent is None:
                 visible = self._visible_agents(self._access(user))
                 agent = visible[0] if visible else self.project.default_agent
-            if not self._knows_agent(user, agent):
-                raise WebError(400, f"沒有 {agent} 這個 agent")
+            self._require_agent(user, agent)
             self._check_run_allowed(user, agent)
             # 先檢查選項，不合法時不會留下空的對話。
             chosen = self._checked_options(
@@ -2509,6 +2508,19 @@ class Workspace:
             or self._own_agent(user, name) is not None
         )
 
+    def _require_agent(self, user: accounts_lib.User, name: str) -> None:
+        """用來開新對話的 agent 必須存在。
+
+        Raises:
+            WebError: 自建的 agent 不存在或是別人的（一律 404，不透露
+                存不存在）；專案沒有這個 agent（400）。
+        """
+        if self._knows_agent(user, name):
+            return
+        if user_agents_lib.is_key(name):
+            raise WebError(404, "找不到這個 Agent，可能已經被刪除。")
+        raise WebError(400, f"沒有 {name} 這個 agent")
+
     def _agent_entry(self, name: str) -> agents_lib.Agent:
         """專案的 agent，或依目前設定組出來的自建 agent。
 
@@ -3096,8 +3108,7 @@ class Workspace:
         return migration.user_dir(self.project.root, owner) / "sessions"
 
     def _create(self, user: accounts_lib.User, agent: str) -> _State:
-        if not self._knows_agent(user, agent):
-            raise WebError(400, f"沒有 {agent} 這個 agent")
+        self._require_agent(user, agent)
         session = sessions_lib.create(self._sessions_dir(user.id))
         state = self._track(session, agent, _now(), user.id)
         self._save_meta(state)

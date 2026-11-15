@@ -16,6 +16,10 @@ export type Route =
   | { page: "chats" }
   /** 一個專案（對話的分類）裡的對話。 */
   | { page: "category"; id: string }
+  /** 自建 Agent：我的 Agent 與管理者提供的 Agent。 */
+  | { page: "agents" }
+  /** 建立（id 是 new）或編輯自己的 Agent。 */
+  | { page: "agentEdit"; id: string }
   | { page: "settings"; section: SettingsSection }
   /**
    * 管理平台：和聊天介面分開的版面，只有管理者能用。section 沒有指定
@@ -64,6 +68,9 @@ function parse(path: string): Route {
   if (parts[0] === "work") return { page: "work" };
   if (parts[0] === "chats") return { page: "chats" };
   if (parts[0] === "p" && parts[1]) return { page: "category", id: parts[1] };
+  if (parts[0] === "agents") {
+    return parts[1] ? { page: "agentEdit", id: parts[1] } : { page: "agents" };
+  }
   if (parts[0] === "admin") {
     return { page: "admin", section: adminSection(parts[1]) };
   }

@@ -13,6 +13,7 @@ import {
   type SessionDetail,
   type SessionOptions,
 } from "../../../src/web/protocol.ts";
+import { sessionAgentLabel } from "../agents.ts";
 import { api } from "../api.ts";
 import { isMember } from "../auth.ts";
 import { activeFolder, folderLabel, withoutFolder } from "../folders.ts";
@@ -319,11 +320,12 @@ export function Conversation({ id }: { id: string }) {
         summary.activity.kind === "thinking") &&
       !detail.partial);
   const canLoadFiles = Boolean(project?.features?.files);
+  const agentName = sessionAgentLabel(project, summary);
   const interrupted =
     summary.status === "stopped" &&
     summary.stopReason === INTERRUPTED_STOP_REASON;
   const approvalAgent =
-    (approval && findApprovalStep(turns, approval.id)?.agent) ?? summary.agent;
+    (approval && findApprovalStep(turns, approval.id)?.agent) ?? agentName;
 
   return (
     <FolderContext.Provider value={folder}>
@@ -332,7 +334,7 @@ export function Conversation({ id }: { id: string }) {
           <div className="main-title">
             <h1>{summary.title}</h1>
             <span className="subtle mono ch-hide-narrow">
-              {project?.name} · {summary.agent}
+              {project?.name} · {agentName}
               {folder && ` · ${folderLabel(project?.folders, folder)}`}
             </span>
           </div>
@@ -475,7 +477,7 @@ export function Conversation({ id }: { id: string }) {
               controls={
                 <>
                   {!composerOptions && (
-                    <span className="select-chip">agent：{summary.agent}</span>
+                    <span className="select-chip">agent：{agentName}</span>
                   )}
                   <label className="select-chip">
                     <ShieldIcon />

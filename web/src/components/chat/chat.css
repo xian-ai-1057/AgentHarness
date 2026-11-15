@@ -1273,9 +1273,11 @@
   gap: 8px;
 }
 
+/* 自建 agent 的開場建議可能比較長：可以換行。 */
 .ch-suggestion {
-  height: 34px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 6px 14px;
+  line-height: 1.4;
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill, 999px);
   background: var(--panel);

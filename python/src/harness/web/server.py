@@ -110,6 +110,7 @@ from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
 from harness.web import office as office_lib
 from harness.web import uploads as uploads_lib
+from harness.web import user_agents as user_agents_lib
 from harness.web import workspace as workspace_lib
 
 DEFAULT_PORT = 4321
@@ -327,6 +328,7 @@ def create_app(
             if mode == "accounts"
             else None
         ),
+        user_agents=user_agents_lib.UserAgentStore.for_project(project.root),
     )
     if owner is not None:
         workspace.migrate(owner)
@@ -363,6 +365,7 @@ def create_app(
     _file_routes(routes)
     _account_routes(routes, mode)
     _group_routes(routes)
+    _user_agent_routes(routes)
     _knowledge_routes(routes)
     _settings_routes(routes)
     _audit_routes(routes)
@@ -858,6 +861,50 @@ def _group_routes(routes: web.RouteTableDef) -> None:
         _require_admin(request)
         group = _ws(request).delete_group(request.match_info["group_id"])
         _audit(request, "group.delete", target=group["name"], detail=group)
+        return _json({"ok": True})
+
+
+def _user_agent_routes(routes: web.RouteTableDef) -> None:
+    """自建 agent：每個人只能看、改、刪自己建立的。"""
+    one = "/api/agents/{agent_id:[0-9a-f]{12}}"
+
+    def detail(agent: dict[str, Any]) -> dict[str, Any]:
+        # 稽核紀錄不放指示全文，只記用了哪些資源。
+        keys = ("id", "name", "model", "toolsets", "knowledgeBases", "skills")
+        return {key: agent[key] for key in keys}
+
+    @routes.get("/api/agents")
+    async def list_agents(request: web.Request) -> web.Response:
+        return _json(_ws(request).list_user_agents(_user(request)))
+
+    @routes.post("/api/agents")
+    async def create_agent(request: web.Request) -> web.Response:
+        body = await _body(request)
+        agent = _ws(request).create_user_agent(_user(request), body)
+        _audit(
+            request, "agent.create", target=agent["name"], detail=detail(agent)
+        )
+        return _json(agent, status=201)
+
+    @routes.patch(one)
+    async def update_agent(request: web.Request) -> web.Response:
+        body = await _body(request)
+        agent = _ws(request).update_user_agent(
+            _user(request), request.match_info["agent_id"], body
+        )
+        _audit(
+            request, "agent.update", target=agent["name"], detail=detail(agent)
+        )
+        return _json(agent)
+
+    @routes.delete(one)
+    async def delete_agent(request: web.Request) -> web.Response:
+        agent = _ws(request).delete_user_agent(
+            _user(request), request.match_info["agent_id"]
+        )
+        _audit(
+            request, "agent.delete", target=agent["name"], detail=detail(agent)
+        )
         return _json({"ok": True})
 
 

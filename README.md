@@ -634,6 +634,11 @@ harness web --port 8080     # 換埠號
   核准都記在只能新增的紀錄裡（雜湊鏈防竄改），管理平台可以篩選、檢查
   完整性與匯出 CSV / JSON Lines（見
   [說明文件的「稽核紀錄」](https://agent-harness-docs-ten.vercel.app/guide/web#稽核紀錄)）。
+- **自建 Agent**（Python 版）：每個人在側欄的「Agent」頁建立自己的 agent：
+  名稱、說明、指示、開場建議、預設模型，以及要用的工具、知識庫與技能。
+  只列出所屬群組開放的工具與知識庫，執行時也照群組再限制一次；只有自己
+  看得到（見
+  [說明文件的「自建 Agent」](https://agent-harness-docs-ten.vercel.app/guide/web#自建-agent)）。
 - **專案**（Python 版）：建立「專案」把對話分類整理，每個人只看得到自己的
   專案。把側欄的對話拖到專案上就會移進去（拖曳時專案會標出來，也可以放到
   「放到新專案」），或用對話的 ⋮ →「移到專案」（見

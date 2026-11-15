@@ -139,35 +139,38 @@ function AgentSection({ project }: { project: ProjectInfo }) {
           agents/ 資料夾裡的每個 Markdown 檔就是一個 agent。
         </p>
       </div>
-      {project.agents.map((agent) => (
-        <div
-          key={agent.name}
-          className="box"
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <div className="box-row">
-            <span className="mono" style={{ fontWeight: 600 }}>
-              {agent.name}
-            </span>
-            <span className="subtle">
-              {agent.name === project.defaultAgent ? "預設 agent" : ""}
-            </span>
-          </div>
-          {agent.description && <div>{agent.description}</div>}
-          <div className="help mono">
-            model: {agent.model ?? "（未設定）"}（
-            {SOURCE_LABELS[agent.modelSource]}）{" · "}maxTurns:{" "}
-            {agent.maxTurns}（{SOURCE_LABELS[agent.maxTurnsSource]}）
-          </div>
-          <div className="tool-chips">
-            {agent.tools.map((name) => (
-              <span key={name} className="tool-chip">
-                {name}
+      {/* 自己建立的 agent 在 Agent 頁（/agents）管理，這裡只列專案的。 */}
+      {project.agents
+        .filter((agent) => !agent.custom)
+        .map((agent) => (
+          <div
+            key={agent.name}
+            className="box"
+            style={{ display: "flex", flexDirection: "column", gap: 8 }}
+          >
+            <div className="box-row">
+              <span className="mono" style={{ fontWeight: 600 }}>
+                {agent.name}
               </span>
-            ))}
+              <span className="subtle">
+                {agent.name === project.defaultAgent ? "預設 agent" : ""}
+              </span>
+            </div>
+            {agent.description && <div>{agent.description}</div>}
+            <div className="help mono">
+              model: {agent.model ?? "（未設定）"}（
+              {SOURCE_LABELS[agent.modelSource]}）{" · "}maxTurns:{" "}
+              {agent.maxTurns}（{SOURCE_LABELS[agent.maxTurnsSource]}）
+            </div>
+            <div className="tool-chips">
+              {agent.tools.map((name) => (
+                <span key={name} className="tool-chip">
+                  {name}
+                </span>
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
     </section>
   );
 }

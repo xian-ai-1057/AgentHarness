@@ -30,6 +30,9 @@ import type {
   SessionOptions,
   SessionSummary,
   UploadedFile,
+  UserAgentInfo,
+  UserAgentInput,
+  UserAgentList,
 } from "../../src/web/protocol.ts";
 import { LOCAL_KEY_REQUIRED } from "../../src/web/protocol.ts";
 import { auditQuery } from "./components/admin/auditFormat.ts";
@@ -197,6 +200,14 @@ export const api = {
   updateGroup: (id: string, changes: GroupChanges) =>
     request<AccessGroup>("PATCH", `/admin/groups/${id}`, changes),
   deleteGroup: (id: string) => request("DELETE", `/admin/groups/${id}`),
+
+  // 自建 Agent（features.userAgents）。
+  userAgents: () => request<UserAgentList>("GET", "/agents"),
+  createUserAgent: (agent: UserAgentInput) =>
+    request<UserAgentInfo>("POST", "/agents", agent),
+  updateUserAgent: (id: string, changes: Partial<UserAgentInput>) =>
+    request<UserAgentInfo>("PATCH", `/agents/${id}`, changes),
+  deleteUserAgent: (id: string) => request("DELETE", `/agents/${id}`),
 
   // 知識庫（features.knowledgeBases）。
   knowledge: () => request<KnowledgeAdminList>("GET", "/knowledge"),

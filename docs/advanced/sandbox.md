@@ -104,6 +104,16 @@ PowerPoint 轉成 PDF 預覽（見[網頁版](/guide/web#預覽檔案)），agen
 `soffice --headless --convert-to pdf 檔名` 轉檔；自己的映像檔沒有
 LibreOffice 時，網頁改用瀏覽器裡的簡易預覽。
 
+它也裝好了內建的 [Office 文件與 PDF skills](/advanced/skills#office-文件與-pdf-的-skills)
+需要的工具：pandoc、qpdf、poppler-utils、tesseract（繁中與簡中 OCR）、
+Node.js 與 pptxgenjs、docx、pdf-lib、pdfjs-dist，以及 pypdf、reportlab、
+markitdown 等 Python 套件，並把內建 skills 的腳本複製到 `/opt/skills/`。
+沙盒沒有網路，這些都在建置時裝好。建置目錄是 repo 根目錄，自己建置時：
+
+```bash
+docker build -t harness-sandbox -f docker/sandbox.Dockerfile .
+```
+
 | 環境變數 | 用途 |
 |---|---|
 | `HARNESS_SANDBOX_IMAGE` | 沒寫 `sandbox.image` 時使用的映像檔 |

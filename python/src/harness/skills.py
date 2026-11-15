@@ -10,7 +10,8 @@ load_skill 讀進完整指示，skill 的工具也在這時才開放使用。這
     skills/
     └── refund/
         ├── SKILL.md        開頭是設定，內文是指示
-        └── policy.md       參考檔案，agent 用 read_skill_file 讀取
+        ├── policy.md       參考檔案，agent 用 read_skill_file 讀取
+        └── scripts/        選用，skill 附帶的腳本（見 SCRIPTS_DIR）
 
 SKILL.md：
 
@@ -35,6 +36,10 @@ SKILL_FILE = "SKILL.md"
 LOAD_TOOL = "load_skill"
 READ_TOOL = "read_skill_file"
 MAX_READ_CHARS = 50_000
+# skill 附帶的腳本放在這個資料夾。腳本通常很多（例如官方 docx skill 有幾十
+# 個 XML schema），load_skill 不逐一列出，只說有幾個檔案；用法寫在
+# SKILL.md 裡，要看原始碼時仍可用 read_skill_file 讀取。
+SCRIPTS_DIR = "scripts"
 
 
 @dataclasses.dataclass(eq=False)
@@ -130,12 +135,21 @@ def make_tools(skills: list[Skill]) -> list[tools_lib.Tool]:
             names = "、".join(item.name for item in target.tools)
             parts += ["", f"現在可以使用的專屬工具：{names}"]
         files = target.resource_files()
+        listed = [
+            path for path in files if not path.startswith(f"{SCRIPTS_DIR}/")
+        ]
+        scripts = len(files) - len(listed)
         if files:
             parts += [
                 "",
                 f"參考檔案（需要時用 {READ_TOOL} 讀取）：",
-                *[f"- {path}" for path in files],
+                *[f"- {path}" for path in listed],
             ]
+        if scripts:
+            parts.append(
+                f"- {SCRIPTS_DIR}/：{scripts} 個腳本與資料檔，用法見上面的"
+                f"指示；要看原始碼時才用 {READ_TOOL} 讀取"
+            )
         return "\n".join(parts)
 
     def read_skill_file(name: str, path: str) -> str:

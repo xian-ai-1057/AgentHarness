@@ -346,7 +346,9 @@ models:
 3. 需要的話，在「對話中可以切換的模型」勾選其他模型，它們會出現在輸入框的模型選單（寫進 `harness.yaml` 的 `models`，原本有寫 `label` 的模型保留顯示名稱）。
 4. 按「測試連線並儲存」。**伺服器會先用新的設定實際連一次模型，連得上才儲存**；金鑰打錯、模型名稱不對或連不到伺服器時，會顯示原因（依錯誤的種類判斷，後面附上原始的錯誤訊息），原本的設定保持不變。
 
-列出模型的方式：OpenAI 相容端點用 `GET /models`（網址沒有 `/v1` 而找不到時再試 `/v1/models`）；Anthropic、OpenAI、Google、OpenRouter 用各自官方的模型清單 API（OpenAI 只留對話用的模型，Google 只留支援 `generateContent` 的模型）；Ollama 用 `GET /api/tags`。API 是 `POST /api/settings/models/discover {provider, baseURL, apiKey}`，只有管理者能用；金鑰留空時用已經存好的金鑰，但**換成別的端點網址時不會送出存好的金鑰**。勾選的模型用 `PUT /api/settings/models {models}` 儲存。
+列出模型的方式：OpenAI 相容端點用 `GET /models`（網址沒有 `/v1` 而找不到時再試 `/v1/models`）；Anthropic、OpenAI、Google、OpenRouter 用各自官方的模型清單 API（OpenAI 只留對話用的模型，Google 只留支援 `generateContent` 的模型）；Ollama 用 `GET /api/tags`。Anthropic 的清單用 `x-api-key` 與 `anthropic-version` 標頭查詢、會翻完所有頁；端點網址填 `https://api.anthropic.com`（或 `/v1`）時也改用這個方式，模型名稱原樣使用。
+
+列不出來時的說明：金鑰錯誤或失效（HTTP 401）、金鑰沒有列出模型的權限（403）、查詢太頻繁或額度用完（429）會分別說明，並附上對方回應裡的錯誤說明（例如 Anthropic 的 `invalid x-api-key`）；網址填錯而收到網頁或空白回應時，會說收到的是什麼。API 是 `POST /api/settings/models/discover {provider, baseURL, apiKey}`，只有管理者能用；金鑰留空時用已經存好的金鑰，但**換成別的端點網址時不會送出存好的金鑰**。勾選的模型用 `PUT /api/settings/models {models}` 儲存。
 
 儲存的內容：
 

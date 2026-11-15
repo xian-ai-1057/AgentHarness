@@ -14,7 +14,8 @@
 「第三條規定」不會被當成新的一條。「第一章 總則」這類章節標題會記在
 位置前面，例如「第二章 › 第五條」；「附錄」「附件」「參考資料」這類
 標題會結束前面的章節，後面的內容記在它們底下。單一條文超過字數上限時，
-依句號再切成幾片，每片的頁碼是那一片開始的那一頁。
+先依「（一）」這類款目、再依句號切成幾片，每片的頁碼是那一片開始的
+那一頁。
 """
 
 import re
@@ -38,6 +39,8 @@ _TOC_LINES = 3
 _PAGE_FOOTER = re.compile(
     r"^附\s*[錄件表圖]\s*[0-9A-Za-z一二三四五六七八九十]*\s*[-－–]\s*[0-9ivxIVX]+$"
 )
+# 條文、要點底下的款目，例如「（一）」「(四)原則四：…」，要在行首。
+_SUB_ITEM = re.compile(r"(?m)^[（(]\s*[一二三四五六七八九十]+\s*[)）]")
 # 同一行出現在這麼多頁以上就是頁首頁尾，不當章節標題。
 _REPEATED_PAGES = 3
 _PAGE = re.compile(r"第\s*(\d+)\s*頁")
@@ -81,7 +84,7 @@ def split_regulation(
     Args:
         sections: 解析器讀出的 (位置, 文字)，例如 PDF 每一頁是
             ("第 3 頁", 該頁文字)。條文可以跨頁。
-        chunk_size: 每片的字數上限；超過時依句號再切。
+        chunk_size: 每片的字數上限；超過時依款目、句號再切。
 
     Returns:
         (位置, 文字) 的列表；位置是「第二章 › 第五條（第 3 頁）」這種
@@ -256,9 +259,42 @@ def _pieces(
 
 
 def _split_text(text: str, chunk_size: int) -> list[tuple[int, str]]:
-    """依句號、分號或換行切成不超過 chunk_size 的片段：(開始位置, 文字)。"""
+    """切成不超過 chunk_size 的片段：(開始位置, 文字)。
+
+    先依「（一）」「(二)」這類款目分段，整段放得下就不拆開，讓每片盡量
+    從一個款目開頭；單一款目太長時再依句號、分號或換行切。
+    """
     if len(text) <= chunk_size:
         return [(0, text)]
+    starts = [0] + [
+        match.start() for match in _SUB_ITEM.finditer(text) if match.start() > 0
+    ]
+    blocks = [
+        (start, text[start:end])
+        for start, end in zip(starts, [*starts[1:], len(text)], strict=True)
+    ]
+    out: list[tuple[int, str]] = []
+    buffer, buffer_at = "", 0
+    for start, block in blocks:
+        if buffer and len(buffer) + len(block) > chunk_size:
+            out.append((buffer_at, buffer))
+            buffer = ""
+        if len(block) > chunk_size:
+            out += [
+                (start + offset, piece)
+                for offset, piece in _split_sentences(block, chunk_size)
+            ]
+            continue
+        if not buffer:
+            buffer_at = start
+        buffer += block
+    if buffer:
+        out.append((buffer_at, buffer))
+    return out
+
+
+def _split_sentences(text: str, chunk_size: int) -> list[tuple[int, str]]:
+    """依句號、分號或換行切成不超過 chunk_size 的片段；還是太長就硬切。"""
     out: list[tuple[int, str]] = []
     buffer, buffer_at, offset = "", 0, 0
     for sentence in re.split(r"(?<=[。；;\n])", text):

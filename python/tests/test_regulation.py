@@ -129,6 +129,23 @@ class TestSplitRegulation:
         assert first[0] == "第一條（第 1 頁）"
         assert first[-1] == "第一條（第 2 頁）"
 
+    def test_long_point_is_split_at_sub_items(self):
+        pages = [
+            (
+                "第 1 頁",
+                "一、核心原則\n（一）原則三：" + "保護隱私。" * 6,
+            ),
+            ("第 2 頁", "（二）原則四：" + "確保穩健。" * 6),
+            ("第 3 頁", "二、配套。\n三、結語。"),
+        ]
+
+        chunks = regulation.split_regulation(pages, 50)
+
+        first = [chunk for chunk in chunks or [] if "第一點" in chunk[0]]
+        assert first[-1][0] == "第一點（第 2 頁）"
+        assert first[-1][1].startswith("（二）原則四")
+        assert "保護隱私" not in first[-1][1]
+
     def test_appendix_ends_the_chapter_and_points_restart(self):
         pages = [
             ("第 1 頁", "第一章 總則\n一、目的。\n二、範圍。\n三、定義。"),

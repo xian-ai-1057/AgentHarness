@@ -12,8 +12,9 @@
 
 條號必須不倒退、一次最多跳 5 條（要點必須剛好是下一點），條文內文引用
 「第三條規定」不會被當成新的一條。「第一章 總則」這類章節標題會記在
-位置前面，例如「第二章 › 第五條」。單一條文超過字數上限時，依句號再
-切成幾片，位置相同。
+位置前面，例如「第二章 › 第五條」；「附錄」「附件」「參考資料」這類
+標題會結束前面的章節，後面的內容記在它們底下。單一條文超過字數上限時，
+依句號再切成幾片，每片的頁碼是那一片開始的那一頁。
 """
 
 import re
@@ -27,6 +28,18 @@ _ARTICLE = re.compile(
 )
 _POINT = re.compile(r"^([一二三四五六七八九十百]+)\s*、")
 _CHAPTER = re.compile(rf"^第\s*[{_NUMERAL}]+\s*[章節編](?=\s|、|$|[^\s第])")
+# 結束正文章節的標題：附錄、附件、附表、參考資料等。
+_APPENDIX = re.compile(r"^(附\s*[錄件表圖則]|參考(?:資料|文獻))")
+# 目錄的引導點，例如「第一章 總則 ........ 3」。
+_LEADER = re.compile(r"(?:\.{4,}|…{2,}|[‧·•．]{4,})")
+# 一頁有這麼多行帶引導點就當成目錄頁，裡面的章節標題不算數。
+_TOC_LINES = 3
+# 頁尾的頁碼，例如「附件 3-1」「附表 2-ii」。
+_PAGE_FOOTER = re.compile(
+    r"^附\s*[錄件表圖]\s*[0-9A-Za-z一二三四五六七八九十]*\s*[-－–]\s*[0-9ivxIVX]+$"
+)
+# 同一行出現在這麼多頁以上就是頁首頁尾，不當章節標題。
+_REPEATED_PAGES = 3
 _PAGE = re.compile(r"第\s*(\d+)\s*頁")
 _DIGITS = {char: value for value, char in enumerate("零一二三四五六七八九")}
 # 至少要有幾條（點）才當成法規類文件。
@@ -74,8 +87,32 @@ def split_regulation(
         (位置, 文字) 的列表；位置是「第二章 › 第五條（第 3 頁）」這種
         格式，頁碼是這一條開始的那一頁。不像法規類文件時回傳 None。
     """
+    # 目錄頁（有頁碼的位置才看得出一頁）、帶引導點的行、頁首頁尾只當
+    # 內文，不當章節標題或新的一條。
+    toc = {
+        location
+        for location, text in sections
+        if _PAGE.search(location)
+        and sum(bool(_LEADER.search(line)) for line in text.splitlines())
+        >= _TOC_LINES
+    }
+    pages_of: dict[str, set[str]] = {}
+    for location, text in sections:
+        for line in text.splitlines():
+            pages_of.setdefault(_normal(line.strip()), set()).add(location)
     lines = [
-        (location, line.strip())
+        (
+            location,
+            line.strip(),
+            location in toc
+            or bool(_LEADER.search(line))
+            or bool(_PAGE_FOOTER.match(_normal(line.strip())))
+            or (
+                _heading(line.strip())
+                and len(pages_of.get(_normal(line.strip()), ()))
+                >= _REPEATED_PAGES
+            ),
+        )
         for location, text in sections
         for line in text.splitlines()
         if line.strip()
@@ -114,9 +151,27 @@ def _boundary(line: str, kind: str, last: int) -> tuple[str, int] | None:
     return f"第{match.group(1)}點", number
 
 
-def _count(lines: list[tuple[str, str]], kind: str) -> int:
+def _heading(line: str) -> bool:
+    """章節標題（第一章）或附錄、附件、參考資料這類標題。"""
+    if len(line) > _CHAPTER_CHARS or _LEADER.search(line):
+        return False
+    normal = _normal(line)
+    # 結尾是頁碼的是目錄，例如「第六章 雲端服務維運控管 24」。
+    if re.search(r"\s\d{1,3}$", normal):
+        return False
+    if _CHAPTER.match(normal):
+        return True
+    return bool(_APPENDIX.match(normal)) and "。" not in normal
+
+
+def _count(lines: list[tuple[str, str, bool]], kind: str) -> int:
     last, found = 0, 0
-    for _, line in lines:
+    for _, line, toc in lines:
+        if toc:
+            continue
+        if kind == "point" and _heading(line):
+            last = 0
+            continue
         hit = _boundary(line, kind, last)
         if hit:
             last = hit[1]
@@ -124,43 +179,46 @@ def _count(lines: list[tuple[str, str]], kind: str) -> int:
     return found
 
 
-def _units(lines: list[tuple[str, str]], kind: str) -> list[tuple[str, str]]:
-    """切成一條一段：(位置, 文字)。第一條之前的前言自成一段。"""
-    units: list[tuple[str, str, list[str]]] = []
+def _units(
+    lines: list[tuple[str, str, bool]], kind: str
+) -> list[tuple[str, list[tuple[str, str]]]]:
+    """切成一條一段：(標籤, [(頁碼, 一行)…])。第一條之前的前言自成一段。"""
+    units: list[tuple[str, list[tuple[str, str]]]] = []
     chapter, last = "", 0
-    current_label, current_page, buffer = "", "", []
+    label: str = ""
+    buffer: list[tuple[str, str]] = []
 
     def flush() -> None:
         if buffer:
-            units.append((current_label, current_page, list(buffer)))
+            units.append((label, list(buffer)))
         buffer.clear()
 
-    for location, line in lines:
+    for location, line, toc in lines:
         page = _page_of(location)
-        if _CHAPTER.match(_normal(line)) and len(line) <= _CHAPTER_CHARS:
+        normal = _normal(line)
+        if toc:
+            buffer.append((page, line))
+            continue
+        if _heading(line):
             flush()
-            chapter = re.sub(r"\s+", " ", _normal(line))
-            current_label, current_page = chapter, page
-            buffer.append(line)
+            if kind == "point":
+                # 要點常常每章從「一、」重新編號。
+                last = 0
+            chapter = re.sub(r"\s+", " ", normal).rstrip("—－-：: ")
+            label = chapter
+            buffer.append((page, line))
             continue
         hit = _boundary(line, kind, last)
         if hit:
             last = hit[1]
             # 章節標題後面緊接著第一條：標題併進這一條。
-            heading_only = (
-                len(buffer) == 1 and chapter and current_label == chapter
-            )
+            heading_only = len(buffer) == 1 and chapter and label == chapter
             if not heading_only:
                 flush()
-                current_page = page
-            current_label = f"{chapter} › {hit[0]}" if chapter else hit[0]
-        elif not buffer:
-            current_page = page
-        buffer.append(line)
+            label = f"{chapter} › {hit[0]}" if chapter else hit[0]
+        buffer.append((page, line))
     flush()
-    return [
-        (_location(label, page), "\n".join(body)) for label, page, body in units
-    ]
+    return units
 
 
 def _page_of(location: str) -> str:
@@ -175,26 +233,59 @@ def _location(label: str, page: str) -> str:
 
 
 def _pieces(
-    units: list[tuple[str, str]], chunk_size: int
+    units: list[tuple[str, list[tuple[str, str]]]], chunk_size: int
 ) -> list[tuple[str, str]]:
-    """超過字數上限的條文依句號、分號或換行再切；還是太長就硬切。"""
+    """組成 (位置, 文字)；超過字數上限的條文依句號、分號或換行再切，
+    還是太長就硬切。每片的頁碼是那一片開始的那一頁。"""
     out: list[tuple[str, str]] = []
-    for location, text in units:
-        if len(text) <= chunk_size:
-            out.append((location, text))
-            continue
-        buffer = ""
-        for sentence in re.split(r"(?<=[。；;\n])", text):
-            while len(sentence) > chunk_size:
-                if buffer:
-                    out.append((location, buffer.strip()))
-                    buffer = ""
-                out.append((location, sentence[:chunk_size].strip()))
-                sentence = sentence[chunk_size:]
-            if buffer and len(buffer) + len(sentence) > chunk_size:
-                out.append((location, buffer.strip()))
+    for label, body in units:
+        text = "\n".join(line for _, line in body)
+        # 每一行在 text 裡開始的位置，用來查一片從哪一頁開始。
+        starts, at = [], 0
+        for page, line in body:
+            starts.append((at, page))
+            at += len(line) + 1
+        for offset, piece in _split_text(text, chunk_size):
+            stripped = piece.strip()
+            if stripped:
+                begin = offset + len(piece) - len(piece.lstrip())
+                out.append(
+                    (_location(label, _page_at(starts, begin)), stripped)
+                )
+    return out
+
+
+def _split_text(text: str, chunk_size: int) -> list[tuple[int, str]]:
+    """依句號、分號或換行切成不超過 chunk_size 的片段：(開始位置, 文字)。"""
+    if len(text) <= chunk_size:
+        return [(0, text)]
+    out: list[tuple[int, str]] = []
+    buffer, buffer_at, offset = "", 0, 0
+    for sentence in re.split(r"(?<=[。；;\n])", text):
+        while len(sentence) > chunk_size:
+            if buffer:
+                out.append((buffer_at, buffer))
                 buffer = ""
-            buffer += sentence
-        if buffer.strip():
-            out.append((location, buffer.strip()))
-    return [(location, text) for location, text in out if text]
+            out.append((offset, sentence[:chunk_size]))
+            sentence = sentence[chunk_size:]
+            offset += chunk_size
+        if buffer and len(buffer) + len(sentence) > chunk_size:
+            out.append((buffer_at, buffer))
+            buffer = ""
+        if not buffer:
+            buffer_at = offset
+        buffer += sentence
+        offset += len(sentence)
+    if buffer:
+        out.append((buffer_at, buffer))
+    return out
+
+
+def _page_at(starts: list[tuple[int, str]], offset: int) -> str:
+    """text 裡 offset 這個位置所在的頁碼（starts 是每一行的開始位置）。"""
+    found = ""
+    for start, page in starts:
+        if start > offset:
+            break
+        found = page or found
+    return found

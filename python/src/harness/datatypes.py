@@ -156,6 +156,8 @@ class RunContext:
             「舊資料」資料夾用來擋住別人的 private/）。
         hide_dotfiles: True 時內建工具看不到、也不能碰任何以點開頭的檔案
             或資料夾（含 .harness/）。
+        state: 這一輪執行期間工具共用的暫存資料，下一輪重新開始（例如
+            search_knowledge 用來讓同一輪的引用編號接續、不重複）。
     """
 
     agent_name: str
@@ -164,3 +166,4 @@ class RunContext:
     deps: Any = None
     hidden: tuple[str, ...] = ()
     hide_dotfiles: bool = False
+    state: dict[str, Any] = dataclasses.field(default_factory=dict)

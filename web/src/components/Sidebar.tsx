@@ -3,8 +3,9 @@
  * 管理者另外有「管理平台」的入口（要登入時在帳號選單裡）。
  *
  * 伺服器支援專案時（features.categories），「專案」列出自己建立的專案，
- * 點了打開專案頁，旁邊的 ＋ 新增專案；對話的 ⋮ 選單可以移到專案。不支援
- * 時只顯示 harness 專案的名稱。
+ * 點了打開專案頁，旁邊的 ＋ 新增專案；對話的 ⋮ 選單可以移到專案，也可以
+ * 直接把對話拖到專案上（拖曳時專案列會標出來，最後多一個「放到新專案」）。
+ * 不支援時只顯示 harness 專案的名稱。
  *
  * 對話依最後更新時間分成今天、昨天、過去 7 天、更早。伺服器支援時
  * （Python 版），每段對話有 ⋮ 選單可以改名或刪除。窄螢幕時側欄變成
@@ -12,6 +13,7 @@
  */
 
 import {
+  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
   type ReactNode,
@@ -23,6 +25,11 @@ import { createPortal } from "react-dom";
 import type { SessionSummary } from "../../../src/web/protocol.ts";
 import { canAdmin, currentUser } from "../auth.ts";
 import { navigate, type Route } from "../router.ts";
+import {
+  isSessionDrag,
+  readSessionDrag,
+  startSessionDrag,
+} from "../sessionDrag.ts";
 import {
   createCategory,
   deleteSession,
@@ -55,11 +62,14 @@ export function Link({
   className,
   children,
   current,
+  onDragStart,
 }: {
   to: string;
   className?: string;
   children: ReactNode;
   current?: boolean;
+  /** 有的時候這個連結可以拖曳（例如把對話拖到專案）。 */
+  onDragStart?: (event: DragEvent<HTMLAnchorElement>) => void;
 }) {
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0)
@@ -73,6 +83,7 @@ export function Link({
       className={className}
       onClick={onClick}
       aria-current={current ? "page" : undefined}
+      onDragStart={onDragStart}
     >
       {children}
     </a>
@@ -85,6 +96,9 @@ export const SEARCH_SHORTCUT = /Mac|iPhone|iPad/.test(navigator.userAgent)
   : "Ctrl K";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/** 拖曳時「放到新專案」這個目標的代號（不會和專案 id 撞到）。 */
+const NEW_TARGET = "#new";
 
 /** 依最後更新時間分組，空的組不列出。list 要先由新到舊排好。 */
 function groupByDay(list: SessionSummary[]): [string, SessionSummary[]][] {
@@ -124,7 +138,12 @@ export function Sidebar({
   const [renaming, setRenaming] = useState<string>();
   const [deleting, setDeleting] = useState<SessionSummary>();
   const [moving, setMoving] = useState<SessionSummary>();
-  const [creating, setCreating] = useState(false);
+  // 新增專案；從拖曳打開時，新增好之後把 session 這段對話移進去。
+  const [creating, setCreating] = useState<{ session?: string }>();
+  // 正在拖對話（從側欄或對話紀錄頁）時，專案列顯示成放置目標。
+  const [dragging, setDragging] = useState(false);
+  // 游標停在哪個目標上：專案 id，或 NEW_TARGET（放到新專案）。
+  const [dropTarget, setDropTarget] = useState<string>();
   const categories = useStore((s) => s.categories);
   const grouping = project?.features?.categories === true;
   const list = Object.values(sessions).sort(
@@ -141,6 +160,74 @@ export function Sidebar({
     : undefined;
   const deleteBlocked =
     deletingStatus === "running" || deletingStatus === "waiting";
+
+  // 拖曳可能從別的畫面開始（對話紀錄頁），所以在 document 上聽。
+  useEffect(() => {
+    if (!grouping) return;
+    let timer: number | undefined;
+    const start = (event: globalThis.DragEvent) => {
+      // Chrome 在 dragstart 當下改版面會直接取消拖曳，等下一輪再顯示目標。
+      if (isSessionDrag(event))
+        timer = window.setTimeout(() => setDragging(true));
+    };
+    const end = () => {
+      window.clearTimeout(timer);
+      setDragging(false);
+      setDropTarget(undefined);
+    };
+    document.addEventListener("dragstart", start);
+    document.addEventListener("dragend", end);
+    document.addEventListener("drop", end);
+    return () => {
+      document.removeEventListener("dragstart", start);
+      document.removeEventListener("dragend", end);
+      document.removeEventListener("drop", end);
+      window.clearTimeout(timer);
+    };
+  }, [grouping]);
+
+  /** 把拖過來的對話放進專案 category。 */
+  const dropInto = async (sessionId: string, category: string) => {
+    const summary = sessions[sessionId];
+    const name = categories.find((c) => c.id === category)?.name ?? "專案";
+    if (summary?.category === category) {
+      showToast(`「${summary.title}」已經在「${name}」裡`);
+      return;
+    }
+    try {
+      await moveSession(sessionId, category);
+      showToast(`已移到「${name}」`);
+    } catch (error) {
+      showToast(`移動失敗：${(error as Error).message}`, "error");
+    }
+  };
+
+  /** 放置目標共用的拖曳事件；target 是專案 id 或 NEW_TARGET。 */
+  const dropHandlers = (
+    target: string,
+    onDrop: (sessionId: string) => void,
+  ) => ({
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (!isSessionDrag(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (dropTarget !== target) setDropTarget(target);
+    },
+    onDragLeave: (event: DragEvent<HTMLElement>) => {
+      // 移到這一列裡面的圖示、文字也會觸發 dragleave，那不算離開。
+      if (event.currentTarget.contains(event.relatedTarget as Node | null))
+        return;
+      setDropTarget((current) => (current === target ? undefined : current));
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      const id = readSessionDrag(event);
+      if (!id) return;
+      event.preventDefault();
+      setDragging(false);
+      setDropTarget(undefined);
+      onDrop(id);
+    },
+  });
 
   // 抽屜打開時把焦點移進來，鍵盤使用者才不會留在後面的畫面。
   useEffect(() => {
@@ -209,27 +296,37 @@ export function Sidebar({
                 className="side-add"
                 aria-label="新增專案"
                 title="新增專案"
-                onClick={() => setCreating(true)}
+                onClick={() => setCreating({})}
               >
                 <AddIcon size={14} />
               </button>
             </div>
-            {categories.length === 0 ? (
+            {categories.length === 0 && !dragging && (
               <button
                 type="button"
                 className="side-item side-hint"
-                onClick={() => setCreating(true)}
+                onClick={() => setCreating({})}
               >
                 <AddIcon size={15} />
                 <span className="grow">新增專案來整理對話</span>
               </button>
-            ) : (
-              <ul className="side-list side-categories">
+            )}
+            {(categories.length > 0 || dragging) && (
+              <ul
+                className={`side-list side-categories ${dragging ? "dropping" : ""}`}
+              >
                 {categories.map((item) => {
                   const here =
                     route.page === "category" && route.id === item.id;
+                  const over = dropTarget === item.id;
                   return (
-                    <li key={item.id} className="side-row">
+                    <li
+                      key={item.id}
+                      className={`side-row ${over ? "drop-over" : ""}`}
+                      {...(dragging
+                        ? dropHandlers(item.id, (id) => dropInto(id, item.id))
+                        : {})}
+                    >
                       <Link
                         to={`/p/${item.id}`}
                         className={`side-item ${here ? "active" : ""}`}
@@ -244,7 +341,25 @@ export function Sidebar({
                     </li>
                   );
                 })}
+                {dragging && (
+                  <li
+                    className={`side-row side-drop-new ${dropTarget === NEW_TARGET ? "drop-over" : ""}`}
+                    {...dropHandlers(NEW_TARGET, (id) =>
+                      setCreating({ session: id }),
+                    )}
+                  >
+                    <div className="side-item">
+                      <AddIcon size={15} />
+                      <span className="grow">放到新專案</span>
+                    </div>
+                  </li>
+                )}
               </ul>
+            )}
+            {dragging && (
+              <p className="side-drop-tip" role="status">
+                放到專案上，就會把對話移進去
+              </p>
             )}
             <div className="side-heading">最近的對話</div>
           </>
@@ -268,6 +383,7 @@ export function Sidebar({
                   summary={item}
                   current={item.id === currentId}
                   admin={admin}
+                  draggable={grouping}
                   renaming={renaming === item.id}
                   menuOpen={menu?.id === item.id}
                   onMenu={(anchor) =>
@@ -344,13 +460,28 @@ export function Sidebar({
       {creating &&
         createPortal(
           <CategoryNameDialog
-            title="新增專案"
+            title={
+              creating.session
+                ? `新增專案，放入「${sessions[creating.session]?.title ?? "對話"}」`
+                : "新增專案"
+            }
             confirmLabel="新增"
             onSubmit={async (name) => {
               const created = await createCategory(name);
-              navigate(`/p/${created.id}`);
+              const session = creating.session;
+              if (session) {
+                // 專案已經建好；移動失敗時不要讓對話框留著（再按一次會多建一個）。
+                try {
+                  await moveSession(session, created.id);
+                  showToast(`已移到新專案「${created.name}」`);
+                } catch (error) {
+                  showToast(`移動失敗：${(error as Error).message}`, "error");
+                }
+              } else {
+                navigate(`/p/${created.id}`);
+              }
             }}
-            onClose={() => setCreating(false)}
+            onClose={() => setCreating(undefined)}
           />,
           document.body,
         )}
@@ -388,6 +519,7 @@ function SessionRow({
   summary,
   current,
   admin,
+  draggable,
   renaming,
   menuOpen,
   onMenu,
@@ -396,6 +528,8 @@ function SessionRow({
   summary: SessionSummary;
   current: boolean;
   admin: boolean;
+  /** 可以拖到專案上（伺服器支援專案時）。 */
+  draggable: boolean;
   renaming: boolean;
   menuOpen: boolean;
   onMenu: (anchor: HTMLElement) => void;
@@ -414,6 +548,9 @@ function SessionRow({
         to={`/s/${summary.id}`}
         className={`side-item ${current ? "active" : ""} ${admin ? "with-more" : ""}`}
         current={current}
+        onDragStart={
+          draggable ? (event) => startSessionDrag(event, summary.id) : undefined
+        }
       >
         <span className="grow">{summary.title}</span>
         <StatusMark summary={summary} />

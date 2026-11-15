@@ -22,8 +22,10 @@ import type {
   MemberInfo,
   ModelChoice,
   ModelTestResult,
+  MyKnowledge,
   PermissionMode,
   PermissionSettings,
+  PersonalKnowledgeBase,
   ProjectInfo,
   SearchResult,
   SessionDetail,
@@ -234,6 +236,34 @@ export const api = {
       query,
       topK,
     }),
+  // 知識庫頁與個人知識庫（features.personalKnowledge）。
+  myKnowledge: () => request<MyKnowledge>("GET", "/my/knowledge"),
+  createMyKnowledge: (base: {
+    name: string;
+    description?: string;
+    chunking?: PersonalKnowledgeBase["chunking"];
+  }) => request<PersonalKnowledgeBase>("POST", "/my/knowledge", base),
+  updateMyKnowledge: (
+    id: string,
+    changes: Partial<
+      Pick<PersonalKnowledgeBase, "name" | "description" | "chunking">
+    >,
+  ) => request<PersonalKnowledgeBase>("PATCH", `/my/knowledge/${id}`, changes),
+  deleteMyKnowledge: (id: string) => request("DELETE", `/my/knowledge/${id}`),
+  myKnowledgeDocuments: (id: string) =>
+    request<KnowledgeDocuments>("GET", `/my/knowledge/${id}/documents`),
+  uploadMyKnowledge: (id: string, file: File, replace?: string) =>
+    sendFile<{ path: string; size: number }>(
+      `/my/knowledge/${id}/documents${
+        replace ? `?replace=${encodeURIComponent(replace)}` : ""
+      }`,
+      file,
+    ),
+  deleteMyKnowledgeDocument: (id: string, path: string) =>
+    request(
+      "DELETE",
+      `/my/knowledge/${id}/documents?path=${encodeURIComponent(path)}`,
+    ),
   // 稽核紀錄（features.audit）。
   audit: (filters: AuditFilters, before?: number) =>
     request<AuditPage>(

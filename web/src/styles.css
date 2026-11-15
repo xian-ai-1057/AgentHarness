@@ -3862,3 +3862,267 @@ h3 {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ── 知識庫頁（每個人都有） ─────────────────────────── */
+
+.kb-page {
+  gap: 28px;
+}
+
+.kb-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.kb-group-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.kb-group-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.kb-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.kb-grid > li {
+  display: flex;
+  animation: fade-up-sm var(--dur-2) var(--ease-out) both;
+}
+
+/* 卡片：自己的知識庫上緣是紅色細條，公司知識庫是灰色。 */
+.kb-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-2);
+  border-top: 3px solid var(--accent);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    box-shadow var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+a.kb-card:hover {
+  border-color: var(--line-3);
+  border-top-color: var(--accent-hover);
+  box-shadow: var(--shadow);
+}
+
+a.kb-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.kb-card-static {
+  border-top-color: var(--line-3);
+}
+
+.kb-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.kb-card-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb-card-desc {
+  font-size: 13px;
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 2.8em;
+}
+
+.kb-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kb-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 -6px -8px;
+}
+
+.btn.btn-sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.kb-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 18px 20px;
+  border: 1px dashed var(--line-3);
+  border-radius: var(--r-md);
+  background: var(--soft);
+}
+
+.kb-empty > div {
+  flex: 1 1 240px;
+}
+
+.kb-empty p {
+  margin: 0;
+}
+
+.kb-empty p.kb-empty-title {
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.kb-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.kb-none {
+  margin: 0;
+}
+
+.kb-detail-head .page-head {
+  align-items: flex-start;
+}
+
+.kb-detail-title {
+  overflow-wrap: anywhere;
+}
+
+.kb-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.kb-type {
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+.kb-count {
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.kb-docs .member-row {
+  padding-left: 10px;
+}
+
+/* 上傳區：整塊可以點，也可以把檔案拖進來。 */
+.kb-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 22px 16px;
+  border: 1.5px dashed var(--line-3);
+  border-radius: var(--r-md);
+  background: var(--soft);
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-out),
+    border-color var(--dur-1) var(--ease-out);
+}
+
+.kb-drop:hover:not(:disabled),
+.kb-drop.dragging {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.kb-drop:disabled {
+  cursor: default;
+  opacity: 0.8;
+}
+
+.kb-drop-icon {
+  color: var(--accent);
+}
+
+.kb-drop-title {
+  font-weight: 600;
+}
+
+.kb-type-choice {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kb-type-choice legend {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.kb-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.kb-radio:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.kb-radio input {
+  margin-top: 3px;
+  accent-color: var(--accent);
+}
+
+.kb-radio > span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

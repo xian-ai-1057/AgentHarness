@@ -9,7 +9,7 @@
  * 資料夾，建立對話時一起送出（SessionOptions.folder）。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionOptions } from "../../../src/web/protocol.ts";
 import { api } from "../api.ts";
 import { isAdmin } from "../auth.ts";
@@ -62,6 +62,26 @@ export function NewChat() {
   useEffect(() => {
     document.title = project ? `${project.name} · Harness` : "Harness";
   }, [project]);
+
+  // 從知識庫頁開的新對話（?knowledge=）：在 agent 預設的知識庫之外再勾
+  // 選那個知識庫。每個知識庫只套用一次，之後使用者自己改的不會被蓋掉。
+  const knowledgeId = useSearchParam("knowledge");
+  const appliedKnowledge = useRef<string>(undefined);
+  useEffect(() => {
+    if (!project || !knowledgeId || appliedKnowledge.current === knowledgeId)
+      return;
+    if (!project.knowledgeBases?.some((base) => base.id === knowledgeId))
+      return;
+    appliedKnowledge.current = knowledgeId;
+    const first =
+      project.agents.find((item) => item.name === project.defaultAgent) ??
+      project.agents[0];
+    const defaults = agentKnowledge(project, first);
+    setOptions((current) => ({
+      ...current,
+      knowledge: [...defaults.filter((id) => id !== knowledgeId), knowledgeId],
+    }));
+  }, [project, knowledgeId]);
 
   const agent = useMemo(
     () =>

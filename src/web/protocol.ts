@@ -266,6 +266,12 @@ export interface ServerFeatures {
    */
   knowledgeSources?: boolean;
   /**
+   * 個人知識庫（Python 版）：側欄的「知識庫」頁可以瀏覽可以用的知識庫，
+   * 也能建立只有自己能用的知識庫（見 MyKnowledge）。false 表示管理者在
+   * harness.yaml 關掉了建立個人知識庫（頁面仍然列出公司知識庫）。
+   */
+  personalKnowledge?: boolean;
+  /**
    * 稽核紀錄（Python 版）：管理平台可以查詢與匯出登入、成員、群組、設定
    * 與工具核准的紀錄（見 AuditEntry）。
    */
@@ -402,6 +408,58 @@ export interface KnowledgeBaseInfo {
   id: string;
   name: string;
   description: string;
+  /** 使用者自己建立的個人知識庫（id 以 my- 開頭，只有自己看得到）。 */
+  personal?: boolean;
+}
+
+/**
+ * 一般使用者的知識庫頁（Python 版，features.personalKnowledge）。
+ *   GET    /api/my/knowledge → MyKnowledge
+ *   POST   /api/my/knowledge {name, description?, chunking?}
+ *          → PersonalKnowledgeBase
+ *   PATCH  /api/my/knowledge/:id {name?, description?, chunking?}
+ *   DELETE /api/my/knowledge/:id（連同文件一起刪除）
+ *   GET    /api/my/knowledge/:id/documents → KnowledgeDocuments
+ *   POST   /api/my/knowledge/:id/documents?replace=（multipart，要帶
+ *          X-Harness-Upload: 1）→ {files: {path, size}[]}
+ *   DELETE /api/my/knowledge/:id/documents?path=
+ * 個人知識庫只有建立的人能看、能用，不經過存取群組，也不能分享。
+ */
+export interface MyKnowledge {
+  /** 群組開放給這個人的公司知識庫（管理者在管理平台建立的）。 */
+  company: CompanyKnowledgeBase[];
+  /** 自己建立的知識庫，依建立時間排序。 */
+  mine: PersonalKnowledgeBase[];
+  limits: PersonalKnowledgeLimits;
+  /** 個人知識庫的文件加起來的大小（位元組）。 */
+  usedBytes: number;
+  /** 支援的副檔名，例如 [".docx", ".md", …]。 */
+  formats: string[];
+}
+
+export interface CompanyKnowledgeBase extends KnowledgeBaseInfo {
+  documents: number;
+  /** 這個人能不能在管理平台管理它（管理者或維護者）。 */
+  manage: boolean;
+}
+
+export interface PersonalKnowledgeBase extends KnowledgeBaseInfo {
+  /** 切片方式：paragraph（依段落）或 regulation（法規一條一片）。 */
+  chunking: "paragraph" | "regulation";
+  documents: number;
+  /** 文件加起來的大小（位元組）。 */
+  bytes: number;
+  /** 秒（Unix time）。 */
+  createdAt: number;
+}
+
+/** harness.yaml 的 personalKnowledge 區塊（大小已換算成位元組）。 */
+export interface PersonalKnowledgeLimits {
+  enabled: boolean;
+  maxBases: number;
+  maxDocuments: number;
+  maxFileBytes: number;
+  maxTotalBytes: number;
 }
 
 /** 知識庫的檢索設定（和 harness.yaml 的鍵相同）。 */

@@ -53,6 +53,11 @@ ACTIONS = {
     "knowledge.delete": "拿掉知識庫",
     "knowledge.upload": "上傳知識庫文件",
     "knowledge.document_delete": "刪除知識庫文件",
+    "knowledge.personal_create": "建立個人知識庫",
+    "knowledge.personal_update": "修改個人知識庫",
+    "knowledge.personal_delete": "刪除個人知識庫",
+    "knowledge.personal_upload": "上傳個人知識庫文件",
+    "knowledge.personal_document_delete": "刪除個人知識庫文件",
     "approval.decide": "工具核准",
     "audit.export": "匯出稽核紀錄",
 }

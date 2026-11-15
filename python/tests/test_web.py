@@ -1622,6 +1622,8 @@ class TestProjectChoices:
             "knowledgeBases": True,
             # 搜尋結果的出處可以打開原文（GET /api/knowledge/source）。
             "knowledgeSources": True,
+            # 知識庫頁可以建立個人知識庫（/api/my/knowledge）。
+            "personalKnowledge": True,
             # 稽核紀錄本機模式也有（帳號是 local）。
             "audit": True,
         }

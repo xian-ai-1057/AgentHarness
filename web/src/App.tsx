@@ -16,6 +16,7 @@ import { AdminApp } from "./components/admin/AdminApp.tsx";
 import { CategoryView, ChatsView } from "./components/ChatsView.tsx";
 import { Conversation } from "./components/Conversation.tsx";
 import { MenuIcon, PenIcon } from "./components/Icons.tsx";
+import { KnowledgeView } from "./components/KnowledgeView.tsx";
 import { NewChat } from "./components/NewChat.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Link, Sidebar } from "./components/Sidebar.tsx";
@@ -36,6 +37,7 @@ function pageTitle(route: Route, state: State): string {
     return state.categories.find((c) => c.id === route.id)?.name ?? "專案";
   }
   if (route.page === "settings") return "設定";
+  if (route.page === "knowledge") return "知識庫";
   if (route.page === "admin") return "管理平台";
   return "新對話";
 }
@@ -201,6 +203,9 @@ function Shell() {
           <CategoryView key={route.id} id={route.id} />
         )}
         {route.page === "settings" && <Settings section={route.section} />}
+        {route.page === "knowledge" && (
+          <KnowledgeView key={route.id ?? ""} id={route.id} />
+        )}
       </div>
       {searching && <SearchDialog onClose={() => setSearching(false)} />}
       <Toaster />

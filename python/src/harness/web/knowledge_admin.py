@@ -44,6 +44,8 @@ _FLOAT_KEYS = ("minSimilarity", "minRerankScore")
 _NAME_LIMIT = 40
 _DESCRIPTION_LIMIT = 300
 _DIR_LIMIT = 5
+# 個人知識庫（personal_knowledge 模組）的識別碼開頭，公司知識庫不能用。
+PERSONAL_PREFIX = "my-"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_maintainers (
@@ -197,6 +199,10 @@ def checked_id(base_id: Any) -> str:
         )
     if base_id == project_lib.DEFAULT_KNOWLEDGE_ID:
         raise KnowledgeAdminError(f"{base_id} 保留給預設知識庫")
+    if base_id.startswith(PERSONAL_PREFIX):
+        raise KnowledgeAdminError(
+            f"{PERSONAL_PREFIX} 開頭的識別碼保留給使用者自己的知識庫"
+        )
     return base_id
 
 

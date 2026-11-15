@@ -78,6 +78,7 @@ from harness.web import folders as folders_lib
 from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
 from harness.web import migration
+from harness.web import personal_knowledge as personal_lib
 from harness.web import uploads as uploads_lib
 
 Event = dict[str, Any]
@@ -242,6 +243,7 @@ class Workspace:
         users: Callable[[str], accounts_lib.User | None] | None = None,
         groups: groups_lib.GroupStore | None = None,
         maintainers: knowledge_admin.MaintainerStore | None = None,
+        personal: personal_lib.PersonalKnowledgeStore | None = None,
     ) -> None:
         """建立 Workspace。
 
@@ -257,6 +259,7 @@ class Workspace:
                 agent、工具組、知識庫與知識庫標籤。None 時不限制。
             maintainers: 知識庫的維護者（帳號模式才有）；None 時只有
                 管理者能管理知識庫。
+            personal: 個人知識庫；預設存在專案的 .harness/harness.db。
 
         Raises:
             ValueError: harness.yaml 的 workspaces 寫錯。
@@ -274,6 +277,9 @@ class Workspace:
         self._users = users
         self._groups = groups if auth_mode == "accounts" else None
         self._maintainers = maintainers if auth_mode == "accounts" else None
+        self.personal = personal or personal_lib.PersonalKnowledgeStore(
+            project.root
+        )
         self._model_fn = model_fn or llm.complete
         self._states: dict[str, _State] = {}
         # close() 停下的對話保留「執行中」的記錄，下次啟動時標成中斷。
@@ -379,6 +385,7 @@ class Workspace:
         agents = self._visible_agents(access)
         models = self._model_options(access)
         bases = self._visible_bases(access)
+        personal = self._personal_bases(user)
         info = {
             "name": project.name,
             "root": str(project.root) if user.is_admin else "",
@@ -397,12 +404,23 @@ class Workspace:
                 for name in agents
             ],
             "knowledgeBases": [
-                {
-                    "id": base.id,
-                    "name": base.name,
-                    "description": base.description,
-                }
-                for base in bases
+                *(
+                    {
+                        "id": base.id,
+                        "name": base.name,
+                        "description": base.description,
+                    }
+                    for base in bases
+                ),
+                *(
+                    {
+                        "id": base.id,
+                        "name": base.name,
+                        "description": base.description,
+                        "personal": True,
+                    }
+                    for base in personal
+                ),
             ],
             "manageKnowledge": bool(self._managed_bases(user)),
             "toolsets": [
@@ -433,6 +451,7 @@ class Workspace:
                 "groups": self._groups is not None,
                 "knowledgeBases": True,
                 "knowledgeSources": True,
+                "personalKnowledge": self.personal.limits().enabled,
                 "audit": True,
             },
             "auth": {
@@ -732,6 +751,12 @@ class Workspace:
             WebError: 不能管理這個知識庫。
         """
         base = self._require_manager(user, base_id)
+        return await self._documents_of(base)
+
+    async def _documents_of(
+        self, base: knowledge_lib.KnowledgeBase
+    ) -> dict[str, Any]:
+        """知識庫的文件清單，加上每份文件的片段數與索引概況。"""
         documents = knowledge_admin.list_documents(base)
         index: dict[str, Any]
         try:
@@ -775,7 +800,7 @@ class Workspace:
                 文件存不存在）。
         """
         access = self._access(user)
-        visible = self._visible_bases(access)
+        visible = self._chat_bases(user, access)
         if base_ref:
             visible = [
                 base for base in visible if base_ref in (base.id, base.name)
@@ -868,6 +893,149 @@ class Workspace:
             ]
         }
 
+    # --- 一般使用者的知識庫頁 ----------------------------------------------
+
+    def my_knowledge(self, user: accounts_lib.User) -> dict[str, Any]:
+        """知識庫頁：這個人可以用的公司知識庫與自己的個人知識庫。
+
+        公司知識庫只列名稱、說明與文件數（群組開放的才看得到）；能不能
+        管理（管理者或維護者）另外標出來，畫面上連到管理平台。
+        """
+        limits = self.personal.limits()
+        managed = self._managed_bases(user)
+        mine = []
+        if limits.enabled and self._live_active(user):
+            mine = [
+                self._personal_info(item)
+                for item in self.personal.owned_by(user.id)
+            ]
+        return {
+            "company": [
+                {
+                    "id": base.id,
+                    "name": base.name,
+                    "description": base.description,
+                    "documents": len(base.knowledge.files()),
+                    "manage": base.id in managed,
+                }
+                for base in self._visible_bases(self._access(user))
+            ],
+            "mine": mine,
+            "limits": limits.info(),
+            "usedBytes": sum(item["bytes"] for item in mine),
+            "formats": sorted(knowledge_lib.DEFAULT_PARSERS),
+        }
+
+    def create_personal_knowledge(
+        self, user: accounts_lib.User, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """建立個人知識庫，回傳 PersonalKnowledgeBase。
+
+        Raises:
+            WebError: 功能關閉、超過數量上限，或欄位不對。
+        """
+        if not self._live_active(user):
+            raise WebError(403, "帳號已停用")
+        with _personal_errors():
+            item = self.personal.create(
+                user.id,
+                body.get("name"),
+                body.get("description") or "",
+                body.get("chunking"),
+            )
+        self._emit({"type": "project"}, owner=user.id)
+        return self._personal_info(item)
+
+    def update_personal_knowledge(
+        self, user: accounts_lib.User, base_id: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        """修改自己的個人知識庫的名稱、說明或切片方式。"""
+        self._require_own(user, base_id)
+        with _personal_errors():
+            item = self.personal.update(base_id, body)
+        self._emit({"type": "project"}, owner=user.id)
+        return self._personal_info(item)
+
+    def delete_personal_knowledge(
+        self, user: accounts_lib.User, base_id: str
+    ) -> dict[str, Any]:
+        """刪除自己的個人知識庫（含文件），回傳被刪除的知識庫。"""
+        self._require_own(user, base_id)
+        with _personal_errors():
+            item = self.personal.delete(base_id)
+        self._emit({"type": "project"}, owner=user.id)
+        return {"id": item.id, "name": item.name}
+
+    async def personal_documents(
+        self, user: accounts_lib.User, base_id: str
+    ) -> dict[str, Any]:
+        """自己的個人知識庫的文件與索引概況（同 knowledge_documents）。"""
+        item = self._require_own(user, base_id)
+        base = self.personal.knowledge_base(item)
+        return await self._documents_of(base)
+
+    async def save_personal_document(
+        self,
+        user: accounts_lib.User,
+        base_id: str,
+        filename: str,
+        chunks: Any,
+        replace: str | None = None,
+    ) -> dict[str, Any]:
+        """上傳（或換掉）自己的個人知識庫裡的一份文件。
+
+        Raises:
+            WebError: 功能關閉、超過文件數或容量上限。
+        """
+        self._require_own(user, base_id)
+        if not self.personal.limits().enabled:
+            raise WebError(403, "管理者沒有開放個人知識庫")
+        with _personal_errors():
+            return await self.personal.save_document(
+                base_id,
+                filename,
+                chunks,
+                max_upload_bytes=self.max_upload_bytes,
+                replace=replace,
+            )
+
+    def delete_personal_document(
+        self, user: accounts_lib.User, base_id: str, path: str
+    ) -> None:
+        """刪除自己的個人知識庫裡的一份文件。"""
+        self._require_own(user, base_id)
+        with _personal_errors():
+            self.personal.delete_document(base_id, path)
+
+    def _require_own(
+        self, user: accounts_lib.User, base_id: str
+    ) -> personal_lib.PersonalBase:
+        """這個人自己的個人知識庫；別人的一律當作找不到（404）。"""
+        item = self.personal.get(base_id)
+        if item is None or item.owner_id != user.id:
+            raise WebError(404, f"找不到知識庫：{base_id}")
+        if not self._live_active(user):
+            raise WebError(403, "帳號已停用")
+        return item
+
+    def _personal_info(self, item: personal_lib.PersonalBase) -> dict[str, Any]:
+        """PersonalKnowledgeBase（見 src/web/protocol.ts）。"""
+        folder = self.personal.files_path(item.id)
+        files = self.personal.knowledge_base(item).knowledge.files()
+        size = 0
+        for relative in files:
+            with contextlib.suppress(OSError):
+                size += (folder / relative).stat().st_size
+        return {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "chunking": item.chunking,
+            "documents": len(files),
+            "bytes": size,
+            "createdAt": item.created_at,
+        }
+
     def _reload_knowledge(self) -> None:
         """依 harness.yaml 重新建立知識庫，並通知瀏覽器重新讀取專案資訊。
 
@@ -921,6 +1089,24 @@ class Workspace:
             for base in self.project.knowledge_bases.values()
             if access.allows("knowledge_bases", base.id)
         ]
+
+    def _personal_bases(
+        self, user: accounts_lib.User
+    ) -> list[knowledge_lib.KnowledgeBase]:
+        """這個人自己的個人知識庫（功能關閉或帳號停用時沒有）。"""
+        if not self.personal.limits().enabled or not self._live_active(user):
+            return []
+        return [
+            self.personal.knowledge_base(item)
+            for item in self.personal.owned_by(user.id)
+        ]
+
+    def _chat_bases(
+        self, user: accounts_lib.User, access: groups_lib.Access
+    ) -> list[knowledge_lib.KnowledgeBase]:
+        """這個人在對話裡可以搜尋的知識庫：群組開放的公司知識庫，加上
+        自己的個人知識庫。"""
+        return [*self._visible_bases(access), *self._personal_bases(user)]
 
     def _agent_bases(
         self, agent: str, visible: list[knowledge_lib.KnowledgeBase]
@@ -2539,7 +2725,8 @@ class Workspace:
             if bases is not None:
                 bases = _string_list(bases, "knowledge")
                 visible = {
-                    base.id for base in self._visible_bases(self._access(user))
+                    base.id
+                    for base in self._chat_bases(user, self._access(user))
                 }
                 unknown = [item for item in bases if item not in visible]
                 if unknown:
@@ -2580,14 +2767,21 @@ class Workspace:
         （管理平台可能改過），並只留下群組開放的知識庫與標籤；一個都
         不剩時拿掉這個工具。"""
         access = self._access(user)
-        current = self.project.knowledge_bases
+        personal = {base.id: base for base in self._personal_bases(user)}
+        current = {**self.project.knowledge_bases, **personal}
+        # 公司知識庫看群組；個人知識庫只有擁有者能搜尋。
+        allowed = set(
+            self.project.knowledge_bases
+            if access.knowledge_bases is None
+            else access.knowledge_bases
+        ) | set(personal)
 
         def convert(item: tools_lib.Tool) -> tools_lib.Tool | None:
             if not isinstance(item, knowledge_lib.KnowledgeTool):
                 return item
             return knowledge_lib.narrow_tool(
                 item,
-                bases=access.knowledge_bases,
+                bases=allowed,
                 labels=access.knowledge,
                 replace_bases=[
                     current[base.id]
@@ -2751,7 +2945,10 @@ class Workspace:
             hint = ""
         if options.get("knowledge") is not None:
             copy.tools = self._chosen_knowledge(
-                agent.name, copy.tools, options["knowledge"]
+                agent.name,
+                copy.tools,
+                options["knowledge"],
+                state.run_user or accounts_lib.LOCAL_USER,
             )
         copy.instructions = "\n\n".join(
             part
@@ -2765,7 +2962,11 @@ class Workspace:
         return copy
 
     def _chosen_knowledge(
-        self, agent: str, tools: list[tools_lib.Tool], chosen: list[str]
+        self,
+        agent: str,
+        tools: list[tools_lib.Tool],
+        chosen: list[str],
+        user: accounts_lib.User,
     ) -> list[tools_lib.Tool]:
         """把 agent 的 search_knowledge 換成搜尋這段對話勾選的知識庫。
 
@@ -2778,11 +2979,11 @@ class Workspace:
             for item in tools
             if not isinstance(item, knowledge_lib.KnowledgeTool)
         ]
-        bases = [
-            self.project.knowledge_bases[base_id]
-            for base_id in chosen
-            if base_id in self.project.knowledge_bases
-        ]
+        known = {
+            **self.project.knowledge_bases,
+            **{base.id: base for base in self._personal_bases(user)},
+        }
+        bases = [known[base_id] for base_id in chosen if base_id in known]
         if not bases:
             return kept
         setting = self.project.agent_knowledge.get(agent)
@@ -3193,6 +3394,15 @@ def _knowledge_errors():
     try:
         yield
     except knowledge_admin.KnowledgeAdminError as error:
+        raise WebError(error.status, str(error)) from error
+
+
+@contextlib.contextmanager
+def _personal_errors():
+    """把 PersonalKnowledgeError 轉成 WebError 的 with 區塊。"""
+    try:
+        yield
+    except personal_lib.PersonalKnowledgeError as error:
         raise WebError(error.status, str(error)) from error
 
 

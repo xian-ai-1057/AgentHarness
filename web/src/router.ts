@@ -16,6 +16,8 @@ export type Route =
   | { page: "chats" }
   /** 一個專案（對話的分類）裡的對話。 */
   | { page: "category"; id: string }
+  /** 知識庫頁：可以用的知識庫；id 是自己的一個個人知識庫。 */
+  | { page: "knowledge"; id?: string }
   | { page: "settings"; section: SettingsSection }
   /**
    * 管理平台：和聊天介面分開的版面，只有管理者能用。section 沒有指定
@@ -64,6 +66,11 @@ function parse(path: string): Route {
   if (parts[0] === "work") return { page: "work" };
   if (parts[0] === "chats") return { page: "chats" };
   if (parts[0] === "p" && parts[1]) return { page: "category", id: parts[1] };
+  if (parts[0] === "knowledge") {
+    return parts[1]
+      ? { page: "knowledge", id: decodeURIComponent(parts[1]) }
+      : { page: "knowledge" };
+  }
   if (parts[0] === "admin") {
     return { page: "admin", section: adminSection(parts[1]) };
   }

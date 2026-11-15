@@ -645,6 +645,10 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 網頁版可以在「管理平台 → 知識庫」新增知識庫、上傳文件與試搜尋，
 群組決定成員能搜尋哪些知識庫（見
 [說明文件的「分成好幾個知識庫」](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#分成好幾個知識庫)）。
+每個人也可以在側欄「知識庫」看到可以用的知識庫，並建立只有自己能用的
+個人知識庫、上傳自己的文件（數量與容量上限在 `harness.yaml` 的
+`personalKnowledge` 設定，見
+[說明文件的「我的知識庫」](https://agent-harness-docs-ten.vercel.app/guide/web#我的知識庫)）。
 
 放法規、內規的知識庫可以設定 `chunking: regulation`，依「第 N 條」或
 「一、二、」一條一片，出處標到第幾條（見

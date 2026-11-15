@@ -605,6 +605,7 @@ def _load_skills(
                 meta.get("tools") or [], toolsets, project_tools
             ),
             root=folder,
+            requires=[str(item) for item in meta.get("requires") or []],
         )
     return loaded
 

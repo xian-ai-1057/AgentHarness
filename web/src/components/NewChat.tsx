@@ -27,6 +27,7 @@ import { FolderContext } from "./chat/folder.ts";
 import {
   agentDefaultSkills,
   agentKnowledge,
+  agentSkills,
   agentTools,
   type ComposerOptions,
   EMPTY_OPTIONS,
@@ -183,7 +184,7 @@ export function NewChat() {
   const composerOptions: ComposerOptions | undefined = enabled
     ? {
         models: project.models ?? [],
-        skills: project.skills ?? [],
+        skills: agentSkills(project, agent),
         defaultSkills: agentDefaultSkills(project, agent),
         tools: agentTools(project, agent),
         knowledgeBases: project.knowledgeBases ?? [],

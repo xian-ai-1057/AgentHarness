@@ -9,6 +9,7 @@ name: canvas-design
 description: 以「設計哲學」為基礎，創作 .png 或 .pdf 的視覺作品。使用者要做海報、藝術作品、主視覺、封面或其他靜態設計時使用。創作原創的設計，絕不抄襲現有藝術家的作品，以免侵害著作權。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 這份指示用來創造「設計哲學」，也就是一種美學運動，接著再把它**用視覺

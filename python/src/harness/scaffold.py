@@ -104,9 +104,10 @@ tools:
 # subagents: [researcher]   # 把工作交給它，它做完只回傳結果
 # handoffs: [billing]       # 把整段對話轉交給它，由它直接回覆使用者
 # skills 是 skills/ 底下的資料夾名稱；整個欄位不寫的話可以使用全部 skill。
-# 也可以列出內建的 skill：skill-creator、code-review、debugging、
-# planning、web-research、git-commit，以及處理 Office 檔與 PDF 的 xlsx、
-# docx、pptx、pdf（需要沙盒；網頁對話裡能執行程式時預設就會開啟）。
+# 也可以列出內建的 skill：code-review、debugging、planning、
+# web-research、git-commit，以及改寫自 Anthropic 官方的 xlsx、docx、pptx、
+# pdf、skill-creator、frontend-design 等（網頁對話裡預設就會開啟；需要
+# 執行程式的要有沙盒）。
 # skills: [refund, code-review]
 # 搜尋預設知識庫（knowledge/ 資料夾）；[hr, it] 搜尋這幾個知識庫，
 # {bases: [hr], labels: [manager]} 再限定可搜尋的標籤。

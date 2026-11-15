@@ -13,11 +13,13 @@
 解析出實際位置（resolve_path）後確認還在工作目錄裡再打開。
 """
 
+import collections
 import dataclasses
 import errno
 import os
 import pathlib
 import stat
+import threading
 import unicodedata
 
 from harness import datatypes
@@ -41,6 +43,14 @@ DIR_FLAGS = os.O_RDONLY | _DIRECTORY
 # 讀檔時加上 O_NONBLOCK：路徑是 FIFO 時打開不會卡住（之後會被拒絕）。
 READ_FLAGS = os.O_RDONLY | _NONBLOCK
 WRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NONBLOCK
+# 最近由 files 工具或上傳寫入的檔案：絕對路徑 →（修改時間的奈秒數, 大小）。
+# 沙盒比對執行前後的資料夾時，最後一次寫入是這些的檔案不算程式產生的
+# （見 harness.sandbox）。只記最近的 _WRITTEN_LIMIT 個。
+_WRITTEN: "collections.OrderedDict[str, tuple[int, int]]" = (
+    collections.OrderedDict()
+)
+_WRITTEN_LIMIT = 2000
+_WRITTEN_LOCK = threading.Lock()
 
 
 class LinkError(ValueError):
@@ -235,6 +245,31 @@ def write_text(
     with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as file:
         require_file(file.fileno(), path)
         file.write(text)
+        file.flush()
+        target = context.workdir.resolve().joinpath(
+            *relative_parts(context, path)
+        )
+        note_written(target, os.fstat(file.fileno()))
+
+
+def note_written(path: pathlib.Path, info: os.stat_result) -> None:
+    """記下伺服器自己（files 工具、上傳）寫入的檔案寫完時的狀態。
+
+    Args:
+        path: 檔案的絕對路徑（已解析捷徑）。
+        info: 寫完後的 stat。
+    """
+    with _WRITTEN_LOCK:
+        _WRITTEN[str(path)] = (info.st_mtime_ns, info.st_size)
+        _WRITTEN.move_to_end(str(path))
+        while len(_WRITTEN) > _WRITTEN_LIMIT:
+            _WRITTEN.popitem(last=False)
+
+
+def written_stamp(path: pathlib.Path) -> tuple[int, int] | None:
+    """note_written 記下的（修改時間的奈秒數, 大小）；沒記過時為 None。"""
+    with _WRITTEN_LOCK:
+        return _WRITTEN.get(str(path))
 
 
 def list_entries(context: datatypes.RunContext, path: str) -> list[Entry]:

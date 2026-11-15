@@ -19,6 +19,7 @@ SKILL.md：
     name: refund
     description: 處理退款申請，依退款政策判斷能不能退
     tools: [find_order, issue_refund]    # 選用，tools/ 裡的工具名稱
+    requires: [run_python]               # 選用，agent 要有這些工具才用得上
     ---
     1. 先用 find_order 查訂單……
 
@@ -53,6 +54,9 @@ class Skill:
         tools: 載入後才開放的工具。
         root: skill 資料夾，裡面的其他檔案可以用 read_skill_file 讀取；
             沒有參考檔案時為 None。
+        requires: agent 要有這些工具（名稱）才用得上這個 skill，例如要
+            在沙盒裡執行腳本的 skill 需要 run_python。網頁版在 agent 這
+            一輪沒有這些工具時，不把它列為預設或使用者挑選的 skill。
     """
 
     name: str
@@ -60,6 +64,7 @@ class Skill:
     instructions: str
     tools: list[tools_lib.Tool] = dataclasses.field(default_factory=list)
     root: pathlib.Path | None = None
+    requires: list[str] = dataclasses.field(default_factory=list)
 
     def resource_files(self) -> list[str]:
         """列出 skill 資料夾裡的參考檔案（不含 SKILL.md）。

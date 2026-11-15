@@ -132,6 +132,11 @@ class Uploads:
                                 f"{self.max_bytes // (1024 * 1024)} MB",
                             )
                         handle.write(chunk)
+                    handle.flush()
+                    # 同時在這個資料夾執行的沙盒不把它算成程式產生的檔案。
+                    paths_lib.note_written(
+                        self.directory / name, os.fstat(handle.fileno())
+                    )
                 if size == 0:
                     raise UploadError(400, f"{name} 是空的檔案")
             except BaseException:

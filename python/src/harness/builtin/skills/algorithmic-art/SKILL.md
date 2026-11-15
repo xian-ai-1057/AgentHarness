@@ -8,6 +8,7 @@ name: algorithmic-art
 description: 用 p5.js 創作演算法藝術（生成藝術），具備可重現的隨機種子與可互動調整的參數。使用者要求用程式創作藝術、生成藝術、演算法藝術、流場（flow field）或粒子系統時使用。創作原創的演算法藝術，不要抄襲現有藝術家的作品，以免侵害著作權。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 演算法哲學是一種用程式表現的運算美學運動。產出 .md（哲學）與 .html

@@ -842,6 +842,7 @@ skills/
 name: refund                           # 省略時用資料夾名稱
 description: 處理退款申請，依退款政策判斷能不能退
 tools: [find_order, issue_refund]      # 選用，tools/ 裡的工具或 toolset
+requires: [run_python]                 # 選用，agent 要有這些工具才用得上
 ---
 1. 先用 find_order 查訂單，確認付款日期。
 2. 讀 policy.md 判斷是否在可退款期間內。
@@ -855,6 +856,10 @@ tools: [find_order, issue_refund]      # 選用，tools/ 裡的工具或 toolset
 - skill 的專屬工具在 skill 載入前不會出現在 agent 的工具裡（即使 agent
   沒寫 `tools` 欄位）。想讓 agent 隨時都能用，就在 agent 的 `tools`
   明確列出。
+- `requires` 列出 skill 用得上的前提工具（例如要在沙盒裡執行腳本的
+  skill 寫 `run_python`）。網頁上這段對話的 agent 沒有這些工具（專案沒有
+  沙盒、群組沒開放，或在「＋ → 工具」取消了）時，這個 skill 不會預設開啟，
+  使用者挑了也不會套用。
 - 載入狀態是從對話紀錄推算的，接續對話時已載入的 skill 仍然有效。
 
 在程式裡使用：
@@ -947,10 +952,14 @@ Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown �
   `/opt/skills`，並裝好上面的工具；`pyharness sandbox` 會列出缺少的項目。
 
 **在網頁上預設開啟。** 和 Claude 一樣，網頁上的每段對話預設就能用這四個
-skill：專案有開沙盒、而且 agent 能執行程式（工具有 `run_python`，沒有被
-群組或這段對話關掉）時，伺服器自動把它們加進技能清單，agent 需要時才載入。
-使用者可以在「＋ → Skills」取消勾選標「預設」的項目（只影響這段對話）。
-要換成別的清單或全部關掉：
+skill 與下面「其他改寫自官方的 skills」，伺服器自動把它們加進技能清單，
+agent 需要時才載入。需要執行程式的（`SKILL.md` 寫了
+`requires: [run_python]`：這四個加上 `algorithmic-art`、`canvas-design`、
+`web-artifacts-builder`、`webapp-testing`）只在專案有開沙盒、而且 agent 能
+執行程式（工具有 `run_python`，沒有被群組或這段對話關掉）時才開；群組沒有
+開放沙盒時「＋ → Skills」也不列出它們，在「＋ → 工具」取消 `run_python`
+時它們變成灰色、不能勾選。使用者可以在「＋ → Skills」取消勾選標「預設」的
+項目（只影響這段對話）。要換成別的清單或全部關掉：
 
 ```yaml
 web:
@@ -983,8 +992,8 @@ skills: [planning, web-research, xlsx, docx, pptx, pdf]
 
 除了上面的文件 skills，[anthropics/skills](https://github.com/anthropics/skills)
 （commit `1780c5e`）的範例 skills 也收錄了，只有 `slack-gif-creator` 沒有
-加。它們和 Claude.ai 上一樣**不預設開啟**：在 agent 的 `skills` 列出，或在
-網頁上每段對話的「＋ → Skills」選用。授權與改寫方式和文件 skills 相同：保留
+加。網頁上每段對話**預設開啟**（見上面的「在網頁上預設開啟」），需要執行
+程式的只在能執行程式時才開；命令列與 API 要在 agent 的 `skills` 列出。授權與改寫方式和文件 skills 相同：保留
 `LICENSE.txt`（Apache 2.0），`SKILL.md` 開頭註明來源與修改內容，附帶的腳本、
 範本、參考文件照原樣收錄。
 
@@ -1479,8 +1488,8 @@ Python 版另外會處理：
 - **連接模型**：在網頁上選供應商、填金鑰與模型，不需要設定環境變數
   （見下方的[在網頁上連接模型](#在網頁上連接模型)）。
 - **每段對話選模型、工具與 skills**：輸入框右下角選模型，左下角的 ＋
-  勾選 skills 與工具，下一則訊息開始生效。有沙盒時處理 Office 檔與 PDF 的
-  skills 預設開啟，可以在這裡關掉（見 [Skills](#skills)）。要多開放幾個模型給使用者選，
+  勾選 skills 與工具，下一則訊息開始生效。改寫自 Anthropic 官方的 skills
+  預設開啟（需要執行程式的要有沙盒），可以在這裡關掉（見 [Skills](#skills)）。要多開放幾個模型給使用者選，
   在 `harness.yaml` 寫 `models: [openai/gpt-5, ...]`（每一項也可以是
   `{name, label}`）。
 - **帳號與工作資料夾**：讓其他人使用時每個人用自己的帳號登入，對話、

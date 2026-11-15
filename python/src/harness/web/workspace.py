@@ -108,10 +108,28 @@ WEB_INSTRUCTIONS = "\n".join(
         "- 引用資料裡的數字時，只用你的程式實際印出來的值。",
     )
 )
-# 和 Claude 一樣：agent 能執行程式（有沙盒）時，每段對話預設開啟處理 Office
-# 檔與 PDF 的 skills，需要時由 agent 自己載入；使用者可以在對話裡關掉。
-# harness.yaml 的 web.defaultSkills 可以換成別的清單，[] 表示都不開。
-DEFAULT_SKILLS = ("xlsx", "docx", "pptx", "pdf")
+# 和 Claude 一樣：每段對話預設開啟這些 skills（改寫自 Anthropic 官方的），
+# 需要時由 agent 自己載入；使用者可以在對話裡關掉。需要執行程式的
+# （SKILL.md 寫了 requires: [run_python]）只在 agent 這一輪能在沙盒裡執行
+# 程式時才開。harness.yaml 的 web.defaultSkills 可以換成別的清單，[] 表示
+# 都不開。
+DEFAULT_SKILLS = (
+    "xlsx",
+    "docx",
+    "pptx",
+    "pdf",
+    "algorithmic-art",
+    "brand-guidelines",
+    "canvas-design",
+    "doc-coauthoring",
+    "frontend-design",
+    "internal-comms",
+    "mcp-builder",
+    "skill-creator",
+    "theme-factory",
+    "web-artifacts-builder",
+    "webapp-testing",
+)
 _UNTITLED = "新對話"
 _TITLE_LENGTH = 40
 _PREVIEW_LIMIT = 200_000
@@ -479,15 +497,12 @@ class Workspace:
                     "name": item.name,
                     "description": item.description,
                     "builtin": builtin_skill,
+                    "requires": list(item.requires),
                 }
                 for item, builtin_skill in self._available_skills().values()
             ],
-            # 能執行程式（工具有 run_python）的 agent 預設開啟的 skills。
-            "defaultSkills": (
-                self._default_skill_names()
-                if project.sandbox is not None
-                else []
-            ),
+            # 每段對話預設開啟的 skills；requires 的工具 agent 沒有時不開。
+            "defaultSkills": self._default_skill_names(),
             "model": {
                 "config": dict(self._settings),
                 "env": {
@@ -3332,8 +3347,14 @@ class Workspace:
             # 繞過使用者關掉的工具。
             copy.skills = [_limit_tools(item, allowed) for item in agent.skills]
         available = self._available_skills()
-        copy.skills = self._with_default_skills(state, copy, available)
-        chosen = [available[n][0] for n in options["skills"] if n in available]
+        usable = self._usable_tools(state, copy.tools)
+        copy.skills = self._with_default_skills(state, copy, available, usable)
+        # 需要的工具這一輪用不到的 skill 不列出（例如群組沒有沙盒）。
+        chosen = [
+            available[n][0]
+            for n in options["skills"]
+            if n in available and set(available[n][0].requires) <= usable
+        ]
         if chosen:
             own = {item.name for item in copy.skills}
             # 使用者挑的 skill 不能帶進 agent 原本沒有的工具。
@@ -3387,27 +3408,40 @@ class Workspace:
         state: _State,
         agent: agents_lib.Agent,
         available: dict[str, tuple[skills_lib.Skill, bool]],
+        usable: set[str],
     ) -> list[skills_lib.Skill]:
         """agent 的 skills 加上預設開啟的，扣掉這段對話關掉的。
 
-        只有 agent 這一輪真的能執行程式時才加：專案有沙盒、agent 的工具
-        （套用對話選的工具之後）有 run_python、使用者的群組有開放，而且
-        不是不能執行程式的「舊資料」資料夾。預設 skill 只開放 agent 原本
-        就有的工具。
+        預設 skill 的 requires（例如 run_python）要都在 usable 裡才加，
+        也只開放 agent 原本就有的工具。
         """
         defaults = self._default_skill_names()
         off = set(state.options.get("disabledSkills") or []) & set(defaults)
         kept = [item for item in agent.skills if item.name not in off]
-        if not self._runs_code(state, agent.tools):
-            return kept
         present = {item.name for item in kept}
         tools = {item.name for item in agent.tools}
         added = [
             _limit_tools(available[name][0], tools)
             for name in defaults
-            if name not in off and name not in present
+            if name not in off
+            and name not in present
+            and set(available[name][0].requires) <= usable
         ]
         return [*kept, *added]
+
+    def _usable_tools(
+        self, state: _State, tools: list[tools_lib.Tool]
+    ) -> set[str]:
+        """agent 這一輪真的能用的工具名稱（判斷 skill 的 requires 用）。
+
+        群組沒開放的不算；run_python 要專案有沙盒、使用者的群組有開放，
+        而且不是不能執行程式的「舊資料」資料夾（見 _runs_code）。
+        """
+        hidden = self._hidden_tools(state.run_user or accounts_lib.LOCAL_USER)
+        names = {item.name for item in tools if id(item) not in hidden}
+        if not self._runs_code(state, tools):
+            names.discard(sandbox_lib.TOOL_NAME)
+        return names
 
     def _runs_code(self, state: _State, tools: list[tools_lib.Tool]) -> bool:
         """這一輪 agent 能不能在沙盒裡執行程式。"""

@@ -221,6 +221,11 @@ export interface SkillInfo {
   description: string;
   /** 內建 skill 或專案 skills/ 裡的。 */
   builtin: boolean;
+  /**
+   * agent 要有這些工具才用得上（例如 run_python）。沒有時 ＋ 選單不列出；
+   * 這段對話取消了這些工具時不能勾選（Python 版）。
+   */
+  requires?: string[];
 }
 
 /**
@@ -716,8 +721,8 @@ export interface ProjectInfo {
   /** ＋ 選單可以選的 skills（Python 版）。 */
   skills?: SkillInfo[];
   /**
-   * 每段對話預設開啟的 skills（Python 版）：agent 能執行程式（有
-   * run_python）時才會套用，使用者可以在 ＋ 選單逐一關閉。
+   * 每段對話預設開啟的 skills（Python 版），使用者可以在 ＋ 選單逐一
+   * 關閉。SkillInfo.requires 的工具 agent 沒有時不會套用。
    */
   defaultSkills?: string[];
   /** 這個人在對話裡可以勾選的知識庫（Python 版，群組開放的）。 */

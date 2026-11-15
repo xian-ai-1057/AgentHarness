@@ -1098,6 +1098,15 @@
   outline-offset: -2px;
 }
 
+.ch-pop-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.ch-pop-item:disabled:hover {
+  background: transparent;
+}
+
 .ch-pop .ch-pop-item > svg {
   flex: none;
   color: var(--muted);

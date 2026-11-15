@@ -8,6 +8,7 @@ name: docx
 description: 建立、讀取、編輯或處理 Word 文件（.docx）與 Word 範本（.dotx）時使用：提到 Word、.docx、.dotx，或要做有目錄、標題、頁碼、信頭等格式的正式文件；從 Word 檔擷取或重整內容、插入或替換圖片、尋找取代、追蹤修訂或註解，或把內容做成精美的 Word 文件。使用者要的報告、備忘錄、信件、範本是 Word 檔時也用。PDF、試算表、Google 文件或與文件無關的程式工作不要用。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 # DOCX：建立、編輯與分析 Word 文件

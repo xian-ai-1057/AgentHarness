@@ -377,6 +377,36 @@ def test_working_skills_use_their_own_folder(name):
     assert ".skill-work/" in text
 
 
+# 要在沙盒裡執行腳本或程式才用得上的 skill。
+RUN_PYTHON_SKILLS = {
+    *OFFICE_SKILLS,
+    "algorithmic-art",
+    "canvas-design",
+    "web-artifacts-builder",
+    "webapp-testing",
+}
+
+
+def test_skills_needing_the_sandbox_say_so():
+    skills = harness.builtin_skills()
+
+    needing = {name for name, item in skills.items() if item.requires}
+
+    assert needing == RUN_PYTHON_SKILLS
+    assert all(
+        skills[name].requires == ["run_python"] for name in RUN_PYTHON_SKILLS
+    )
+
+
+def test_default_web_skills_are_all_official_ones():
+    from harness.web import workspace
+
+    assert set(workspace.DEFAULT_SKILLS) == {
+        *OFFICIAL_SKILLS,
+        "doc-coauthoring",
+    }
+
+
 def test_doc_coauthoring_is_written_from_scratch():
     # 官方的 doc-coauthoring 沒有授權條款，所以不收錄，自己寫一份。
     root = harness.builtin_skills()["doc-coauthoring"].root

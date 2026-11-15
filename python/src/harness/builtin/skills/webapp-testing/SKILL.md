@@ -10,6 +10,7 @@ name: webapp-testing
 description: 用 Playwright 與無頭瀏覽器操作、測試網頁應用：驗證前端功能、除錯 UI 行為、擷取畫面截圖、讀取瀏覽器主控台訊息。使用者要測試或檢查自己寫的網頁、HTML 檔或在沙盒裡跑的網站時使用。沙盒沒有網路，不能測試外部或公司內部的網站。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 # 網頁應用測試

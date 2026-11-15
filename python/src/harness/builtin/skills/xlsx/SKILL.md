@@ -7,6 +7,7 @@ name: xlsx
 description: 試算表檔案是主要的輸入或產出時使用：開啟、讀取、編輯或修正 .xlsx、.xlsm、.xltx、.csv、.tsv（加欄位、寫公式、格式、圖表、清理凌亂資料），從頭建立試算表，或在表格格式之間轉換。使用者提到某個試算表檔案並要對它做事時一定要用。產出不是試算表（例如 Word、HTML 報告、單純的 Python 程式）時不要用。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 # XLSX：建立、編輯與分析試算表

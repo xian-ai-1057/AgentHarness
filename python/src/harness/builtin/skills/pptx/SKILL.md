@@ -8,6 +8,7 @@ name: pptx
 description: 只要用到 .pptx 或 .potx 檔就使用，不論是輸入、產出或兩者：建立投影片、簡報、提案簡報；讀取、解析或擷取 .pptx 的文字（即使內容要用在別的地方，例如寫信或摘要）；編輯或更新既有簡報；合併或分割投影片；處理範本、版面配置、講者備忘稿或註解。使用者提到「簡報」「投影片」「deck」或某個 .pptx/.potx 檔名時都用。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 # PPTX：建立、編輯與分析簡報

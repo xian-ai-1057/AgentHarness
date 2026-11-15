@@ -9,6 +9,7 @@ name: web-artifacts-builder
 description: 用 React、TypeScript、Tailwind CSS 與 shadcn/ui 建構多元件、較複雜的網頁應用，最後打包成單一 HTML 檔。需要狀態管理、路由或 shadcn/ui 元件的複雜互動頁面（儀表板、小工具、互動式報告）時使用；簡單的單檔 HTML 不要用。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 # 網頁應用建構器

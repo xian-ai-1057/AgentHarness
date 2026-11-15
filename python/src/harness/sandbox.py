@@ -17,6 +17,11 @@
 接在工具結果後面（路徑相對於 RunContext.workdir：命令列是專案根目錄，
 網頁版是對話的工作資料夾），網頁版用它顯示檔案卡片。
 
+同一個資料夾一次只跑一個沙盒（見 _exclusive），期間由 files 工具或上傳
+寫入的檔案也不算（見 paths.note_written）；不然兩段對話同時在同一個資料
+夾工作時，會把對方的檔案算成自己產生的。逾時停掉的程式寫出的檔案可能
+不完整，只在文字裡列出，不做成檔案卡片。
+
 pyharness 自己也跑在容器裡時（用 docker-compose.yml 部署），它看到的路徑
 不是主機上的路徑，沒辦法直接掛載。這時專案放在一個 Docker volume 裡，
 用環境變數 HARNESS_SANDBOX_VOLUME 告訴沙盒 volume 的名稱，沙盒改成只掛載
@@ -30,12 +35,16 @@ pyharness 自己也跑在容器裡時（用 docker-compose.yml 部署），它�
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import os
 import pathlib
 import shutil
 import subprocess
+import time
 import uuid
+import weakref
+from collections.abc import AsyncIterator
 from typing import Any
 
 from harness import datatypes
@@ -57,6 +66,14 @@ PRODUCED_MARKER = "[產生的檔案] "
 # 比對產生的檔案時最多看幾個項目、最多列出幾個檔案。
 _SCAN_LIMIT = 5000
 _PRODUCED_LIMIT = 20
+# 等其他程式執行完超過這麼多秒時，在結果裡說明為什麼比較慢才開始。
+_WAIT_NOTICE_SECONDS = 1.0
+# 每個事件迴圈各自一組鎖（asyncio.Lock 只能在建立它的迴圈裡等待），
+# 以沙盒掛載的資料夾為鍵。
+_Locks = dict[str, asyncio.Lock]
+_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Locks]" = (
+    weakref.WeakKeyDictionary()
+)
 
 # 專案裡會被 harness 讀取或執行的位置；掛進容器的話，容器裡的程式可以
 # 改寫它們，進而在主機上執行程式。
@@ -337,19 +354,22 @@ class Sandbox:
         """包成 agent 可以使用的工具（run_python）。"""
 
         async def run_python(context: datatypes.RunContext, code: str) -> str:
-            before = await asyncio.to_thread(snapshot, self.workspace)
-            result = await self.run(code)
-            after = await asyncio.to_thread(snapshot, self.workspace)
-            # 失敗或逾時前寫出的檔案也列出來，部分結果常常還用得上。
-            produced = produced_lines(
-                self.workspace, context.workdir, before, after
-            )
+            async with _exclusive(self.workspace) as waited:
+                before = await asyncio.to_thread(snapshot, self.workspace)
+                result = await self.run(code)
+                after = await asyncio.to_thread(snapshot, self.workspace)
             if result.timed_out:
                 raise tools_lib.ToolError(
                     f"執行超過 {self.timeout_seconds:g} 秒，已停止。請縮小資料"
-                    "範圍或改用更有效率的做法再試一次。" + produced
+                    "範圍或改用更有效率的做法再試一次。"
+                    + unfinished_lines(self.workspace, before, after)
+                    + wait_notice(waited)
                 )
-            output = format_output(result) + produced
+            # 失敗前寫出的檔案也列出來，部分結果常常還用得上。
+            produced = produced_lines(
+                self.workspace, context.workdir, before, after
+            )
+            output = format_output(result) + produced + wait_notice(waited)
             if result.exit_code != 0:
                 raise tools_lib.ToolError(
                     f"程式結束代碼 {result.exit_code}。\n{output}"
@@ -393,19 +413,27 @@ class Sandbox:
             workdir = CONTAINER_WORKDIR
             if inside.parts:
                 workdir = f"{CONTAINER_WORKDIR}/{inside.as_posix()}"
-            before = await asyncio.to_thread(snapshot, self.workspace)
-            result = await self.run_shell(command, workdir, timeout)
-            after = await asyncio.to_thread(snapshot, self.workspace)
-            produced = produced_lines(
-                self.workspace, context.workdir, before, after
-            )
+            async with _exclusive(self.workspace) as waited:
+                before = await asyncio.to_thread(snapshot, self.workspace)
+                result = await self.run_shell(command, workdir, timeout)
+                after = await asyncio.to_thread(snapshot, self.workspace)
+            if result.timed_out:
+                produced = unfinished_lines(self.workspace, before, after)
+            else:
+                produced = produced_lines(
+                    self.workspace, context.workdir, before, after
+                )
             outcome = shell.CommandResult(
                 exit_code=result.exit_code,
                 stdout=result.stdout,
                 stderr=result.stderr,
                 timed_out=result.timed_out,
             )
-            return shell.format_result(outcome, timeout) + produced
+            return (
+                shell.format_result(outcome, timeout)
+                + produced
+                + wait_notice(waited)
+            )
 
         network = "可以連網" if self.network else "沒有網路"
         description = (
@@ -549,18 +577,13 @@ def produced_lines(
         開頭空一行、每個檔案一行（PRODUCED_MARKER 加上相對於專案根目錄
         的路徑），最新的排前面，最多 20 個；沒有產生檔案時為空字串。
     """
-    changed = [
-        (stamp[0], name)
-        for name, stamp in after.items()
-        if before.get(name) != stamp
-    ]
+    changed = _changed(workspace, before, after)
     if not changed:
         return ""
     try:
         base = workspace.resolve().relative_to(root.resolve())
     except ValueError:
         return ""
-    changed.sort(reverse=True)
     lines = [
         f"{PRODUCED_MARKER}{(base / name).as_posix()}"
         for _, name in changed[:_PRODUCED_LIMIT]
@@ -569,6 +592,83 @@ def produced_lines(
     if omitted > 0:
         lines.append(f"（另外還有 {omitted} 個檔案沒有列出）")
     return "\n\n" + "\n".join(lines)
+
+
+def unfinished_lines(
+    workspace: pathlib.Path, before: Snapshot, after: Snapshot
+) -> str:
+    """逾時停掉的程式寫出的檔案：只用文字列出，不做成檔案卡片。
+
+    這些檔案常常是寫到一半或暫存用的（例如測試網頁時的截圖），列成
+    「產生的檔案」會讓使用者以為是成品。
+
+    Args:
+        workspace: 沙盒的工作目錄。
+        before: 執行前的 snapshot。
+        after: 執行後的 snapshot。
+
+    Returns:
+        開頭空一行的說明，路徑相對於沙盒的工作目錄；沒有檔案時為
+        空字串。
+    """
+    changed = _changed(workspace, before, after)
+    if not changed:
+        return ""
+    names = [name for _, name in changed[:_PRODUCED_LIMIT]]
+    omitted = len(changed) - len(names)
+    more = f"等 {len(changed)} 個檔案" if omitted > 0 else ""
+    return (
+        f"\n\n停止前寫出了 {'、'.join(names)}{more}（相對於 "
+        f"{CONTAINER_WORKDIR}），可能不完整，沒有交給使用者。用得上的話"
+        "請重新產生；暫存的檔案請用 run_python 刪掉，不要留在使用者的"
+        "資料夾裡。"
+    )
+
+
+def wait_notice(waited: float) -> str:
+    """等其他程式執行完才開始時，接在結果後面的說明。"""
+    if waited < _WAIT_NOTICE_SECONDS:
+        return ""
+    return (
+        f"\n\n（同一個資料夾裡有其他對話的程式在執行，等了 {waited:.0f} "
+        "秒才開始。）"
+    )
+
+
+@contextlib.asynccontextmanager
+async def _exclusive(workspace: pathlib.Path) -> AsyncIterator[float]:
+    """同一個資料夾一次只讓一個沙盒執行，回傳等了幾秒。
+
+    產生的檔案是執行前後比對資料夾找出來的；同一個人開兩段對話（或
+    共用資料夾的不同成員）同時執行程式時，不排隊就分不出是誰寫的。
+    """
+    loop = asyncio.get_running_loop()
+    locks = _LOCKS.setdefault(loop, {})
+    key = str(pathlib.Path(workspace).resolve())
+    lock = locks.setdefault(key, asyncio.Lock())
+    start = time.monotonic()
+    async with lock:
+        yield time.monotonic() - start
+
+
+def _changed(
+    workspace: pathlib.Path, before: Snapshot, after: Snapshot
+) -> list[tuple[int, str]]:
+    """執行期間新增或修改的檔案，最新的排前面。
+
+    最後一次寫入是 files 工具或上傳做的（paths.note_written 記下的
+    狀態和現在相同）不算：那是其他對話同時寫的，或這段對話自己用
+    files 工具寫的，各自已經有檔案卡片。
+    """
+    root = pathlib.Path(workspace).resolve()
+    changed = [
+        (stamp[0], name)
+        for name, stamp in after.items()
+        if before.get(name) != stamp
+        and paths.written_stamp(root / name) != stamp
+    ]
+    changed.sort(reverse=True)
+    return changed
 
 
 def from_config(root: pathlib.Path, config: Any) -> Sandbox | None:

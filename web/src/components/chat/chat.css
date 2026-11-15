@@ -2354,6 +2354,7 @@ button.ch-cite:focus-visible {
   font-size: 13px;
 }
 
+/* 閃兩下之後螢光底與左邊的線都淡掉，變回一般文字（使用者要求不保留螢光底）。 */
 @keyframes ch-source-flash {
   0%,
   40% {
@@ -2365,13 +2366,26 @@ button.ch-cite:focus-visible {
   }
 }
 
+@keyframes ch-source-fade {
+  from {
+    background: var(--highlight, #fff1a8);
+    border-left-color: var(--accent);
+  }
+  to {
+    background: transparent;
+    border-left-color: transparent;
+  }
+}
+
 .ch-source-flash .ch-source-mark {
-  animation: ch-source-flash 1.4s ease-out 2;
+  animation:
+    ch-source-flash 1.4s ease-out 2,
+    ch-source-fade 0.6s ease-out 2.8s forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .ch-source-flash .ch-source-mark {
-    animation: none;
+    animation: ch-source-fade 0.6s ease-out 2.8s forwards;
   }
 }
 
@@ -2435,6 +2449,7 @@ button.ch-cite:focus-visible {
   display: block;
 }
 
+/* 閃兩下之後淡掉，PDF 變回原本的樣子（使用者要求不保留螢光底）。 */
 .ch-pdf-mark {
   position: absolute;
   border-radius: 2px;
@@ -2442,7 +2457,9 @@ button.ch-cite:focus-visible {
   mix-blend-mode: multiply;
   pointer-events: none;
   scroll-margin: 96px;
-  animation: ch-pdf-flash 1.4s ease-out 2;
+  animation:
+    ch-pdf-flash 1.4s ease-out 2,
+    ch-pdf-fade 0.6s ease-out 2.8s forwards;
 }
 
 @keyframes ch-pdf-flash {
@@ -2456,9 +2473,18 @@ button.ch-cite:focus-visible {
   }
 }
 
+@keyframes ch-pdf-fade {
+  from {
+    background: rgba(255, 214, 0, 0.42);
+  }
+  to {
+    background: transparent;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ch-pdf-mark {
-    animation: none;
+    animation: ch-pdf-fade 0.6s ease-out 2.8s forwards;
   }
 }
 

@@ -705,7 +705,7 @@ Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
 | OpenAI Agents SDK | `Agent` 與執行迴圈分離、用 schema 定義工具參數、`context.deps` 傳遞相依物件、工具層級的 `needsApproval` |
 | Claude Agent SDK / Claude Code | Hooks、權限模式與 allow / deny / ask 規則、只附加不改寫的 JSONL 對話紀錄、用 Markdown 檔定義 agent、用 MCP 接外部工具、內建工具（Read / Edit / Glob / Grep / Bash / WebFetch）、`SKILL.md` 格式的 skills |
 | OpenAI Codex | `update_plan` 計畫工具、`shell` 指令工具、內建 skills（skill-creator 等） |
-| [Anthropic skills](https://github.com/anthropics/skills) | 內建的 xlsx、docx、pptx、pdf skills（Apache 2.0，腳本照原樣收錄，說明改寫成繁體中文） |
+| [Anthropic skills](https://github.com/anthropics/skills) | 內建的 xlsx、docx、pptx、pdf、skill-creator、web-artifacts-builder、webapp-testing、mcp-builder、canvas-design、algorithmic-art、theme-factory、frontend-design、internal-comms、brand-guidelines skills（Apache 2.0，腳本照原樣收錄，說明改寫成繁體中文） |
 | Hermes Agent | 不綁定模型供應商、toolsets（成組啟用工具）、專案層級的 `AGENTS.md` |
 | DeepSeek Harness | 對話壓縮的做法（Python 版） |
 
@@ -722,7 +722,8 @@ Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
   - 知識庫（RAG）
   - Skills（需要時才載入的說明文件），包含內建的 skill-creator、
     code-review 等 skills，以及改寫自 Anthropic 官方、處理 Excel、Word、
-    PowerPoint、PDF 的 xlsx、docx、pptx、pdf skills
+    PowerPoint、PDF 的 xlsx、docx、pptx、pdf skills 與其他官方範例 skills
+    （網頁應用、網頁測試、MCP 伺服器、海報設計等）
   - 跨對話的長期記憶
   - 訊息防護（個資遮蔽、提示注入偵測）
   - 對話過長時的自動壓縮（Python 版壓縮過的對話，TypeScript 版可以

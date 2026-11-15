@@ -293,15 +293,25 @@ def test_builtin_skills_are_complete():
     loaded = harness.builtin_skills()
 
     assert sorted(loaded) == [
+        "algorithmic-art",
+        "brand-guidelines",
+        "canvas-design",
         "code-review",
         "debugging",
+        "doc-coauthoring",
         "docx",
+        "frontend-design",
         "git-commit",
+        "internal-comms",
+        "mcp-builder",
         "pdf",
         "planning",
         "pptx",
         "skill-creator",
+        "theme-factory",
+        "web-artifacts-builder",
         "web-research",
+        "webapp-testing",
         "xlsx",
     ]
     for skill in loaded.values():
@@ -324,10 +334,32 @@ def test_resource_files_work_under_hidden_parent_folder(tmp_path):
 
 
 OFFICE_SKILLS = ["xlsx", "docx", "pptx", "pdf"]
+# 改寫自 Anthropic 官方 skills 的全部 skill。
+OFFICIAL_SKILLS = [
+    *OFFICE_SKILLS,
+    "algorithmic-art",
+    "brand-guidelines",
+    "canvas-design",
+    "frontend-design",
+    "internal-comms",
+    "mcp-builder",
+    "skill-creator",
+    "theme-factory",
+    "web-artifacts-builder",
+    "webapp-testing",
+]
+# 會在工作資料夾產生中間檔的 skill。
+WORKING_SKILLS = [
+    *OFFICE_SKILLS,
+    "canvas-design",
+    "mcp-builder",
+    "web-artifacts-builder",
+    "webapp-testing",
+]
 
 
-@pytest.mark.parametrize("name", OFFICE_SKILLS)
-def test_office_skills_keep_license_and_mention_changes(name):
+@pytest.mark.parametrize("name", OFFICIAL_SKILLS)
+def test_official_skills_keep_license_and_mention_changes(name):
     skill = harness.builtin_skills()[name]
     text = (skill.root / "SKILL.md").read_text(encoding="utf-8")
 
@@ -335,21 +367,43 @@ def test_office_skills_keep_license_and_mention_changes(name):
     assert "Apache License" in (skill.root / "LICENSE.txt").read_text("utf-8")
     assert "github.com/anthropics/skills" in text
     assert "修改內容" in text
+
+
+@pytest.mark.parametrize("name", WORKING_SKILLS)
+def test_working_skills_use_their_own_folder(name):
+    text = (harness.builtin_skills()[name].root / "SKILL.md").read_text("utf-8")
+
     # 同一個人的對話共用工作資料夾：中間檔放在每次工作專用的資料夾。
     assert ".skill-work/" in text
 
 
-@pytest.mark.parametrize("name", OFFICE_SKILLS)
-def test_office_skill_scripts_exist_where_instructions_say(name):
-    # 沙盒映像檔把 builtin/skills 複製到 /opt/skills，說明裡寫的每個腳本
+def test_doc_coauthoring_is_written_from_scratch():
+    # 官方的 doc-coauthoring 沒有授權條款，所以不收錄，自己寫一份。
+    root = harness.builtin_skills()["doc-coauthoring"].root
+
+    assert not (root / "LICENSE.txt").exists()
+    assert "自行撰寫" in (root / "SKILL.md").read_text("utf-8")
+
+
+@pytest.mark.parametrize("name", OFFICIAL_SKILLS)
+def test_skill_files_exist_where_instructions_say(name):
+    # 沙盒映像檔把 builtin/skills 複製到 /opt/skills，說明裡寫的每個檔案
     # 路徑都要真的存在。
     root = harness.builtin_skills()[name].root
     text = (root / "SKILL.md").read_text(encoding="utf-8")
-    paths = set(re.findall(r"/opt/skills/([\w/.-]+\.(?:py|js))", text))
+    paths = set(
+        re.findall(r"/opt/skills/([\w/.-]+\.(?:py|js|sh|pdf|html))", text)
+    )
 
-    assert paths, "說明裡沒有提到任何腳本"
     for path in paths:
         assert (root.parent / path).is_file(), path
+
+
+@pytest.mark.parametrize("name", OFFICE_SKILLS)
+def test_office_skills_mention_their_scripts(name):
+    text = (harness.builtin_skills()[name].root / "SKILL.md").read_text("utf-8")
+
+    assert re.search(r"/opt/skills/[\w/.-]+\.(?:py|js)", text)
 
 
 def test_sandbox_image_installs_builtin_skills():
@@ -357,6 +411,12 @@ def test_sandbox_image_installs_builtin_skills():
     text = (dockerfile / "sandbox.Dockerfile").read_text(encoding="utf-8")
 
     assert "COPY python/src/harness/builtin/skills /opt/skills" in text
+    # 沙盒沒有網路：web-artifacts-builder、webapp-testing、algorithmic-art、
+    # mcp-builder 需要的東西都在建置時裝好。
+    assert "/opt/web-artifact" in text
+    assert "playwright install" in text
+    assert "p5@" in text
+    assert "@modelcontextprotocol/server" in text
 
 
 def test_load_skill_summarizes_scripts_folder(tmp_path):

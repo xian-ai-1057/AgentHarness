@@ -108,6 +108,10 @@ LibreOffice 時，網頁改用瀏覽器裡的簡易預覽。
 需要的工具：pandoc、qpdf、poppler-utils、tesseract（繁中與簡中 OCR）、
 Node.js 與 pptxgenjs、docx、pdf-lib、pdfjs-dist，以及 pypdf、reportlab、
 markitdown 等 Python 套件，並把內建 skills 的腳本複製到 `/opt/skills/`。
+[其他需要沙盒的 skills](/advanced/skills#其他改寫自官方的-skills) 用到的 Playwright 與無頭
+Chromium、MCP SDK、TypeScript、p5.js 與 React 專案範本（`/opt/web-artifact`）
+也一併裝好。全部裝好後映像檔約 4 GB；沙盒沒有網路，所以這些都必須在建置
+時下載（建置的機器要能連 Debian、PyPI、npm 與 Playwright 的下載站）。
 沙盒沒有網路，這些都在建置時裝好。建置目錄是 repo 根目錄，自己建置時：
 
 ```bash

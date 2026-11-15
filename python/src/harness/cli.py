@@ -480,6 +480,22 @@ if lacking:
     print("文件 skills 缺少：", "、".join(lacking))
 else:
     print("文件 skills（xlsx、docx、pptx、pdf）：工具齊全")
+# 其他需要沙盒的內建 skills。
+others = {
+    "webapp-testing（Playwright）": importlib.util.find_spec("playwright"),
+    "mcp-builder（Python mcp）": importlib.util.find_spec("mcp"),
+    "web-artifacts-builder（專案範本）": os.path.isdir(
+        "/opt/web-artifact/node_modules"
+    ),
+    "algorithmic-art（p5.js）": os.path.isfile(
+        "/usr/local/lib/node_modules/p5/lib/p5.min.js"
+    ),
+}
+absent = [name for name, ok in others.items() if not ok]
+if absent:
+    print("其他 skills 缺少：", "、".join(absent))
+else:
+    print("其他 skills（網頁應用、網頁測試、MCP、演算法藝術）：工具齊全")
 try:
     socket.create_connection(("pypi.org", 443), timeout=3).close()
     print("網路：可以連線")

@@ -57,6 +57,13 @@ extend-exclude = [
     "src/harness/builtin/skills/pdf",
     "src/harness/builtin/skills/pptx",
     "src/harness/builtin/skills/xlsx",
+    "src/harness/builtin/skills/*/SKILL.md",
+    "src/harness/builtin/skills/mcp-builder/reference",
+    "src/harness/builtin/skills/mcp-builder/scripts",
+    "src/harness/builtin/skills/skill-creator/scripts",
+    "src/harness/builtin/skills/skill-creator/eval-viewer",
+    "src/harness/builtin/skills/webapp-testing/scripts",
+    "src/harness/builtin/skills/webapp-testing/examples",
 ]
 
 [tool.ruff.lint]

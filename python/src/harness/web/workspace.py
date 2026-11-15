@@ -2670,12 +2670,17 @@ class Workspace:
             raise WebError(400, "內容必須是物件")
         access = self._access(user)
 
-        def check(key: str, allowed: set[str], what: str) -> None:
+        def check(
+            key: str,
+            allowed: set[str],
+            what: str,
+            names: dict[str, str] | None = None,
+        ) -> None:
             chosen = body.get(key)
             if not _is_string_list(chosen):
                 return
             unknown = [
-                item
+                (names or {}).get(item.strip(), item.strip())
                 for item in chosen
                 if item.strip() and item.strip() not in allowed
             ]
@@ -2691,10 +2696,16 @@ class Workspace:
             },
             "工具組",
         )
+        # 自己的個人知識庫也能選：自建 agent 和個人知識庫都只有自己能用。
+        # 錯誤訊息顯示公司知識庫的名稱；別人的個人知識庫只顯示識別碼。
         check(
             "knowledgeBases",
-            {base.id for base in self._visible_bases(access)},
+            {base.id for base in self._chat_bases(user, access)},
             "知識庫",
+            {
+                base.id: base.name
+                for base in self.project.knowledge_bases.values()
+            },
         )
         check("skills", set(self._available_skills()), "技能")
         model = body.get("model")
@@ -2739,6 +2750,22 @@ class Workspace:
             raise WebError(400, "這個 Agent 已經刪除了，請開一段新的對話。")
         return self._build_user_agent(found)
 
+    def _owner_personal_bases(
+        self, record: user_agents_lib.UserAgent
+    ) -> list[knowledge_lib.KnowledgeBase]:
+        """自建 agent 挑的、建立者自己的個人知識庫。
+
+        個人知識庫已經刪除、換了主人或功能被管理者關掉時略過。
+        """
+        if not self.personal.limits().enabled:
+            return []
+        found = []
+        for base_id in record.knowledge_bases:
+            base = self.personal.get(base_id)
+            if base is not None and base.owner_id == record.owner_id:
+                found.append(self.personal.knowledge_base(base))
+        return found
+
     def _build_user_agent(
         self, record: user_agents_lib.UserAgent
     ) -> agents_lib.Agent:
@@ -2757,7 +2784,7 @@ class Workspace:
             project.knowledge_bases[base_id]
             for base_id in record.knowledge_bases
             if base_id in project.knowledge_bases
-        ]
+        ] + self._owner_personal_bases(record)
         if bases:
             search = knowledge_lib.search_tool(bases, None, 5)
             tools[search.name] = search

@@ -2291,3 +2291,17 @@ button.ch-cite:focus-visible {
 .ch-tab-body .scroll:focus:not(:focus-visible) {
   outline: none;
 }
+
+/* 自建 agent 刪掉後，舊對話只能看：輸入框換成這段提示。 */
+.ch-agent-deleted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 12px 12px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--soft);
+  color: var(--ink);
+}

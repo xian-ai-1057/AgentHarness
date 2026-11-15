@@ -237,10 +237,10 @@ const EMPTY_DRAFT: Draft = {
   skills: [],
 };
 
-/** 新的 agent 預設勾選的工具：大家都會用到的內建工具組。 */
+/** 新的 agent 預設只勾「讀寫檔案」，其他工具由使用者自己決定要不要開。 */
 function defaultToolsets(project: ProjectInfo): string[] {
   return project.toolsets
-    .filter((set) => set.builtin && ["files", "web", "plan"].includes(set.name))
+    .filter((set) => set.builtin && set.name === "files")
     .map((set) => set.name);
 }
 
@@ -351,13 +351,14 @@ export function AgentEditor({ id }: { id: string }) {
   const withMissing = (
     items: { name: string; label: string; hint?: string }[],
     chosen: string[],
+    labelOf: (name: string) => string = (name) => name,
   ) => [
     ...items,
     ...chosen
       .filter((name) => !items.some((item) => item.name === name))
       .map((name) => ({
         name,
-        label: name,
+        label: labelOf(name),
         hint: "目前不能使用",
         missing: true,
       })),
@@ -544,7 +545,11 @@ export function AgentEditor({ id }: { id: string }) {
             legend="工具"
             help="勾選這個 Agent 可以使用的工具。需要確認的工具照樣會先問你。"
             empty="管理者還沒有開放工具給你。"
-            items={withMissing(options.toolsets, draft.toolsets)}
+            items={withMissing(
+              options.toolsets,
+              draft.toolsets,
+              (name) => toolsetText(name, true, []).label,
+            )}
             value={draft.toolsets}
             onChange={(toolsets) => edit({ toolsets })}
           />

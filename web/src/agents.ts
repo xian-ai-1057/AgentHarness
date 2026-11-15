@@ -33,6 +33,15 @@ export function sessionAgentLabel(
   return isUserAgent(summary.agent) ? "已刪除的 Agent" : summary.agent;
 }
 
+/** 這段對話用的自建 agent 已經被刪掉了（專案資訊還沒載入時不算）。 */
+export function isDeletedAgent(
+  project: ProjectInfo | undefined,
+  agent: string | undefined,
+): boolean {
+  if (!project || !isUserAgent(agent)) return false;
+  return !project.agents.some((item) => item.name === agent);
+}
+
 /** 內建工具組的白話說明；專案自己的工具組顯示名稱與工具。 */
 const BUILTIN_TOOLSETS: Record<string, { label: string; hint: string }> = {
   files: {

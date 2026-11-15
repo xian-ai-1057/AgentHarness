@@ -736,7 +736,8 @@ knowledge:
 - 直接連 OpenAI 時列出 text-embedding 系列；其他供應商沒有清單，選
   「其他」自行輸入。
 
-模型網址上沒有任何 embedding 模型（或查不到清單）時，「Embedding 模型」
+模型網址上沒有任何 embedding 模型、查不到清單，或根本沒有模型網址（例如
+直接連 Anthropic）時，「Embedding 模型」
 下方會顯示提醒：只能選關鍵字或演算法，要用語意檢索得先在模型中台加上
 embedding 模型。LiteLLM 標明用途時，目前設定的模型不在網址上也會提醒。
 

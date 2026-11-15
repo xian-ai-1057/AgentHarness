@@ -56,9 +56,6 @@ function listNote(found: Loaded): string {
   if ("loading" in found) return "正在查詢模型連線上的模型…";
   // 查詢失敗另外用醒目的提醒顯示（見 embeddingWarning）。
   if (found.source === "error") return "";
-  if (found.source === "none") {
-    return "沒有設定模型端點，列不出模型；可以選「其他」自行輸入。";
-  }
   if (found.source === "names") {
     return "依模型名稱判斷用途，清單裡沒有的請選「其他」自行輸入。";
   }
@@ -70,9 +67,10 @@ function rerankNote(found: Loaded): string {
   if (found.source === "error") {
     return `列不出模型網址上的 rerank 模型（${found.error ?? "查詢失敗"}），可以選「其他」自行輸入。`;
   }
-  if (found.source !== "none" && found.rerank.length === 0) {
-    return "這個模型網址上沒有 rerank 模型。";
+  if (found.source === "none") {
+    return "目前的模型連線沒有模型網址，沒有可以選的 rerank 模型；可以選「其他」自行輸入。";
   }
+  if (found.rerank.length === 0) return "這個模型網址上沒有 rerank 模型。";
   return listNote(found);
 }
 

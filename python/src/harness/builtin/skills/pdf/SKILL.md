@@ -50,9 +50,10 @@ tools: [files]
 
 照 FORMS.md 用 `extract_form_field_info.py` 取得 `field_info.json` 之後，值裡
 有中文時，改成把文字直接畫在頁面上，並拿掉原本的表單欄位（填好的檔案就
-不能再當表單編輯）。**動手前先告訴使用者「填好的 PDF 會是一般 PDF，不能再當
-表單修改欄位」**，交付時也再提醒一次；使用者需要保留可編輯的欄位時，改用
-FORMS.md 的 `fill_fillable_fields.py`，並說明有些檢視器會把中文顯示成空白。
+不能再當表單編輯）。**交付時一定要在回覆裡寫明：「填好的 PDF 是一般 PDF，
+不能再當表單修改欄位；原本的空白表單沒有變動。需要保留可編輯的欄位，請告訴
+我。」** 使用者要保留可編輯的欄位時，改用 FORMS.md 的
+`fill_fillable_fields.py`，並說明有些檢視器會把中文顯示成空白。
 
 ```python
 import io, json

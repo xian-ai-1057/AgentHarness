@@ -278,7 +278,8 @@ async def _run_loop(
             handoff = {"from": agent.name, "to": target.name}
             yield datatypes.Event("handoff", handoff)
             agent = target
-            context = _make_context(agent, session, options)
+            # 換手後同一輪的暫存資料（例如引用編號）繼續沿用。
+            context = dataclasses.replace(context, agent_name=agent.name)
             toolbox = _build_toolbox(agent, session, options, usage)
         elif _loaded_skill(results):
             # 載入 skill 後，它的專屬工具從下一次呼叫模型開始可用。

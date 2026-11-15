@@ -65,6 +65,10 @@ def my_orders(context: harness.RunContext) -> list[dict]:
 
 `context.deps` 就是呼叫 `harness.run(..., deps=...)` 時傳進來的物件。
 
+`context.state` 是這一輪執行期間工具共用的字典，下一輪重新開始；適合放
+「這一輪已經用到第幾號」這類計數（內建的 `search_knowledge` 用它讓同一輪
+的引用編號接續）。鍵名加上自己的前綴，避免和別的工具撞名。
+
 ::: warning 使用者身分不要讓模型填
 使用者身分應該從 `context.deps` 取得，不要做成工具的參數，否則模型可以填別人的 ID。
 :::

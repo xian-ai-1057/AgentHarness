@@ -1624,6 +1624,8 @@ class TestProjectChoices:
             "knowledgeSources": True,
             # 稽核紀錄本機模式也有（帳號是 local）。
             "audit": True,
+            # 自建 Agent（本機模式也有，擁有者是本機使用者）。
+            "userAgents": True,
         }
         assert info["auth"] == {
             "mode": "local",

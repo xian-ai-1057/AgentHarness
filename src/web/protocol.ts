@@ -84,6 +84,8 @@ export interface SessionSummary {
   notice?: string;
   /** 正在等使用者決定的工具呼叫，讓列表可以直接允許或拒絕。 */
   approval?: Approval;
+  /** 自建 agent 的名稱（Python 版）；agent 刪掉後仍然保留。 */
+  agentLabel?: string;
 }
 
 /** 寫檔類工具執行前，給使用者看的內容。 */
@@ -270,6 +272,11 @@ export interface ServerFeatures {
    * 與工具核准的紀錄（見 AuditEntry）。
    */
   audit?: boolean;
+  /**
+   * 自建 Agent（Python 版）：每個人在 /agents 建立自己的 agent，只能挑
+   * 所屬群組開放的工具組與知識庫（見 UserAgentInfo）。
+   */
+  userAgents?: boolean;
 }
 
 /**
@@ -581,7 +588,12 @@ export interface ToolsetInfo {
 export type SettingSource = "agent" | "config" | "env" | "default";
 
 export interface AgentInfo {
+  /** 對話裡用的名稱；自建的 agent 是 user:<識別碼>。 */
   name: string;
+  /** 顯示的名稱（自建的 agent）；沒有時顯示 name。 */
+  label?: string;
+  /** 這個人自己建立的 agent 才有。 */
+  custom?: { id: string; starters: string[] };
   description: string;
   tools: string[];
   /** 實際使用的模型名稱；都沒設定時為 null。 */
@@ -788,3 +800,50 @@ export type ServerEvent =
   | { type: "project" }
   /** 專案（ChatCategory）有變動：重新讀取 GET /api/categories。 */
   | { type: "categories" };
+
+/**
+ * 自己建立的 agent（Python 版，features.userAgents）。只有建立的人看得到。
+ *
+ *   GET    /api/agents             → UserAgentList
+ *   POST   /api/agents             UserAgentInput → UserAgentInfo
+ *   PATCH  /api/agents/:id         Partial<UserAgentInput> → UserAgentInfo
+ *   DELETE /api/agents/:id
+ *
+ * 工具組、知識庫與模型只能挑這個人能用的（群組開放的、模型選單裡的），
+ * 執行時再依群組限制一次。開新對話時 agent 填 key。
+ */
+export interface UserAgentInput {
+  name: string;
+  description: string;
+  /** 指示（角色指令）。 */
+  instructions: string;
+  /** 開場建議，最多 limits.starters 個。 */
+  starters: string[];
+  /** 預設模型；null 表示跟著專案的預設模型。 */
+  model: string | null;
+  /** 工具組名稱（ToolsetInfo.name）。 */
+  toolsets: string[];
+  /** 知識庫識別碼（KnowledgeBaseInfo.id）。 */
+  knowledgeBases: string[];
+  /** 技能名稱（SkillInfo.name）。 */
+  skills: string[];
+}
+
+export interface UserAgentInfo extends UserAgentInput {
+  id: string;
+  /** 對話裡的 agent 名稱（user:<id>）。 */
+  key: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UserAgentList {
+  agents: UserAgentInfo[];
+  limits: {
+    name: number;
+    description: number;
+    instructions: number;
+    starter: number;
+    starters: number;
+  };
+}

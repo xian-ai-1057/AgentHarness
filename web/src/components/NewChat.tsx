@@ -7,10 +7,14 @@
  *
  * 伺服器支援工作資料夾時，輸入框可以選資料夾：上傳的檔案放進那個
  * 資料夾，建立對話時一起送出（SessionOptions.folder）。
+ *
+ * ?agent=<名稱> 預先選好 agent（Agent 頁的「開始對話」）。選了自己建立的
+ * agent 時，上方顯示它的名稱與說明，建議換成它的開場建議。
  */
 
 import { useEffect, useMemo, useState } from "react";
 import type { SessionOptions } from "../../../src/web/protocol.ts";
+import { agentInitial, agentLabel } from "../agents.ts";
 import { api } from "../api.ts";
 import { isAdmin } from "../auth.ts";
 import { activeFolder, foldersEnabled } from "../folders.ts";
@@ -42,7 +46,10 @@ const SUGGESTIONS = [
 
 export function NewChat() {
   const project = useStore((s) => s.project);
-  const [agentName, setAgentName] = useState<string>();
+  const agentParam = useSearchParam("agent");
+  const [agentName, setAgentName] = useState<string | undefined>(
+    agentParam ?? undefined,
+  );
   const [error, setError] = useState<string>();
   const [draft, setDraft] = useState<{ text: string }>();
   const [sending, setSending] = useState<{
@@ -62,6 +69,13 @@ export function NewChat() {
   useEffect(() => {
     document.title = project ? `${project.name} · Harness` : "Harness";
   }, [project]);
+
+  // 從 Agent 頁換了一個 agent 開新對話（網址的 ?agent= 變了）。
+  useEffect(() => {
+    if (!agentParam) return;
+    setAgentName(agentParam);
+    setOptions((current) => ({ ...current, tools: null }));
+  }, [agentParam]);
 
   const agent = useMemo(
     () =>
@@ -176,11 +190,19 @@ export function NewChat() {
     }
   };
 
+  const provided = project.agents.filter((item) => !item.custom);
+  const mine = project.agents.filter((item) => item.custom);
+  const agentOption = (item: (typeof project.agents)[number]) => (
+    <option key={item.name} value={item.name}>
+      {agentLabel(item)}
+      {item.description ? ` — ${item.description}` : ""}
+    </option>
+  );
   const agentPicker =
     project.agents.length > 1 ? (
       <label className="select-chip">
         <span className="ch-hide-narrow">agent：</span>
-        {agent.name}
+        {agentLabel(agent)}
         <ChevronDownIcon />
         <select
           aria-label="選擇 agent"
@@ -191,17 +213,25 @@ export function NewChat() {
             setOptions((current) => ({ ...current, tools: null }));
           }}
         >
-          {project.agents.map((item) => (
-            <option key={item.name} value={item.name}>
-              {item.name}
-              {item.description ? ` — ${item.description}` : ""}
-            </option>
-          ))}
+          {mine.length > 0 ? (
+            <>
+              <optgroup label="我的 Agent">{mine.map(agentOption)}</optgroup>
+              <optgroup label="管理者提供的">
+                {provided.map(agentOption)}
+              </optgroup>
+            </>
+          ) : (
+            project.agents.map(agentOption)
+          )}
         </select>
       </label>
     ) : composerOptions ? undefined : (
-      <span className="select-chip">agent：{agent.name}</span>
+      <span className="select-chip">agent：{agentLabel(agent)}</span>
     );
+  // 自建的 agent 有開場建議時，取代一般的建議。
+  const starters = agent.custom?.starters.length
+    ? agent.custom.starters.map((text) => ({ label: text, text }))
+    : SUGGESTIONS;
 
   return (
     <FolderContext.Provider value={folder}>
@@ -229,7 +259,22 @@ export function NewChat() {
                     </button>
                   </div>
                 )}
-                <h1 className="ch-greeting anim-in">今天要做什麼？</h1>
+                {agent.custom ? (
+                  <div className="ch-agent-intro anim-in">
+                    <span
+                      className="agent-avatar agent-avatar-lg"
+                      aria-hidden="true"
+                    >
+                      {agentInitial(agentLabel(agent))}
+                    </span>
+                    <h1 className="ch-agent-name">{agentLabel(agent)}</h1>
+                    {agent.description && (
+                      <p className="ch-agent-desc">{agent.description}</p>
+                    )}
+                  </div>
+                ) : (
+                  <h1 className="ch-greeting anim-in">今天要做什麼？</h1>
+                )}
               </>
             )}
 
@@ -272,7 +317,7 @@ export function NewChat() {
                 style={{ animationDelay: "0.12s" }}
                 aria-label="建議"
               >
-                {SUGGESTIONS.map((item) => (
+                {starters.map((item) => (
                   <li key={item.label}>
                     <button
                       type="button"

@@ -79,6 +79,7 @@ from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
 from harness.web import migration
 from harness.web import uploads as uploads_lib
+from harness.web import user_agents as user_agents_lib
 
 Event = dict[str, Any]
 Listener = Callable[[Event], None]
@@ -207,6 +208,8 @@ class _State:
     )
     # options["tools"] 是依哪個 agent 的工具檢查的；只套用在這個 agent。
     tools_agent: str | None = None
+    # 自建 agent 的名稱（建立對話時記下）；agent 刪掉後仍然顯示得出來。
+    agent_label: str | None = None
     # 以 assistant 訊息的索引（字串）為鍵。
     feedback: dict[str, dict[str, Any]] = dataclasses.field(
         default_factory=dict
@@ -242,6 +245,7 @@ class Workspace:
         users: Callable[[str], accounts_lib.User | None] | None = None,
         groups: groups_lib.GroupStore | None = None,
         maintainers: knowledge_admin.MaintainerStore | None = None,
+        user_agents: user_agents_lib.UserAgentStore | None = None,
     ) -> None:
         """建立 Workspace。
 
@@ -257,6 +261,7 @@ class Workspace:
                 agent、工具組、知識庫與知識庫標籤。None 時不限制。
             maintainers: 知識庫的維護者（帳號模式才有）；None 時只有
                 管理者能管理知識庫。
+            user_agents: 使用者自建的 agent；None 時不提供這個功能。
 
         Raises:
             ValueError: harness.yaml 的 workspaces 寫錯。
@@ -274,6 +279,7 @@ class Workspace:
         self._users = users
         self._groups = groups if auth_mode == "accounts" else None
         self._maintainers = maintainers if auth_mode == "accounts" else None
+        self._user_agents = user_agents
         self._model_fn = model_fn or llm.complete
         self._states: dict[str, _State] = {}
         # close() 停下的對話保留「執行中」的記錄，下次啟動時標成中斷。
@@ -390,11 +396,14 @@ class Workspace:
                 else (agents[0] if agents else project.default_agent)
             ),
             "agents": [
-                {
-                    **self._agent_info(name, hidden, models, access),
-                    "knowledge": self._agent_bases(name, bases),
-                }
-                for name in agents
+                *(
+                    {
+                        **self._agent_info(name, hidden, models, access),
+                        "knowledge": self._agent_bases(name, bases),
+                    }
+                    for name in agents
+                ),
+                *self._own_agent_infos(user, hidden, models, access, bases),
             ],
             "knowledgeBases": [
                 {
@@ -434,6 +443,7 @@ class Workspace:
                 "knowledgeBases": True,
                 "knowledgeSources": True,
                 "audit": True,
+                "userAgents": self._user_agents is not None,
             },
             "auth": {
                 "mode": self.auth_mode,
@@ -926,10 +936,15 @@ class Workspace:
         self, agent: str, visible: list[knowledge_lib.KnowledgeBase]
     ) -> list[str] | None:
         """agent 預設搜尋的知識庫（只留這個人可以用的）；沒有設定時 None。"""
+        ids = {base.id for base in visible}
+        own = self._user_agent(agent)
+        if own is not None:
+            if not own.knowledge_bases:
+                return None
+            return [item for item in own.knowledge_bases if item in ids]
         setting = self.project.agent_knowledge.get(agent)
         if setting is None:
             return None
-        ids = {base.id for base in visible}
         return [base_id for base_id in setting.bases if base_id in ids]
 
     def _require_groups(self) -> groups_lib.GroupStore:
@@ -1024,7 +1039,7 @@ class Workspace:
             if agent is None:
                 visible = self._visible_agents(self._access(user))
                 agent = visible[0] if visible else self.project.default_agent
-            if agent not in self.project.agents:
+            if not self._knows_agent(user, agent):
                 raise WebError(400, f"沒有 {agent} 這個 agent")
             self._check_run_allowed(user, agent)
             # 先檢查選項，不合法時不會留下空的對話。
@@ -1042,6 +1057,10 @@ class Workspace:
             raise WebError(400, "訊息不可以是空的")
         if state is None:
             state = self._create(user, agent)
+            own = self._own_agent(user, agent)
+            if own is not None:
+                state.agent_label = own.name
+                self._save_meta(state)
             state.category = category
             if chosen != state.options or category is not None:
                 state.options = chosen
@@ -1383,7 +1402,7 @@ class Workspace:
             != state.options["folder"]
         ):
             raise WebError(400, FOLDER_LOCKED)
-        agent = self._active_agent(state).name
+        agent = self._active_name(state)
         state.options = self._checked_options(
             user, changes, state.options, agent
         )
@@ -1402,7 +1421,7 @@ class Workspace:
         _with_options），所以回傳 None，畫面才不會顯示不存在的限制。
         """
         options = dict(state.options)
-        if state.tools_agent != self._active_agent(state).name:
+        if state.tools_agent != self._active_name(state):
             options["tools"] = None
         return options
 
@@ -2345,6 +2364,247 @@ class Workspace:
         """模型連線或模型清單改了：下次重新向模型中台查詢。"""
         self._model_access.clear()
 
+    # ---- 自建 agent（見 user_agents.py）----
+
+    def list_user_agents(self, user: accounts_lib.User) -> dict[str, Any]:
+        """這個人自己建立的 agent（完整設定）。"""
+        store = self._require_user_agents()
+        return {
+            "agents": [item.info() for item in store.owned_by(user.id)],
+            "limits": {
+                "name": user_agents_lib.NAME_LIMIT,
+                "description": user_agents_lib.DESCRIPTION_LIMIT,
+                "instructions": user_agents_lib.INSTRUCTIONS_LIMIT,
+                "starter": user_agents_lib.STARTER_LIMIT,
+                "starters": user_agents_lib.STARTERS_MAX,
+            },
+        }
+
+    def create_user_agent(
+        self, user: accounts_lib.User, body: Any
+    ) -> dict[str, Any]:
+        """建立自己的 agent；只能挑自己能用的工具組、知識庫、技能與模型。
+
+        Raises:
+            WebError: 欄位不對，或挑了不能用的資源。
+        """
+        store = self._require_user_agents()
+        self._check_agent_resources(user, body)
+        with _user_agent_errors():
+            created = store.create(user.id, body)
+        self._emit({"type": "project"}, user.id)
+        return created.info()
+
+    def update_user_agent(
+        self, user: accounts_lib.User, agent_id: str, body: Any
+    ) -> dict[str, Any]:
+        """修改自己的 agent；下一輪對話開始照新的設定。
+
+        Raises:
+            WebError: 找不到（或是別人的）、欄位不對，或挑了不能用的資源。
+        """
+        store = self._require_user_agents()
+        self._require_own_agent(user, agent_id)
+        self._check_agent_resources(user, body)
+        with _user_agent_errors():
+            updated = store.update(agent_id, body)
+        self._emit({"type": "project"}, user.id)
+        return updated.info()
+
+    def delete_user_agent(
+        self, user: accounts_lib.User, agent_id: str
+    ) -> dict[str, Any]:
+        """刪除自己的 agent。用它的舊對話還打得開，但不能再繼續。
+
+        Raises:
+            WebError: 找不到（或是別人的）。
+        """
+        store = self._require_user_agents()
+        self._require_own_agent(user, agent_id)
+        with _user_agent_errors():
+            deleted = store.delete(agent_id)
+        self._emit({"type": "project"}, user.id)
+        return deleted.info()
+
+    def _require_user_agents(self) -> user_agents_lib.UserAgentStore:
+        if self._user_agents is None:
+            raise WebError(400, "這個版本沒有自建 Agent 的功能")
+        return self._user_agents
+
+    def _require_own_agent(
+        self, user: accounts_lib.User, agent_id: str
+    ) -> user_agents_lib.UserAgent:
+        """自己的 agent；別人的和不存在的一樣回 404。"""
+        found = self._own_agent(user, user_agents_lib.KEY_PREFIX + agent_id)
+        if found is None:
+            raise WebError(404, "找不到這個 Agent")
+        return found
+
+    def _check_agent_resources(
+        self, user: accounts_lib.User, body: Any
+    ) -> None:
+        """自建 agent 只能用自己能用的東西：所屬群組開放的工具組與知識庫、
+        專案的技能，以及模型選單裡的模型。格式由 user_agents 檢查。
+
+        Raises:
+            WebError: 挑了不能用的資源。
+        """
+        if not isinstance(body, dict):
+            raise WebError(400, "內容必須是物件")
+        access = self._access(user)
+
+        def check(key: str, allowed: set[str], what: str) -> None:
+            chosen = body.get(key)
+            if not _is_string_list(chosen):
+                return
+            unknown = [
+                item
+                for item in chosen
+                if item.strip() and item.strip() not in allowed
+            ]
+            if unknown:
+                raise WebError(400, f"這些{what}不能使用：{'、'.join(unknown)}")
+
+        check(
+            "toolsets",
+            {
+                name
+                for name in self.project.toolsets
+                if access.allows("toolsets", name)
+            },
+            "工具組",
+        )
+        check(
+            "knowledgeBases",
+            {base.id for base in self._visible_bases(access)},
+            "知識庫",
+        )
+        check("skills", set(self._available_skills()), "技能")
+        model = body.get("model")
+        if isinstance(model, str) and model.strip():
+            names = {item["name"] for item in self._model_options(access)}
+            if model.strip() not in names:
+                raise WebError(400, f"沒有 {model.strip()} 這個模型可以選")
+
+    def _user_agent(self, name: str | None) -> user_agents_lib.UserAgent | None:
+        """name 是自建 agent 時找出它；不是或已經刪除時為 None。"""
+        if self._user_agents is None or not user_agents_lib.is_key(name):
+            return None
+        assert name is not None
+        return self._user_agents.get(user_agents_lib.id_of(name))
+
+    def _own_agent(
+        self, user: accounts_lib.User, name: str | None
+    ) -> user_agents_lib.UserAgent | None:
+        """這個人自己建立的 agent；別人的一律當成不存在。"""
+        found = self._user_agent(name)
+        return (
+            found if found is not None and found.owner_id == user.id else None
+        )
+
+    def _knows_agent(self, user: accounts_lib.User, name: str) -> bool:
+        """name 是專案的 agent，或這個人自己建立的 agent。"""
+        return (
+            name in self.project.agents
+            or self._own_agent(user, name) is not None
+        )
+
+    def _agent_entry(self, name: str) -> agents_lib.Agent:
+        """專案的 agent，或依目前設定組出來的自建 agent。
+
+        Raises:
+            WebError: 自建的 agent 已經刪除。
+        """
+        if not user_agents_lib.is_key(name):
+            return self.project.agents[name]
+        found = self._user_agent(name)
+        if found is None:
+            raise WebError(400, "這個 Agent 已經刪除了，請開一段新的對話。")
+        return self._build_user_agent(found)
+
+    def _build_user_agent(
+        self, record: user_agents_lib.UserAgent
+    ) -> agents_lib.Agent:
+        """把自建 agent 的設定組成 Agent。
+
+        工具組、知識庫與技能已經被拿掉的略過；群組的限制在執行時套用
+        （見 _scoped_agent、_knowledge_converter），和專案的 agent 一樣。
+        專案的 AGENTS.md（共用規範）接在指示後面。
+        """
+        project = self.project
+        tools: dict[str, tools_lib.Tool] = {}
+        for set_name in record.toolsets:
+            for item in project.toolsets.get(set_name, []):
+                tools[item.name] = item
+        bases = [
+            project.knowledge_bases[base_id]
+            for base_id in record.knowledge_bases
+            if base_id in project.knowledge_bases
+        ]
+        if bases:
+            search = knowledge_lib.search_tool(bases, None, 5)
+            tools[search.name] = search
+        available = self._available_skills()
+        chosen_skills = [
+            available[name][0] for name in record.skills if name in available
+        ]
+        model = record.model
+        if model is not None and model not in {
+            item["name"] for item in self._model_options()
+        }:
+            model = None
+        header = f"你是「{record.name}」"
+        if record.description:
+            header += f"：{record.description}"
+        shared = project.root / "AGENTS.md"
+        try:
+            rules = shared.read_text(encoding="utf-8").strip()
+        except OSError:
+            rules = ""
+        config = config_lib.read_config(project.root)
+        params = config.get("modelParams")
+        return agents_lib.Agent(
+            name=record.key,
+            instructions="\n\n".join(
+                part
+                for part in (header + "。", record.instructions, rules)
+                if part
+            ),
+            tools=list(tools.values()),
+            model=model or self._settings["model"],
+            model_params=dict(params) if isinstance(params, dict) else {},
+            max_turns=self._settings["maxTurns"] or 20,
+            description=record.description,
+            skills=chosen_skills,
+        )
+
+    def _own_agent_infos(
+        self,
+        user: accounts_lib.User,
+        hidden: set[int],
+        models: list[dict[str, Any]],
+        access: groups_lib.Access,
+        bases: list[knowledge_lib.KnowledgeBase],
+    ) -> list[dict[str, Any]]:
+        """專案資訊裡這個人自己建立的 agent（AgentInfo 加上 custom）。"""
+        if self._user_agents is None:
+            return []
+        found = []
+        for record in self._user_agents.owned_by(user.id):
+            info = self._agent_info(record.key, hidden, models, access)
+            found.append(
+                {
+                    **info,
+                    "label": record.name,
+                    "custom": {
+                        "id": record.id,
+                        "starters": list(record.starters),
+                    },
+                    "knowledge": self._agent_bases(record.key, bases),
+                }
+            )
+        return found
+
     def _visible_agents(self, access: groups_lib.Access) -> list[str]:
         """可以開始對話的 agent 名稱，預設 agent 排第一。"""
         names = [
@@ -2383,7 +2643,12 @@ class Workspace:
             WebError: 所屬群組沒有開放這個 agent，或沒有開放任何模型。
         """
         access = self._access(user)
-        if not access.allows("agents", agent):
+        if user_agents_lib.is_key(agent):
+            # 自建的 agent 不歸群組的 agent 清單管，但只有建立的人能用；
+            # 它的工具與知識庫在執行時依群組再限制一次。
+            if self._own_agent(user, agent) is None:
+                raise WebError(400, "這個 Agent 已經刪除了，請開一段新的對話。")
+        elif not access.allows("agents", agent):
             raise WebError(
                 403, f"管理者沒有開放 {agent} 給你使用，請聯絡管理者。"
             )
@@ -2396,13 +2661,16 @@ class Workspace:
         models: list[dict[str, Any]] | None = None,
         access: groups_lib.Access = groups_lib.FULL_ACCESS,
     ) -> dict[str, Any]:
-        agent = self.project.agents[name]
+        agent = self._agent_entry(name)
         hidden = hidden or set()
         model = agent.model or llm.default_model()
         # 群組沒有開放 agent 自己的模型時，畫面上顯示實際會用的模型。
         if access.models is not None and model not in access.models:
             model = models[0]["name"] if models else model
         own = self._overrides.get(name, {})
+        custom = self._user_agent(name)
+        if custom is not None and custom.model:
+            own = {**own, "model": custom.model}
         env_model = os.environ.get("HARNESS_MODEL")
         if "model" in own:
             model_source = "agent"
@@ -2509,7 +2777,7 @@ class Workspace:
             tools = changes["tools"]
             if tools is not None:
                 tools = _string_list(tools, "tools")
-                agent = self.project.agents[agent_name]
+                agent = self._agent_entry(agent_name)
                 hidden = self._hidden_tools(user)
                 own = {
                     item.name for item in agent.tools if id(item) not in hidden
@@ -2549,9 +2817,16 @@ class Workspace:
             options["knowledge"] = bases
         return options
 
+    def _active_name(self, state: _State) -> str:
+        """目前負責這段對話的 agent 名稱；自建的 agent 不會轉交，刪掉後
+        也照樣回傳它的名稱。"""
+        if user_agents_lib.is_key(state.agent):
+            return state.agent
+        return self._active_agent(state).name
+
     def _active_agent(self, state: _State):
         """目前負責這段對話的 agent（可能已經轉交給別的 agent）。"""
-        entry = self.project.agents[state.agent]
+        entry = self._agent_entry(state.agent)
         return delegation.active_agent(entry, state.session.messages)
 
     def _run_agent(self, state: _State) -> agents_lib.Agent:
@@ -2821,7 +3096,7 @@ class Workspace:
         return migration.user_dir(self.project.root, owner) / "sessions"
 
     def _create(self, user: accounts_lib.User, agent: str) -> _State:
-        if agent not in self.project.agents:
+        if not self._knows_agent(user, agent):
             raise WebError(400, f"沒有 {agent} 這個 agent")
         session = sessions_lib.create(self._sessions_dir(user.id))
         state = self._track(session, agent, _now(), user.id)
@@ -2870,6 +3145,8 @@ class Workspace:
     def _save_meta(self, state: _State) -> None:
         """把起始 agent、名稱、選項、評價、回覆的模型與允許過的工具存檔。"""
         meta: dict[str, Any] = {"agent": state.agent}
+        if state.agent_label is not None:
+            meta["agentLabel"] = state.agent_label
         if state.custom_title is not None:
             meta["title"] = state.custom_title
         if state.category is not None:
@@ -2910,15 +3187,19 @@ class Workspace:
         updated: float,
         owner: str,
     ) -> _State:
-        entry = self.project.agents.get(
-            agent or "", self.project.agents[self.project.default_agent]
-        )
+        if user_agents_lib.is_key(agent):
+            # 自建的 agent：就算已經刪除也保留名稱，對話照樣打得開。
+            agent_name = agent
+        else:
+            agent_name = self.project.agents.get(
+                agent or "", self.project.agents[self.project.default_agent]
+            ).name
         first = next(
             (m for m in session.messages if m.get("role") == "user"), None
         )
         state = _State(
             session=session,
-            agent=entry.name,
+            agent=agent_name,
             title=_title(first.get("content") or "") if first else _UNTITLED,
             updated_at=updated,
             owner=owner,
@@ -2942,14 +3223,23 @@ class Workspace:
         self._emit({"type": "session", "summary": self._summary(state)})
 
     def _summary(self, state: _State) -> dict[str, Any]:
-        # 對話可能已經轉交給別的 agent，顯示目前負責的那個。
-        entry = self.project.agents[state.agent]
-        active = delegation.active_agent(entry, state.session.messages)
+        # 對話可能已經轉交給別的 agent，顯示目前負責的那個。自建的 agent
+        # 不會轉交，名稱用它目前的名稱（刪掉後用建立對話時記下的）。
+        label = None
+        if user_agents_lib.is_key(state.agent):
+            active_name = state.agent
+            own = self._user_agent(state.agent)
+            label = own.name if own is not None else state.agent_label
+        else:
+            entry = self.project.agents[state.agent]
+            active_name = delegation.active_agent(
+                entry, state.session.messages
+            ).name
         pending = next(iter(state.approvals.values()), None)
         summary = {
             "id": state.session.id,
             "title": self._title(state),
-            "agent": active.name,
+            "agent": active_name,
             "model": state.options["model"],
             "status": state.status,
             "updatedAt": state.updated_at,
@@ -2964,6 +3254,7 @@ class Workspace:
             "stopReason": state.stop_reason,
             "approval": pending.approval if pending else None,
             "category": state.category,
+            "agentLabel": label,
         }
         summary.update({k: v for k, v in optional.items() if v is not None})
         return summary
@@ -3188,6 +3479,15 @@ def _group_errors():
 
 
 @contextlib.contextmanager
+def _user_agent_errors():
+    """把 UserAgentError 轉成 WebError 的 with 區塊。"""
+    try:
+        yield
+    except user_agents_lib.UserAgentError as error:
+        raise WebError(error.status, str(error)) from error
+
+
+@contextlib.contextmanager
 def _knowledge_errors():
     """把 KnowledgeAdminError 轉成 WebError 的 with 區塊。"""
     try:
@@ -3248,6 +3548,9 @@ def _restore_meta(state: _State, meta: dict[str, Any]) -> None:
     title = meta.get("title")
     if isinstance(title, str) and title.strip():
         state.custom_title = title
+    label = meta.get("agentLabel")
+    if isinstance(label, str) and label:
+        state.agent_label = label
     category = meta.get("category")
     if isinstance(category, str) and category:
         state.category = category

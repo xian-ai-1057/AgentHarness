@@ -271,3 +271,14 @@ export const BookIcon = (p: IconProps) => (
     <path d="M9 7h7M9 11h5" />
   </Svg>
 );
+
+/** Agent：一個小機器人。 */
+export const AgentIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="8" width="16" height="12" rx="3" />
+    <path d="M12 8V4" />
+    <circle cx="12" cy="3.5" r="0.5" />
+    <path d="M9 13v1.5M15 13v1.5" />
+    <path d="M2 13v3M22 13v3" />
+  </Svg>
+);

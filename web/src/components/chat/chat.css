@@ -1273,9 +1273,11 @@
   gap: 8px;
 }
 
+/* 自建 agent 的開場建議可能比較長：可以換行。 */
 .ch-suggestion {
-  height: 34px;
-  padding: 0 14px;
+  min-height: 34px;
+  padding: 6px 14px;
+  line-height: 1.4;
   border: 1px solid var(--line-2);
   border-radius: var(--r-pill, 999px);
   background: var(--panel);
@@ -2288,4 +2290,18 @@ button.ch-cite:focus-visible {
 /* 點過預覽區才能用 Ctrl（⌘）＋「+」「−」縮放；滑鼠點擊不顯示外框。 */
 .ch-tab-body .scroll:focus:not(:focus-visible) {
   outline: none;
+}
+
+/* 自建 agent 刪掉後，舊對話只能看：輸入框換成這段提示。 */
+.ch-agent-deleted {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 12px 12px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  background: var(--soft);
+  color: var(--ink);
 }

@@ -40,6 +40,7 @@ import {
 import { CategoryNameDialog, MoveDialog } from "./CategoryDialogs.tsx";
 import {
   AddIcon,
+  AgentIcon,
   ChatsIcon,
   FolderIcon,
   GearIcon,
@@ -275,6 +276,20 @@ export function Sidebar({
         <span className="grow">工作中</span>
         {active > 0 && <span className="hint">{active}</span>}
       </Link>
+      {project?.features?.userAgents && (
+        <Link
+          to="/agents"
+          className={`side-item ${
+            route.page === "agents" || route.page === "agentEdit"
+              ? "active"
+              : ""
+          }`}
+          current={route.page === "agents"}
+        >
+          <AgentIcon />
+          <span className="grow">Agent</span>
+        </Link>
+      )}
       {grouping && (
         <Link
           to="/chats"

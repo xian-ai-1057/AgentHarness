@@ -354,14 +354,21 @@ export interface MemberInfo extends CurrentUser {
   createdAt: number;
   /** 最後一次使用的時間（毫秒）；沒有登入過時沒有。 */
   lastSeenAt?: number;
+  /**
+   * 另外加入的存取群組（AccessGroup.id，不含「所有人」）；只有 Python 版
+   * 帳號模式才有。
+   */
+  groups?: string[];
 }
 
 /**
  * 新增成員或重設密碼的結果。密碼由伺服器產生，只會回傳這一次，
  * 請管理者交給成員；成員第一次登入後可以自己改。
- *   POST  /api/admin/users {username, displayName, role}
+ *   POST  /api/admin/users {username, displayName, role, groups?}
  *   PATCH /api/admin/users/:id {displayName?, role?, disabled?} → MemberInfo
  *   POST  /api/admin/users/:id/password
+ *   DELETE /api/admin/users/:id（Python 版：刪除帳號與這個人的所有資料）
+ *   PUT   /api/admin/users/:id/groups {groups} → MemberInfo（Python 版）
  */
 export interface IssuedPassword {
   user: MemberInfo;

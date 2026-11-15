@@ -421,6 +421,33 @@ class AccountStore:
                 )
         return self._require(user_id)
 
+    def delete_user(self, user_id: str) -> User:
+        """刪除帳號與它的登入狀態，回傳被刪除的帳號。
+
+        只刪帳號本身；這個人的對話、檔案與其他資料由呼叫的人清理（見
+        workspace.py 的 purge_member）。刪除後同一個名稱可以再建立。
+
+        Raises:
+            AccountError: 找不到帳號，或它是最後一位可以使用的管理者。
+        """
+        user = self._require(user_id)
+        with self._connect() as db:
+            if user.is_admin and not user.disabled:
+                count = db.execute(
+                    "SELECT COUNT(*) FROM users WHERE role = 'admin' "
+                    "AND disabled = 0 AND id != ?",
+                    (user_id,),
+                ).fetchone()[0]
+                if count == 0:
+                    raise AccountError(
+                        "至少要留一位可以使用的管理者，不能刪除最後一位"
+                    )
+            db.execute(
+                "DELETE FROM login_sessions WHERE user_id = ?", (user_id,)
+            )
+            db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return user
+
     def set_password(self, user_id: str, password: str) -> None:
         """換密碼，並登出這個人所有的登入狀態。
 

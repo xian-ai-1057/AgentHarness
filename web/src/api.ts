@@ -183,11 +183,13 @@ export const api = {
     username: string,
     displayName: string,
     role: CurrentUser["role"],
+    groups?: string[],
   ) =>
     request<IssuedPassword>("POST", "/admin/users", {
       username,
       displayName,
       role,
+      ...(groups?.length ? { groups } : {}),
     }),
   updateMember: (
     id: string,
@@ -195,6 +197,9 @@ export const api = {
   ) => request<MemberInfo>("PATCH", `/admin/users/${id}`, changes),
   resetPassword: (id: string) =>
     request<IssuedPassword>("POST", `/admin/users/${id}/password`, {}),
+  deleteMember: (id: string) => request("DELETE", `/admin/users/${id}`),
+  setMemberGroups: (id: string, groups: string[]) =>
+    request<MemberInfo>("PUT", `/admin/users/${id}/groups`, { groups }),
 
   // 存取群組（features.groups）。
   groups: () => request<GroupList>("GET", "/admin/groups"),

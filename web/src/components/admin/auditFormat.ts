@@ -111,12 +111,27 @@ export function describeDetail(entry: AuditEntry): string {
   switch (entry.action) {
     case "auth.login_failed":
       return FAILURE_LABELS[String(detail.reason)] ?? "";
-    case "member.create":
-      return `角色：${roleLabel(detail.role)}`;
+    case "member.create": {
+      const role = `角色：${roleLabel(detail.role)}`;
+      const groups = nameList(detail.groups);
+      return groups ? `${role} · 群組：${groups}` : role;
+    }
+    case "member.groups":
+      return `群組：${nameList(detail.before) || "（無）"} → ${nameList(detail.after) || "（無）"}`;
+    case "member.delete":
+      return `${String(detail.displayName ?? "")} · 角色：${roleLabel(detail.role)}`;
     case "member.update":
       return describeChanges(detail.changes);
-    case "group.update":
-      return `修改了：${fieldList(detail.changes)}`;
+    case "group.update": {
+      const parts: string[] = [];
+      const fields = fieldList(detail.changes);
+      if (fields) parts.push(`修改了：${fields}`);
+      const added = nameList(detail.membersAdded);
+      if (added) parts.push(`加入成員：${added}`);
+      const removed = nameList(detail.membersRemoved);
+      if (removed) parts.push(`移出成員：${removed}`);
+      return parts.join(" · ");
+    }
     case "knowledge.create":
     case "knowledge.personal_create":
     case "knowledge.personal_delete":
@@ -163,6 +178,10 @@ export function describeDetail(entry: AuditEntry): string {
     default:
       return "";
   }
+}
+
+function nameList(value: unknown): string {
+  return Array.isArray(value) ? value.map(String).join("、") : "";
 }
 
 function roleLabel(role: unknown): string {

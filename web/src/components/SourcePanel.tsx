@@ -1,10 +1,12 @@
 /**
  * 右側面板：知識庫出處的原文。
  *
- * 「原文」分頁顯示整份文件讀出來的文字（GET /api/knowledge/source/text），
- * 引用的那一段用螢光標示，捲到畫面中間並閃一下；每次點對話裡的引用
- * 編號都會再閃一次。「原始檔案」分頁是原本的檔案：PDF 用瀏覽器內建的
- * 檢視器開到出處的頁碼，其他格式在新分頁開啟或下載。
+ * PDF 的「原文」分頁用 PDF.js 畫出 PDF 本身（見 chat/PdfViewer.tsx），
+ * 跳到出處的頁碼，引用的段落在 PDF 上螢光標示並閃一下；「解析文字」
+ * 分頁是知識庫讀出來的文字（GET /api/knowledge/source/text），掃描檔
+ * 在 PDF 上標示不到時可以看這裡。其他格式的「原文」分頁就是讀出來的
+ * 文字，「原始檔案」分頁在新分頁開啟或下載。每次點對話裡的引用編號都
+ * 會再閃一次。
  *
  * 和檔案面板一樣可以拖曳左邊的分隔線調整寬度（兩個面板共用寬度）。
  */
@@ -20,10 +22,12 @@ import {
 } from "./chat/citations.ts";
 import { DownloadIcon } from "./chat/icons.tsx";
 import { PanelResizer } from "./chat/PanelResizer.tsx";
+import { PdfViewer } from "./chat/PdfViewer.tsx";
 import { usePanelWidth } from "./chat/usePanelWidth.ts";
 import { CloseIcon } from "./Icons.tsx";
 
-type View = "text" | "file";
+/** pdf：PDF 本身；text：讀出來的文字；file：原始檔案的連結。 */
+type View = "pdf" | "text" | "file";
 type Sections = KnowledgeSourceText["sections"];
 
 export function SourcePanel({
@@ -36,11 +40,22 @@ export function SourcePanel({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const { shown, changeWidth } = usePanelWidth(panelRef);
-  const [view, setView] = useState<View>("text");
+  const [chosen, setChosen] = useState<View>("pdf");
   const name = source.path.split("/").at(-1) ?? source.path;
   const url = sourceUrl(source);
   const pdf = /\.pdf$/i.test(source.path);
-  const fileShown = source.page ? `${url}#page=${source.page}` : url;
+  const views: [View, string][] = pdf
+    ? [
+        ["pdf", "原文"],
+        ["text", "解析文字"],
+      ]
+    : [
+        ["text", "原文"],
+        ["file", "原始檔案"],
+      ];
+  const view = views.some(([id]) => id === chosen)
+    ? chosen
+    : (views[0]?.[0] ?? "text");
 
   // 文件的文字；同一份文件換引用時不重新讀取。
   const docKey = `${source.base}\n${source.path}`;
@@ -96,12 +111,11 @@ export function SourcePanel({
       >
         <div className="panel-header">
           <div className="tabs" role="tablist">
-            <ViewTab id="text" view={view} onView={setView}>
-              原文
-            </ViewTab>
-            <ViewTab id="file" view={view} onView={setView}>
-              原始檔案
-            </ViewTab>
+            {views.map(([id, label]) => (
+              <ViewTab key={id} id={id} view={view} onView={setChosen}>
+                {label}
+              </ViewTab>
+            ))}
           </div>
           <div className="ch-panel-tools">
             <button
@@ -148,21 +162,13 @@ export function SourcePanel({
                 excerpt={source.excerpt}
                 url={url}
               />
-            ) : pdf ? (
-              <div className="anim-in">
-                <div className="ch-preview-pdf">
-                  {/* 換到另一頁時重新建立：只改網址的 #page 不一定會跳頁。 */}
-                  <iframe key={fileShown} src={fileShown} title={name} />
-                  <a
-                    className="ch-preview-open"
-                    href={fileShown}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  >
-                    看不到內容？在新分頁開啟
-                  </a>
-                </div>
-              </div>
+            ) : view === "pdf" ? (
+              <PdfViewer
+                url={url}
+                page={source.page}
+                excerpt={source.excerpt}
+                trigger={source}
+              />
             ) : (
               <p className="ch-preview-state">
                 <a href={url} target="_blank" rel="noreferrer noopener">

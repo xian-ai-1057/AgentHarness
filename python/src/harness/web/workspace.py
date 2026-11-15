@@ -771,10 +771,20 @@ class Workspace:
         except Exception as error:  # 例如 embedding 模型連不上。
             details = {}
             index = {"error": _describe(error)}
+        warned = {
+            warning.split("：", 1)[0] for warning in index.get("warnings", [])
+        }
         for item in documents:
             found = details.get(item["path"])
             item["chunks"] = found["chunks"] if found else 0
             item["labels"] = found["labels"] if found else []
+            if (
+                "error" not in index
+                and item["supported"]
+                and not item["chunks"]
+                and item["path"] not in warned
+            ):
+                item["note"] = _empty_document_note(item["path"])
         return {"documents": documents, "index": index}
 
     async def knowledge_source(
@@ -3713,6 +3723,19 @@ def _lookup_vision(name: str) -> bool | None:
         return None
     value = info.get("supports_vision")
     return value if isinstance(value, bool) else None
+
+
+def _empty_document_note(path: str) -> str:
+    """支援的文件卻沒切出片段時，告訴使用者為什麼搜尋不到。
+
+    最常見的是掃描的 PDF：每頁都是圖片，沒有文字可以搜尋。
+    """
+    if path.lower().endswith(knowledge_lib.PDF_SUFFIX):
+        return (
+            "這份 PDF 看起來是掃描檔（每頁都是圖片），沒有文字可以搜尋。"
+            "請改傳有文字的 PDF，或先用 OCR 轉成文字。"
+        )
+    return "這份文件裡沒有讀到文字，所以搜尋不到。"
 
 
 def _describe(error: BaseException) -> str:

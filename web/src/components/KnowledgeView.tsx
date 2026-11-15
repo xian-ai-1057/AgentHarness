@@ -557,11 +557,15 @@ function Documents({
                   {!doc.supported && (
                     <span className="badge badge-muted">不支援的格式</span>
                   )}
+                  {doc.note && (
+                    <span className="badge badge-warn">搜尋不到</span>
+                  )}
                 </span>
                 <span className="member-meta">
                   {formatBytes(doc.size)} · {doc.chunks} 個片段 ·{" "}
                   {new Date(doc.modifiedAt * 1000).toLocaleString()}
                 </span>
+                {doc.note && <span className="kb-note">{doc.note}</span>}
               </span>
               <button
                 type="button"

@@ -1,6 +1,9 @@
 """個人知識庫：使用者自己建立、只有自己能用的知識庫。"""
 
+import io
+
 import aiohttp
+import pypdf
 
 from tests import conftest
 from tests import test_knowledge_bases as kb_tests
@@ -146,6 +149,26 @@ class TestPersonalKnowledge:
         assert [b["id"] for b in listed["company"]] == ["hr"]
         assert "人資規章 / leave.md" in found
         assert "我的筆記 / a.md" in found
+
+    async def test_explains_documents_without_text(self, site):
+        s = await site(script=[conftest.text_response("好")])
+        alice = await s.login("alice", password_of("alice"))
+        _, created = await create(alice)
+        base_id = created["id"]
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        scanned = io.BytesIO()
+        writer.write(scanned)
+        await upload(s, alice, base_id, "掃描.pdf", scanned.getvalue())
+        await upload(s, alice, base_id, "空白.md", "   ")
+        await upload(s, alice, base_id, "有字.md", "內容")
+
+        _, docs = await alice.api("GET", f"/my/knowledge/{base_id}/documents")
+
+        notes = {item["path"]: item.get("note") for item in docs["documents"]}
+        assert "掃描檔" in notes["掃描.pdf"]
+        assert "沒有讀到文字" in notes["空白.md"]
+        assert notes["有字.md"] is None
 
     async def test_rename_and_delete(self, site):
         s = await site(script=[conftest.text_response("好")])

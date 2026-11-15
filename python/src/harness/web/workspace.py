@@ -73,6 +73,7 @@ from harness.builtin import web as web_tools
 from harness.web import accounts as accounts_lib
 from harness.web import categories as categories_lib
 from harness.web import config as config_lib
+from harness.web import files as files_lib
 from harness.web import folders as folders_lib
 from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
@@ -431,6 +432,7 @@ class Workspace:
                 "categories": True,
                 "groups": self._groups is not None,
                 "knowledgeBases": True,
+                "knowledgeSources": True,
                 "audit": True,
             },
             "auth": {
@@ -586,6 +588,7 @@ class Workspace:
                 "retrieval": {
                     "embeddingModel": knowledge.embedding_model,
                     "chunkSize": knowledge.chunk_size,
+                    "chunking": knowledge.chunking,
                     "reranker": knowledge.reranker,
                     "rerankCandidates": knowledge.rerank_candidates,
                     "minSimilarity": knowledge.min_similarity,
@@ -748,6 +751,51 @@ class Workspace:
             item["chunks"] = found["chunks"] if found else 0
             item["labels"] = found["labels"] if found else []
         return {"documents": documents, "index": index}
+
+    async def knowledge_source(
+        self, user: accounts_lib.User, base_ref: str, path: str
+    ) -> tuple[int, os.stat_result]:
+        """打開搜尋結果出處的文件，讓網頁預覽原文。
+
+        只送得出這個人搜尋得到的文件：知識庫要開放給他（群組），文件要
+        在那個知識庫的索引裡（屬於子知識庫的資料夾不算），有標籤的文件
+        要和他可以搜尋的標籤有交集。
+
+        Args:
+            user: 目前的使用者。
+            base_ref: 出處上的知識庫名稱或識別碼；空字串時（只搜尋一個
+                知識庫，出處沒有名稱）依序找這個人可以搜尋的知識庫。
+            path: 出處上的檔案路徑（相對於知識庫資料夾）。
+
+        Returns:
+            (fd, stat)；fd 用完要自己關閉。
+
+        Raises:
+            WebError: 找不到，或這個人不能看這份文件（一律 404，不透露
+                文件存不存在）。
+        """
+        access = self._access(user)
+        visible = self._visible_bases(access)
+        if base_ref:
+            visible = [
+                base for base in visible if base_ref in (base.id, base.name)
+            ]
+        allowed = None if access.knowledge is None else set(access.knowledge)
+        for base in visible:
+            knowledge = base.knowledge
+            if knowledge.path is None or path not in knowledge.files():
+                continue
+            found = (await knowledge.documents()).get(path)
+            if found is None:
+                continue
+            labels = found["labels"]
+            if allowed is not None and labels and not allowed & set(labels):
+                continue
+            try:
+                return files_lib.open_file(knowledge.path, path)
+            except files_lib.FileError as error:
+                raise WebError(error.status, str(error)) from error
+        raise WebError(404, "找不到這份文件，或你沒有權限查看")
 
     async def save_knowledge_document(
         self,

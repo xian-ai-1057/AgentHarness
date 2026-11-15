@@ -706,6 +706,7 @@ def load_knowledge_bases(
                 path,
                 embedding_model=spec.get("embeddingModel"),
                 chunk_size=spec.get("chunkSize") or 800,
+                chunking=spec.get("chunking") or "paragraph",
                 cache_dir=cache,
                 reranker=spec.get("reranker"),
                 rerank_candidates=spec.get("rerankCandidates") or 20,
@@ -736,6 +737,7 @@ def _check_fields(
 _RETRIEVAL_FIELDS = {
     "embeddingModel",
     "chunkSize",
+    "chunking",
     "reranker",
     "rerankCandidates",
     "minSimilarity",

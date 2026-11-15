@@ -31,12 +31,14 @@ SETTING_KEYS = (
     "description",
     "embeddingModel",
     "chunkSize",
+    "chunking",
     "reranker",
     "rerankCandidates",
     "minSimilarity",
     "minRerankScore",
 )
 _TEXT_KEYS = ("name", "description", "embeddingModel", "reranker")
+_CHOICE_KEYS = {"chunking": knowledge_lib.CHUNKING_MODES}
 _INT_KEYS = ("chunkSize", "rerankCandidates")
 _FLOAT_KEYS = ("minSimilarity", "minRerankScore")
 _NAME_LIMIT = 40
@@ -152,6 +154,11 @@ def checked_settings(changes: Any) -> dict[str, Any]:
     for key, value in changes.items():
         if value is None or (isinstance(value, str) and not value.strip()):
             values[key] = None
+        elif key in _CHOICE_KEYS:
+            if value not in _CHOICE_KEYS[key]:
+                choices = "、".join(_CHOICE_KEYS[key])
+                raise KnowledgeAdminError(f"{key} 必須是 {choices} 其中之一")
+            values[key] = value
         elif key in _TEXT_KEYS:
             if not isinstance(value, str):
                 raise KnowledgeAdminError(f"{key} 必須是文字")

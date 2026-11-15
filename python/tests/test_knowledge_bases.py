@@ -527,3 +527,65 @@ class TestAdmin:
         assert nested == 201 and saved["files"][0]["path"] == "規章/2025/x.md"
         assert missing == 404
         assert (s.root / "harness.yaml").exists()
+
+
+class TestSource:
+    """GET /api/knowledge/source：點出處打開原文。"""
+
+    @staticmethod
+    def prepare(root: pathlib.Path) -> None:
+        add_documents(root)
+        write(
+            root / "knowledge" / "secret.md",
+            "---\nlabels: [hr]\n---\n特休計算：只有人資看得到。",
+        )
+
+    @staticmethod
+    async def fetch(s, person, query: str):
+        response = await s.client.get(
+            f"/api/knowledge/source?{query}", headers=person.headers
+        )
+        return response.status, await response.read(), response.headers
+
+    async def test_only_documents_the_person_can_search(self, site):
+        s = await site(extra=BASES, prepare=self.prepare)
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        await boss.api(
+            "PATCH",
+            "/admin/groups/everyone",
+            {"knowledgeBases": ["default", "hr"], "knowledge": []},
+        )
+
+        by_name = await self.fetch(s, alice, "base=人資規章&path=leave.md")
+        by_id = await self.fetch(s, alice, "base=hr&path=leave.md")
+        no_base = await self.fetch(s, alice, "path=general.md")
+        closed = await self.fetch(s, alice, "base=it&path=vpn.md")
+        sub_base = await self.fetch(s, alice, "base=default&path=hr/leave.md")
+        escape = await self.fetch(s, alice, "base=default&path=../harness.yaml")
+        labelled = await self.fetch(s, alice, "base=default&path=secret.md")
+        admin = await self.fetch(s, boss, "base=default&path=secret.md")
+        download = await self.fetch(
+            s, alice, "base=hr&path=leave.md&download=1"
+        )
+        anonymous = await self.fetch(s, s.anonymous(), "path=general.md")
+
+        assert by_name[0] == 200
+        assert by_name[1].decode() == "特休計算：滿半年三天。"
+        assert by_id[0] == 200
+        assert no_base[0] == 200
+        assert closed[0] == 404
+        assert sub_base[0] == 404
+        assert escape[0] == 404
+        assert labelled[0] == 404
+        assert admin[0] == 200
+        assert "attachment" in download[2]["Content-Disposition"]
+        assert anonymous[0] == 401
+
+    async def test_project_reports_the_feature(self, site):
+        s = await site(extra=BASES, prepare=add_documents)
+        alice = await s.login("alice", password_of("alice"))
+
+        _, project = await alice.api("GET", "/project")
+
+        assert project["features"]["knowledgeSources"] is True

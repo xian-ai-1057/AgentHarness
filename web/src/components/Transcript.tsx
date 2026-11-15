@@ -1,6 +1,6 @@
 /** 對話內容：使用者訊息、步驟群組、agent 的文字、檔案卡片與產生的圖片。 */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { fileUrl } from "../api.ts";
 import {
   type Block,
@@ -11,6 +11,11 @@ import {
   type Turn,
 } from "../transcript.ts";
 import "./chat/chat.css";
+import {
+  type CitationMap,
+  citationsByBlock,
+  type KnowledgeSource,
+} from "./chat/citations.ts";
 import { FileBadge } from "./chat/FileBadge.tsx";
 import { fileName, isThumbnail } from "./chat/filetype.ts";
 import { useFolder } from "./chat/folder.ts";
@@ -40,6 +45,7 @@ export function TurnView({
   onOpenPath,
   canLoadFiles = false,
   reply,
+  onOpenCitation,
 }: {
   turn: Turn;
   onOpenFile: (change: FileChange) => void;
@@ -52,7 +58,10 @@ export function TurnView({
   canLoadFiles?: boolean;
   /** 這一輪已經結束時，回覆底下的動作。 */
   reply?: ReplyActions;
+  /** 點了回覆裡的知識庫出處；沒有提供時出處不能點。 */
+  onOpenCitation?: (source: KnowledgeSource) => void;
 }) {
+  const citations = useMemo(() => citationsByBlock(turn.blocks), [turn.blocks]);
   const written = turn.files.filter((change) => change.status === "written");
   // 寫入的檔案已經有卡片，不再重複顯示。
   const produced = turn.produced.filter(
@@ -77,7 +86,13 @@ export function TurnView({
         </div>
       )}
       {turn.blocks.map((block) => (
-        <BlockView key={block.key} block={block} localFiles={canLoadFiles} />
+        <BlockView
+          key={block.key}
+          block={block}
+          localFiles={canLoadFiles}
+          citations={citations.get(block.key)}
+          onOpenCitation={onOpenCitation}
+        />
       ))}
       {written.map((change) => (
         <FileCard
@@ -131,9 +146,13 @@ export function AttachmentChip({
 function BlockView({
   block,
   localFiles,
+  citations,
+  onOpenCitation,
 }: {
   block: Block;
   localFiles: boolean;
+  citations?: CitationMap;
+  onOpenCitation?: (source: KnowledgeSource) => void;
 }) {
   if (block.kind === "text") {
     return (
@@ -142,6 +161,8 @@ function BlockView({
           text={block.text}
           streaming={block.streaming}
           localFiles={localFiles}
+          citations={citations}
+          onOpenCitation={onOpenCitation}
         />
       </div>
     );

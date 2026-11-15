@@ -535,6 +535,8 @@ export interface KnowledgeDocument {
   /** 切成幾個片段（索引建立失敗時是 0）。 */
   chunks: number;
   labels: string[];
+  /** 支援的格式卻搜尋不到時的原因，例如掃描的 PDF 沒有文字。 */
+  note?: string;
 }
 
 export interface KnowledgeDocuments {

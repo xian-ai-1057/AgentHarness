@@ -529,6 +529,11 @@ h3 {
   color: var(--muted);
 }
 
+.badge-warn {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
 .dot {
   width: 6px;
   height: 6px;
@@ -3829,6 +3834,11 @@ h3 {
 .kb-warnings {
   margin: 0;
   padding-left: 18px;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.kb-note {
   font-size: 12px;
   color: var(--warn);
 }

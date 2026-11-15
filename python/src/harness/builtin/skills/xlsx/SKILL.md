@@ -18,6 +18,17 @@ tools: [files]
   執行，並把 stdout、stderr 印出來。不要用 `run_command` 執行這些指令。
 - 工作目錄是 `/workspace`（這段對話的工作資料夾）：使用者上傳的檔案在
   `uploads/`，產出的檔案存在 `/workspace` 底下，完成後告訴使用者檔名。
+- **中間檔放在這次工作專用的資料夾，不要動別人的檔案。** 同一個人的
+  其他對話可能同時在用這個工作資料夾。開始時先建一個專用資料夾，例如
+  `W = f".skill-work/xlsx-{secrets.token_hex(3)}"`（`os.makedirs(W)`），
+  解壓縮的 `unpacked/`、JSON、腳本、逐頁圖片等中間檔都放在裡面（Python 裡
+  `os.chdir(W)`，`subprocess` 傳 `cwd=W`）。每次 `run_python` 都是新的行程，
+  把 W 的路徑印出來，之後每次執行都寫明同一個路徑。
+  只有要交給使用者的成品（含給他預覽的 PDF）才存到工作資料夾的一般位置，
+  並取一個不會和既有檔案撞名的檔名。`rm`、覆寫只能用在 W 裡的檔案；
+  `uploads/` 裡的原檔只讀不改，要修改時先複製到 W；切換到 W 之後，上傳檔與
+  成品都用絕對路徑（`/workspace/uploads/…`、`/workspace/成品.docx`）。
+  完成後刪掉 W。
 - 沙盒**沒有網路，也不能安裝套件**。`openpyxl`、`pandas`、`markitdown`
   與 LibreOffice 都已經裝好，直接 import 或執行；萬一 import 失敗，告訴
   使用者缺少哪個套件，不要嘗試 `pip install`。

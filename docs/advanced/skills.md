@@ -102,6 +102,11 @@ Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown �
 - **腳本在沙盒裡唯讀。** `/opt/skills/` 在映像檔的系統目錄裡，容器以唯讀
   方式執行，agent 寫的程式改不到這些腳本；專案的 `skills/` 資料夾仍然不會
   掛進沙盒。
+- **中間檔放在每次工作專用的資料夾。** 同一個人的多段對話可能共用同一個
+  工作資料夾（例如「我的檔案」），所以這幾個 skill 要求 agent 把解壓縮的
+  檔案、JSON、逐頁圖片等放在 `.skill-work/<skill>-<隨機碼>/`，只刪除那裡的
+  檔案，做完就刪掉；成品才存到工作資料夾，並避開既有的檔名。以點開頭的
+  資料夾不會出現在產生的檔案卡片裡。
 - **load_skill 不逐一列出 `scripts/` 裡的檔案**，只說有幾個（docx、pptx、
   xlsx 各有幾十個 XML schema）；用法寫在 `SKILL.md` 裡，需要時仍可用
   `read_skill_file` 讀取原始碼。這個規則適用於所有 skill 的 `scripts/` 資料夾。

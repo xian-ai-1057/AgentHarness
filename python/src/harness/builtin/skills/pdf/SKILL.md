@@ -20,6 +20,17 @@ tools: [files]
   stderr。不要用 `run_command` 執行這些指令。
 - 工作目錄是 `/workspace`（這段對話的工作資料夾）：使用者上傳的檔案在
   `uploads/`，產出的檔案存在 `/workspace` 底下，完成後告訴使用者檔名。
+- **中間檔放在這次工作專用的資料夾，不要動別人的檔案。** 同一個人的
+  其他對話可能同時在用這個工作資料夾。開始時先建一個專用資料夾，例如
+  `W = f".skill-work/pdf-{secrets.token_hex(3)}"`（`os.makedirs(W)`），
+  解壓縮的 `unpacked/`、JSON、腳本、逐頁圖片等中間檔都放在裡面（Python 裡
+  `os.chdir(W)`，`subprocess` 傳 `cwd=W`）。每次 `run_python` 都是新的行程，
+  把 W 的路徑印出來，之後每次執行都寫明同一個路徑。
+  只有要交給使用者的成品（含給他預覽的 PDF）才存到工作資料夾的一般位置，
+  並取一個不會和既有檔案撞名的檔名。`rm`、覆寫只能用在 W 裡的檔案；
+  `uploads/` 裡的原檔只讀不改，要修改時先複製到 W；切換到 W 之後，上傳檔與
+  成品都用絕對路徑（`/workspace/uploads/…`、`/workspace/成品.docx`）。
+  完成後刪掉 W。
 - 沙盒**沒有網路，也不能安裝套件**。下面提到的 Python 套件（pypdf、
   pdfplumber、reportlab、pypdfium2、pytesseract、pdf2image）、命令列工具
   （qpdf、poppler-utils、tesseract 含繁中與簡中）與 npm 套件（pdf-lib、
@@ -27,7 +38,7 @@ tools: [files]
   `pip install` 或 `npm install`。`pdftk` 沒有安裝，改用 qpdf 或 pypdf。
 - 這個 skill 的腳本在 `/opt/skills/pdf/scripts/`（唯讀）。REFERENCE.md 與
   FORMS.md 裡寫的 `scripts/...` 都指這個資料夾，例如
-  `python /opt/skills/pdf/scripts/check_fillable_fields.py uploads/form.pdf`。
+  `python /opt/skills/pdf/scripts/check_fillable_fields.py /workspace/uploads/form.pdf`。
 - **你看不到圖片**（工具結果只有文字）。FORMS.md 裡要看頁面圖片判斷欄位
   的步驟，優先改用 `extract_form_structure.py` 的座標（Approach A）；只能靠
   看圖估計位置的掃描表單，先告訴使用者這個限制，填完後請他預覽確認。
@@ -39,7 +50,9 @@ tools: [files]
 
 照 FORMS.md 用 `extract_form_field_info.py` 取得 `field_info.json` 之後，值裡
 有中文時，改成把文字直接畫在頁面上，並拿掉原本的表單欄位（填好的檔案就
-不能再當表單編輯）。先跟使用者說明這個差異。
+不能再當表單編輯）。**動手前先告訴使用者「填好的 PDF 會是一般 PDF，不能再當
+表單修改欄位」**，交付時也再提醒一次；使用者需要保留可編輯的欄位時，改用
+FORMS.md 的 `fill_fillable_fields.py`，並說明有些檢視器會把中文顯示成空白。
 
 ```python
 import io, json
@@ -55,7 +68,7 @@ pdfmetrics.registerFont(
 fields = {f["field_id"]: f for f in json.load(open("field_info.json"))}
 values = {"name": "王小明", "agree": True}   # field_id → 文字，勾選框用 True/False
 
-writer = PdfWriter(clone_from=PdfReader("uploads/form.pdf"))
+writer = PdfWriter(clone_from=PdfReader("/workspace/uploads/form.pdf"))
 for number, page in enumerate(writer.pages, start=1):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=(float(page.mediabox.width), float(page.mediabox.height)))
@@ -83,10 +96,10 @@ for number, page in enumerate(writer.pages, start=1):
             del page["/Annots"]
 if "/AcroForm" in writer._root_object:
     del writer._root_object["/AcroForm"]
-writer.write("filled.pdf")
+writer.write("/workspace/form-filled.pdf")   # 成品存到 W 外面，檔名不要和既有檔案撞名
 ```
 
-完成後用 `pdftotext filled.pdf -` 確認文字都在，再請使用者預覽確認位置。
+完成後用 `pdftotext /workspace/form-filled.pdf -` 確認文字都在，再請使用者預覽確認位置。
 
 ## 概覽
 

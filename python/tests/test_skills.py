@@ -335,6 +335,8 @@ def test_office_skills_keep_license_and_mention_changes(name):
     assert "Apache License" in (skill.root / "LICENSE.txt").read_text("utf-8")
     assert "github.com/anthropics/skills" in text
     assert "修改內容" in text
+    # 同一個人的對話共用工作資料夾：中間檔放在每次工作專用的資料夾。
+    assert ".skill-work/" in text
 
 
 @pytest.mark.parametrize("name", OFFICE_SKILLS)

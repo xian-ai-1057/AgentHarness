@@ -23,6 +23,17 @@ tools: [files]
   `uploads/`，產出的檔案存在 `/workspace` 底下，完成後告訴使用者檔名。
   Node 腳本也寫在這裡（例如用 Python 寫出 `build_doc.js` 再執行
   `node build_doc.js`）。
+- **中間檔放在這次工作專用的資料夾，不要動別人的檔案。** 同一個人的
+  其他對話可能同時在用這個工作資料夾。開始時先建一個專用資料夾，例如
+  `W = f".skill-work/docx-{secrets.token_hex(3)}"`（`os.makedirs(W)`），
+  解壓縮的 `unpacked/`、JSON、腳本、逐頁圖片等中間檔都放在裡面（Python 裡
+  `os.chdir(W)`，`subprocess` 傳 `cwd=W`）。每次 `run_python` 都是新的行程，
+  把 W 的路徑印出來，之後每次執行都寫明同一個路徑。
+  只有要交給使用者的成品（含給他預覽的 PDF）才存到工作資料夾的一般位置，
+  並取一個不會和既有檔案撞名的檔名。`rm`、覆寫只能用在 W 裡的檔案；
+  `uploads/` 裡的原檔只讀不改，要修改時先複製到 W；切換到 W 之後，上傳檔與
+  成品都用絕對路徑（`/workspace/uploads/…`、`/workspace/成品.docx`）。
+  完成後刪掉 W。
 - 沙盒**沒有網路，也不能安裝套件**。`docx`（npm）、`pandoc`、LibreOffice、
   `pdftoppm` 都已經裝好，`require('docx')` 直接可用；萬一失敗，告訴使用者
   缺少什麼，不要嘗試 `npm install` 或 `pip install`。
@@ -31,7 +42,7 @@ tools: [files]
   一次執行只做一件事。
 - **你看不到圖片**（工具結果只有文字）。官方流程裡「轉成圖片再看」的步驟
   改成：用 `pandoc -t markdown` 檢查內容與結構、用 `validate.py` 檢查檔案；
-  轉出來的 PDF 留在工作資料夾，網頁會顯示成檔案卡片，請使用者打開預覽確認
+  轉出來的 PDF 複製到工作資料夾的一般位置，網頁會顯示成檔案卡片，請使用者打開預覽確認
   版面。
 
 .docx 是由 XML 檔案組成的 ZIP 壓縮檔。依工作選擇做法：

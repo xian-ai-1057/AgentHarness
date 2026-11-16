@@ -194,6 +194,16 @@ export const KeyIcon = (p: IconProps) => (
   </Svg>
 );
 
+/** 插頭：管理平台的 MCP 伺服器（外接的工具）。 */
+export const PlugIcon = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M9 2v6" />
+    <path d="M15 2v6" />
+    <path d="M6 8h12v3a6 6 0 0 1-12 0V8Z" />
+    <path d="M12 17v5" />
+  </Svg>
+);
+
 export const LogoutIcon = (p: IconProps) => (
   <Svg {...p}>
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

@@ -20,6 +20,7 @@ import {
   CheckIcon,
   ChipIcon,
   ListIcon,
+  PlugIcon,
   ShieldIcon,
   UserIcon,
   UsersIcon,
@@ -30,6 +31,7 @@ import { UserMenu } from "../shell/UserMenu.tsx";
 import { Audit } from "./Audit.tsx";
 import { Groups } from "./Groups.tsx";
 import { Knowledge } from "./Knowledge.tsx";
+import { McpServers } from "./McpServers.tsx";
 import {
   type Draft,
   ModelSection,
@@ -40,6 +42,7 @@ import {
 export const ADMIN_LABELS: Record<AdminSection, string> = {
   model: "模型",
   permissions: "權限",
+  mcp: "MCP 工具",
   knowledge: "知識庫",
   members: "成員",
   groups: "群組",
@@ -49,6 +52,7 @@ export const ADMIN_LABELS: Record<AdminSection, string> = {
 const ADMIN_ICONS: Record<AdminSection, typeof ChipIcon> = {
   model: ChipIcon,
   permissions: ShieldIcon,
+  mcp: PlugIcon,
   knowledge: BookIcon,
   members: UserIcon,
   groups: UsersIcon,
@@ -172,6 +176,7 @@ function AdminMain({ section }: { section: AdminSection }) {
           <span className="subtle mono">
             {section === "members" ||
             section === "groups" ||
+            section === "mcp" ||
             section === "knowledge" ||
             section === "audit"
               ? project.name
@@ -199,6 +204,7 @@ function AdminMain({ section }: { section: AdminSection }) {
             )}
             {section === "members" && <Members />}
             {section === "groups" && <Groups />}
+            {section === "mcp" && <McpServers />}
             {section === "knowledge" && <Knowledge />}
             {section === "audit" && <Audit />}
           </div>

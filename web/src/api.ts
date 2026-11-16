@@ -21,6 +21,10 @@ import type {
   KnowledgeModelChoices,
   KnowledgeSettings,
   KnowledgeSourceText,
+  McpServerInfo,
+  McpServerInput,
+  McpServerList,
+  McpTestResult,
   MemberInfo,
   ModelChoice,
   ModelTestResult,
@@ -209,6 +213,27 @@ export const api = {
   updateGroup: (id: string, changes: GroupChanges) =>
     request<AccessGroup>("PATCH", `/admin/groups/${id}`, changes),
   deleteGroup: (id: string) => request("DELETE", `/admin/groups/${id}`),
+
+  // 管理者掛載的 MCP 伺服器（features.mcpServers）。
+  mcpServers: () => request<McpServerList>("GET", "/admin/mcp"),
+  createMcpServer: (server: McpServerInput) =>
+    request<McpServerInfo>("POST", "/admin/mcp", server),
+  updateMcpServer: (name: string, changes: McpServerInput) =>
+    request<McpServerInfo>(
+      "PATCH",
+      `/admin/mcp/${encodeURIComponent(name)}`,
+      changes,
+    ),
+  deleteMcpServer: (name: string) =>
+    request("DELETE", `/admin/mcp/${encodeURIComponent(name)}`),
+  reconnectMcpServer: (name: string) =>
+    request<McpServerInfo>(
+      "POST",
+      `/admin/mcp/${encodeURIComponent(name)}/reconnect`,
+      {},
+    ),
+  testMcpServer: (server: McpServerInput & { existing?: string }) =>
+    request<McpTestResult>("POST", "/admin/mcp/test", server),
 
   // 自建 Agent（features.userAgents）。
   userAgents: () => request<UserAgentList>("GET", "/agents"),

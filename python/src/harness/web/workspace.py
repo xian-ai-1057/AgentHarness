@@ -78,6 +78,7 @@ from harness.web import files as files_lib
 from harness.web import folders as folders_lib
 from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
+from harness.web import mcp_admin
 from harness.web import migration
 from harness.web import personal_knowledge as personal_lib
 from harness.web import uploads as uploads_lib
@@ -328,6 +329,9 @@ class Workspace:
         self._builtin_skills = project_lib.builtin_skills()
         # 模型中台回覆的「這個人能用的模型」：使用者識別 → (到期時間, 名稱)。
         self._model_access: dict[str, tuple[float, frozenset[str] | None]] = {}
+        # 管理者在管理平台掛載的 MCP 伺服器；網站啟動後由 server 呼叫
+        # mcp.start() 在背景連線，工具連上後才加進專案。
+        self.mcp = mcp_admin.McpAdmin(project, self.refresh_project)
 
     def subscribe(
         self, user: accounts_lib.User, listener: Listener
@@ -486,6 +490,7 @@ class Workspace:
                 "personalKnowledge": self.personal.limits().enabled,
                 "audit": True,
                 "userAgents": self._user_agents is not None,
+                "mcpServers": True,
             },
             "auth": {
                 "mode": self.auth_mode,
@@ -2028,6 +2033,7 @@ class Workspace:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await self.mcp.close()
 
     def _start(
         self,

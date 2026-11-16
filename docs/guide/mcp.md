@@ -77,7 +77,7 @@ tools: [files, plan, web, webiq]
 - 金鑰前面要有 `Bearer `，少了會得到 401。
 - `require_approval: never` 不用另外設定：MCP 工具除非伺服器標記為破壞性操作，預設都直接執行。想每次都先問，用 `permissions.ask` 加上工具名稱。
 - **使用者身分**（Python 版）：網頁版要登入時，工具呼叫會附上使用者的 `x-litellm-end-user-id` 與 `x-litellm-trace-id` 標頭，LiteLLM 才能依使用者記錄與管控 MCP 的使用（見[網頁版 → 模型中台](/guide/web#模型中台)）。伺服器網址和 `HARNESS_BASE_URL` 是同一台（scheme、主機、port 都相同）時自動開啟；不同台時預設不送，要送就在伺服器設定加上 `forwardUser: true`，同一台但不想送就寫 `forwardUser: false`。本機程式（`command`）的伺服器不適用。
-- **連不上 Proxy 時整個專案會載入失敗**（網頁版無法啟動），錯誤訊息會寫出網址。啟動後在網頁版「設定 → 工具」看得到 webiq 的工具，就表示連上了。
+- **連不上 Proxy 時整個專案會載入失敗**（網頁版無法啟動），錯誤訊息會寫出網址。啟動後在網頁版「設定 → 工具」看得到 webiq 的工具，就表示連上了。Python 版的網頁也可以改由管理者[在管理平台掛載](#管理平台掛載)，連不上時不會擋住網站。
 
 ### 用 Docker 部署時 {#litellm-docker}
 
@@ -104,6 +104,27 @@ docker compose up -d --force-recreate harness
 ```
 
 內網的 Proxy 記得放進 `.env` 的 `NO_PROXY`。這個版本之後自動建立的助手，`harness.yaml` 與 `agents/main.md` 裡已經有註解掉的 webiq 設定，也可以改成取消註解。
+
+## 在管理平台掛載 <span class="badge-py">Python 版</span> {#管理平台掛載}
+
+不想改 `harness.yaml`、重新啟動的話，管理者可以直接在網頁的「管理平台 → MCP 工具」（`/admin/mcp`）掛載**遠端**的 MCP 伺服器：
+
+1. 按「掛載 MCP 伺服器」，填名稱（也是工具組名稱，英文字母開頭）、網址（Streamable HTTP，例如 `http://litellm:4000/webiq/mcp`）與認證用的標頭。
+2. 按「測試連線」確認連得上、看有哪些工具，再按「掛載」。
+3. 工具會加到所有專案 agent（也可以選「指定」只加到某幾個），成為一個工具組；到「管理平台 → [群組](/guide/web#存取群組)」勾選這個工具組，成員才看得到。「所有人」群組的工具組是「全部」時，所有成員馬上都能用。
+
+**LiteLLM 的 webiq 有範本**：還沒有 webiq 時，頁面上會出現「網頁搜尋 webiq（LiteLLM）」，按「套用範本」會填好網址 `<模型中台>/webiq/mcp`（模型中台取自 `HARNESS_BASE_URL`，去掉 `/v1`）與標頭 `x-litellm-api-key`，只要在 `Bearer ` 後面貼上 LiteLLM 的金鑰。連不上時試試 `<模型中台>/mcp/webiq`，或 `<模型中台>/mcp` 加上標頭 `x-mcp-servers: webiq`（依 LiteLLM 版本而定）。
+
+- **只有管理者能掛載**，一般成員看不到這一頁，直接呼叫 API（`/api/admin/mcp`）也會被拒絕。
+- **只接受遠端伺服器**：在伺服器上啟動程式（`command`）等於讓網頁上的操作在伺服器執行任意指令，這類伺服器只能由部署的人寫在 `harness.yaml`。
+- **金鑰不會再顯示**：標頭的值存在 `.harness/secrets/mcp-headers.json`（只有服務的帳號能讀，內建的檔案工具也讀不到），網頁與 API 只回傳標頭名稱；修改時值留空表示沿用原本的金鑰。稽核紀錄只記標頭名稱。
+- **標頭可以引用的環境變數有限制**：`MCP_` 開頭的環境變數（部署的人特地留給 MCP 用）可以送到任何伺服器；模型中台的金鑰 `LITELLM_API_KEY`、`HARNESS_API_KEY` 只能送到模型中台（網址和 `HARNESS_BASE_URL` 或 `LITELLM_PROXY_URL` 同一台），例如 `Bearer ${LITELLM_API_KEY}`；其他環境變數（模型供應商的金鑰、密碼）一律不能引用，網址裡也不能寫。這樣管理平台的管理者就算不是主機的維運者，也拿不到容器裡的其他金鑰。
+- **不能連到雲端 metadata 這類保留位址**（`169.254.0.0/16` 等），轉址過去也會被擋。內部網路與本機不擋，因為模型中台通常就在內網；連線失敗的原因會完整顯示給管理者，方便排除問題。
+- **連不上不影響網站**：和 `harness.yaml` 不同，網頁上掛載的伺服器在背景連線，連不上時只有這一台顯示「連線失敗」與原因，修好後按「重新連線」。網站重新啟動時會自動重新連線。
+- 停用的伺服器不連線，工具也不會出現；「拿掉」會關閉連線並刪除存起來的金鑰。群組裡勾選的名稱會留著，用同樣的名稱重新掛載就恢復。
+- 名稱不能和現有的工具組（內建的 `files`、`web` 等、`tools/` 底下的檔案、`harness.yaml` 的 `mcpServers`）重複；工具名稱和其他工具重複時無法掛載，頁面會說明是哪一個。
+- 網頁上掛載的伺服器只在網頁版使用，命令列（`pyharness chat`）不會載入。`harness.yaml` 裡的伺服器也會列在頁面下方，只能看、不能改。
+- 使用者身分標頭（`x-litellm-end-user-id`）和 `harness.yaml` 的規則相同：網址和 `HARNESS_BASE_URL` 是同一台時自動附上。
 
 ## 運作方式
 

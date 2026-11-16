@@ -4511,3 +4511,29 @@ a.kb-card:focus-visible {
   color: var(--warn-ink);
   font-size: 13px;
 }
+
+/* 管理平台 → MCP 工具。 */
+.mcp-dialog {
+  width: 560px;
+}
+
+.mcp-header-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.mcp-test {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.mcp-dialog-extra {
+  display: flex;
+  gap: 4px;
+  margin-right: auto;
+}

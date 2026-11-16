@@ -34,6 +34,14 @@
     POST   /api/admin/groups             新增存取群組（管理者）
     PATCH  /api/admin/groups/{id}        改名稱、說明、資源或成員（管理者）
     DELETE /api/admin/groups/{id}        刪除存取群組（管理者）
+    GET    /api/admin/mcp                管理者掛載的 MCP 伺服器、harness.yaml
+                                         裡的伺服器與可以選的 agent（管理者）
+    POST   /api/admin/mcp                掛載 MCP 伺服器（管理者，見 mcp_admin）
+    PATCH  /api/admin/mcp/{name}         改網址、標頭、agent 或停用（管理者）
+    DELETE /api/admin/mcp/{name}         拿掉 MCP 伺服器（管理者）
+    POST   /api/admin/mcp/{name}/reconnect
+                                         重新連線（管理者）
+    POST   /api/admin/mcp/test           用表單的設定試連線、列出工具，不儲存
     GET    /api/knowledge                知識庫與設定（管理者，或維護者看自己
                                          維護的）
     GET    /api/knowledge/models         模型連線上的 embedding 與 rerank
@@ -114,6 +122,7 @@ import re
 import secrets
 import urllib.parse
 from collections.abc import Iterable
+from collections.abc import Iterator
 from typing import Any
 
 from aiohttp import BodyPartReader
@@ -128,6 +137,7 @@ from harness.web import files as files_lib
 from harness.web import folders as folders_lib
 from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
+from harness.web import mcp_admin
 from harness.web import office as office_lib
 from harness.web import uploads as uploads_lib
 from harness.web import user_agents as user_agents_lib
@@ -385,6 +395,7 @@ def create_app(
     _file_routes(routes)
     _account_routes(routes, mode)
     _group_routes(routes)
+    _mcp_routes(routes)
     _user_agent_routes(routes)
     _knowledge_routes(routes)
     _personal_knowledge_routes(routes)
@@ -406,6 +417,7 @@ def create_app(
         return _serve_static(static_dir or STATIC_DIR, request.path)
 
     app.add_routes(routes)
+    app.on_startup.append(_on_startup)
     app.on_shutdown.append(_on_shutdown)
     return app
 
@@ -949,6 +961,78 @@ def _group_routes(routes: web.RouteTableDef) -> None:
         group = _ws(request).delete_group(request.match_info["group_id"])
         _audit(request, "group.delete", target=group["name"], detail=group)
         return _json({"ok": True})
+
+
+def _mcp_routes(routes: web.RouteTableDef) -> None:
+    """管理者掛載的 MCP 伺服器：只有管理者能看與修改，成員不能新增。
+
+    稽核紀錄只記標頭名稱，不記值（API 金鑰）。
+    """
+    one = "/api/admin/mcp/{name:[A-Za-z][A-Za-z0-9_-]{0,39}}"
+
+    def detail(info: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "url": info["url"],
+            "headers": [item["name"] for item in info["headers"]],
+            "agents": info["agents"],
+            "enabled": info["enabled"],
+        }
+
+    @routes.get("/api/admin/mcp")
+    async def list_mcp(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(_ws(request).mcp.list_info())
+
+    @routes.post("/api/admin/mcp/test")
+    async def test_mcp(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        with _mcp_errors():
+            return _json(await _ws(request).mcp.test(body))
+
+    @routes.post("/api/admin/mcp")
+    async def create_mcp(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        with _mcp_errors():
+            info = await _ws(request).mcp.create(body)
+        _audit(request, "mcp.create", target=info["name"], detail=detail(info))
+        return _json(info, status=201)
+
+    @routes.patch(one)
+    async def update_mcp(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        with _mcp_errors():
+            info = await _ws(request).mcp.update(
+                request.match_info["name"], body
+            )
+        _audit(request, "mcp.update", target=info["name"], detail=detail(info))
+        return _json(info)
+
+    @routes.post(one + "/reconnect")
+    async def reconnect_mcp(request: web.Request) -> web.Response:
+        _require_admin(request)
+        with _mcp_errors():
+            info = await _ws(request).mcp.reconnect(request.match_info["name"])
+        return _json(info)
+
+    @routes.delete(one)
+    async def delete_mcp(request: web.Request) -> web.Response:
+        _require_admin(request)
+        with _mcp_errors():
+            info = await _ws(request).mcp.delete(request.match_info["name"])
+        _audit(request, "mcp.delete", target=info["name"], detail=detail(info))
+        return _json({"ok": True})
+
+
+@contextlib.contextmanager
+def _mcp_errors() -> Iterator[None]:
+    """把 McpAdminError 轉成帶狀態碼的 WebError。"""
+    try:
+        yield
+    except mcp_admin.McpAdminError as error:
+        raise workspace_lib.WebError(error.status, str(error)) from error
 
 
 def _user_agent_routes(routes: web.RouteTableDef) -> None:
@@ -2034,6 +2118,11 @@ def _serve_static(directory: pathlib.Path, path: str) -> web.StreamResponse:
     if path.startswith("/assets/"):
         cache = "public, max-age=31536000, immutable"
     return web.FileResponse(target, headers={"Cache-Control": cache})
+
+
+async def _on_startup(app: web.Application) -> None:
+    # 管理者掛載的 MCP 伺服器在背景連線，連不上也不會擋住網站啟動。
+    app[_WORKSPACE].mcp.start()
 
 
 async def _on_shutdown(app: web.Application) -> None:

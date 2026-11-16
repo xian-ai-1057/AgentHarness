@@ -9,6 +9,9 @@
       "!**/*.md",
       "!python/src/harness/web/static",
       "!python/src/harness/builtin/skills/*/scripts",
+      "!python/src/harness/builtin/skills/*/templates",
+      "!python/src/harness/builtin/skills/*/eval-viewer",
+      "!python/src/harness/builtin/skills/*/assets",
       "!docs/.vitepress/dist",
       "!docs/.vitepress/cache"
     ]

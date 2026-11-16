@@ -328,7 +328,7 @@ class TestKnowledgeCommand:
 
         output = capsys.readouterr().out
         assert code == 0
-        assert "1 個檔案、1 個片段，檢索方式：關鍵字" in output
+        assert "1 個檔案、1 個片段，檢索方式：演算法（BM25）" in output
         assert "[1] 來源：faq.md" in output
 
     def test_knowledge_shows_reranker_thresholds_and_scores(
@@ -350,7 +350,7 @@ class TestKnowledgeCommand:
 
         output = capsys.readouterr().out
         assert code == 0
-        assert "檢索方式：關鍵字，再用 reranker 重新排序" in output
+        assert "檢索方式：演算法（BM25），再用 reranker 重新排序" in output
         assert "門檻：rerank ≥ 0.5" in output
         assert "[1] 來源：faq.md（rerank 0.750）" in output
 

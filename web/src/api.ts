@@ -18,6 +18,7 @@ import type {
   KnowledgeAdminList,
   KnowledgeDocuments,
   KnowledgeHit,
+  KnowledgeModelChoices,
   KnowledgeSettings,
   KnowledgeSourceText,
   MemberInfo,
@@ -183,11 +184,13 @@ export const api = {
     username: string,
     displayName: string,
     role: CurrentUser["role"],
+    groups?: string[],
   ) =>
     request<IssuedPassword>("POST", "/admin/users", {
       username,
       displayName,
       role,
+      ...(groups?.length ? { groups } : {}),
     }),
   updateMember: (
     id: string,
@@ -195,6 +198,9 @@ export const api = {
   ) => request<MemberInfo>("PATCH", `/admin/users/${id}`, changes),
   resetPassword: (id: string) =>
     request<IssuedPassword>("POST", `/admin/users/${id}/password`, {}),
+  deleteMember: (id: string) => request("DELETE", `/admin/users/${id}`),
+  setMemberGroups: (id: string, groups: string[]) =>
+    request<MemberInfo>("PUT", `/admin/users/${id}/groups`, { groups }),
 
   // 存取群組（features.groups）。
   groups: () => request<GroupList>("GET", "/admin/groups"),
@@ -214,6 +220,9 @@ export const api = {
 
   // 知識庫（features.knowledgeBases）。
   knowledge: () => request<KnowledgeAdminList>("GET", "/knowledge"),
+  /** 設定的下拉選單：模型連線上的 embedding 與 rerank 模型。 */
+  knowledgeModels: () =>
+    request<KnowledgeModelChoices>("GET", "/knowledge/models"),
   createKnowledge: (base: { id: string } & KnowledgeSettings) =>
     request<{ id: string }>("POST", "/knowledge", base),
   updateKnowledge: (

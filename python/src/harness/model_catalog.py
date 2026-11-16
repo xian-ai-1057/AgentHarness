@@ -192,6 +192,130 @@ async def _endpoint(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class RetrievalModels:
+    """知識庫可以選的 embedding 與 rerank 模型。
+
+    Attributes:
+        embedding: embedding 模型。
+        rerank: rerank 模型。
+        source: 怎麼分出來的："model_info"（LiteLLM 的 /model/info 標明了
+            用途）、"names"（只有模型名稱，依名稱猜）或 "none"（沒有可以
+            查的端點）。
+    """
+
+    embedding: list[ModelChoice]
+    rerank: list[ModelChoice]
+    source: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "embedding": [item.to_json() for item in self.embedding],
+            "rerank": [item.to_json() for item in self.rerank],
+            "source": self.source,
+        }
+
+
+async def list_retrieval_models() -> RetrievalModels:
+    """查詢目前的模型連線上有哪些 embedding 與 rerank 模型（知識庫用）。
+
+    - 連 OpenAI 相容端點（HARNESS_BASE_URL）時，先問 LiteLLM Proxy 的
+      GET /model/info：它的 model_info.mode 標明了 embedding 或 rerank。
+      端點沒有這個網址（例如 vLLM）或沒有標明用途時，改用 GET /models
+      的名稱猜（名稱有 rerank 的是 rerank 模型；有 embed、bge、e5、gte
+      等字樣的是 embedding 模型）。
+    - 直接連 OpenAI（有 OPENAI_API_KEY）時列出 text-embedding 系列。
+    - 其他情況沒有清單，請直接填模型名稱。
+
+    Raises:
+        CatalogError: 連不上端點或金鑰不對。
+    """
+    url = _env(providers.BASE_URL_VAR).rstrip("/")
+    if url:
+        if _is_anthropic(url):
+            return RetrievalModels([], [], "none")
+        key = _env(providers.API_KEY_VAR)
+        try:
+            found = await _litellm_model_info(url, key)
+        except CatalogError:
+            found = None
+        if found is not None:
+            return found
+        names = [item.name for item in await _endpoint(url, key, {})]
+        return _guess_by_name(names, "")
+    key = _env("OPENAI_API_KEY")
+    if key:
+        data = await _get_json(_OFFICIAL["openai"], _bearer(key))
+        names = [
+            item["id"]
+            for item in _items(data, "data")
+            if isinstance(item.get("id"), str)
+        ]
+        found = _guess_by_name(names, "openai/")
+        return RetrievalModels(found.embedding, [], "names")
+    return RetrievalModels([], [], "none")
+
+
+async def _litellm_model_info(url: str, key: str) -> RetrievalModels | None:
+    """LiteLLM Proxy 的 /model/info；不是 LiteLLM 或沒標明用途時回傳 None。"""
+    root = url.removesuffix("/v1")
+    try:
+        data = await _get_json(f"{root}/model/info", _bearer(key))
+    except _NotFound:
+        return None
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+    embedding: list[ModelChoice] = []
+    rerank: list[ModelChoice] = []
+    labelled = False
+    unlabelled: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("model_name")
+        if not isinstance(name, str) or not name:
+            continue
+        info = item.get("model_info")
+        mode = info.get("mode") if isinstance(info, dict) else None
+        if mode == "embedding":
+            embedding.append(ModelChoice(name, name))
+        elif mode == "rerank":
+            rerank.append(ModelChoice(name, name))
+        if mode:
+            labelled = True
+        else:
+            unlabelled.append(name)
+    if not labelled:
+        return None
+    # 沒有標明用途的模型，再依名稱猜一次。
+    guessed = _guess_by_name(unlabelled, "")
+    return RetrievalModels(
+        _sorted([*embedding, *guessed.embedding]),
+        _sorted([*rerank, *guessed.rerank]),
+        "model_info",
+    )
+
+
+_RERANK_NAME = re.compile(r"rerank", re.IGNORECASE)
+_EMBEDDING_NAME = re.compile(
+    r"(embed|bge-|(?:^|[/_-])e5-|gte-|nomic|minilm|mpnet|voyage-|jina-)",
+    re.IGNORECASE,
+)
+
+
+def _guess_by_name(names: list[str], prefix: str) -> RetrievalModels:
+    """只有模型名稱時，依名稱分出 embedding 與 rerank 模型。"""
+    embedding = []
+    rerank = []
+    for name in names:
+        if _RERANK_NAME.search(name):
+            rerank.append(ModelChoice(prefix + name, name))
+        elif _EMBEDDING_NAME.search(name):
+            embedding.append(ModelChoice(prefix + name, name))
+    return RetrievalModels(_sorted(embedding), _sorted(rerank), "names")
+
+
 def _is_anthropic(url: str) -> bool:
     try:
         host = urllib.parse.urlsplit(url).hostname

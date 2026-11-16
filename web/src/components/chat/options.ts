@@ -13,6 +13,8 @@ import type {
 export interface ComposerOptions {
   models: ModelOption[];
   skills: SkillInfo[];
+  /** 這個 agent 預設開啟的 skills（只有它用得上的）。 */
+  defaultSkills?: string[];
   /** 這個 agent 可以用的工具名稱與說明。 */
   tools: { name: string; description: string }[];
   /** 可以勾選的知識庫（群組開放的）。 */
@@ -112,4 +114,74 @@ export function modelLabel(
 ): string | undefined {
   if (!name) return undefined;
   return models?.find((model) => model.name === name)?.label || name;
+}
+
+/**
+ * agent 用得上的 skills：requires 的工具 agent 都有（群組沒開放或專案
+ * 沒有沙盒時，agent 的工具裡就沒有 run_python）。
+ */
+export function agentSkills(
+  project: ProjectInfo,
+  agent: AgentInfo | undefined,
+): SkillInfo[] {
+  const tools = agent?.tools ?? [];
+  return (project.skills ?? []).filter((skill) =>
+    (skill.requires ?? []).every((name) => tools.includes(name)),
+  );
+}
+
+/** agent 預設開啟的 skills（只留它用得上的）。 */
+export function agentDefaultSkills(
+  project: ProjectInfo,
+  agent: AgentInfo | undefined,
+): string[] {
+  const usable = new Set(agentSkills(project, agent).map((s) => s.name));
+  return (project.defaultSkills ?? []).filter((name) => usable.has(name));
+}
+
+/**
+ * 這段對話取消了 skill 需要的哪個工具；沒有取消時為 undefined。這時
+ * skill 用不到，也不能勾選（和伺服器的判斷一樣）。
+ */
+export function missingTool(
+  options: ComposerOptions,
+  name: string,
+): string | undefined {
+  const tools = options.value.tools;
+  if (!tools) return undefined;
+  const skill = options.skills.find((item) => item.name === name);
+  return (skill?.requires ?? []).find((tool) => !tools.includes(tool));
+}
+
+/** 這段對話實際開著的預設 skills：扣掉關掉的與需要的工具被取消的。 */
+export function activeDefaultSkills(options: ComposerOptions): string[] {
+  const off = options.value.disabledSkills ?? [];
+  return (options.defaultSkills ?? []).filter(
+    (name) => !off.includes(name) && !missingTool(options, name),
+  );
+}
+
+/**
+ * 在 ＋ 選單勾選或取消一個 skill 後要存的值。預設 skill 改的是
+ * disabledSkills；其他 skill 改的是一定要用的 skills。
+ */
+export function toggleSkill(
+  options: ComposerOptions,
+  name: string,
+): Partial<SessionOptions> {
+  const { value } = options;
+  if ((options.defaultSkills ?? []).includes(name)) {
+    const off = value.disabledSkills ?? [];
+    return off.includes(name)
+      ? { disabledSkills: off.filter((item) => item !== name) }
+      : {
+          disabledSkills: [...off, name],
+          skills: value.skills.filter((item) => item !== name),
+        };
+  }
+  return {
+    skills: value.skills.includes(name)
+      ? value.skills.filter((item) => item !== name)
+      : [...value.skills, name],
+  };
 }

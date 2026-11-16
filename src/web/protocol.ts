@@ -155,6 +155,11 @@ export interface SessionOptions {
   /** 這段對話一定要用的 skill 名稱，會在送給模型的訊息裡提示它先讀取。 */
   skills: string[];
   /**
+   * 這段對話關掉的預設 skill（ProjectInfo.defaultSkills 裡的名稱）。沒有或
+   * 空陣列時，預設 skill 全部開著。
+   */
+  disabledSkills?: string[];
+  /**
    * 這段對話要搜尋的知識庫（KnowledgeBaseInfo.id）；null 或沒有時跟著 agent
    * 的設定（AgentInfo.knowledge）。只能選 ProjectInfo.knowledgeBases 裡的。
    * 空陣列表示這段對話不搜尋知識庫。
@@ -216,6 +221,11 @@ export interface SkillInfo {
   description: string;
   /** 內建 skill 或專案 skills/ 裡的。 */
   builtin: boolean;
+  /**
+   * agent 要有這些工具才用得上（例如 run_python）。沒有時 ＋ 選單不列出；
+   * 這段對話取消了這些工具時不能勾選（Python 版）。
+   */
+  requires?: string[];
 }
 
 /**
@@ -344,14 +354,21 @@ export interface MemberInfo extends CurrentUser {
   createdAt: number;
   /** 最後一次使用的時間（毫秒）；沒有登入過時沒有。 */
   lastSeenAt?: number;
+  /**
+   * 另外加入的存取群組（AccessGroup.id，不含「所有人」）；只有 Python 版
+   * 帳號模式才有。
+   */
+  groups?: string[];
 }
 
 /**
  * 新增成員或重設密碼的結果。密碼由伺服器產生，只會回傳這一次，
  * 請管理者交給成員；成員第一次登入後可以自己改。
- *   POST  /api/admin/users {username, displayName, role}
+ *   POST  /api/admin/users {username, displayName, role, groups?}
  *   PATCH /api/admin/users/:id {displayName?, role?, disabled?} → MemberInfo
  *   POST  /api/admin/users/:id/password
+ *   DELETE /api/admin/users/:id（Python 版：刪除帳號與這個人的所有資料）
+ *   PUT   /api/admin/users/:id/groups {groups} → MemberInfo（Python 版）
  */
 export interface IssuedPassword {
   user: MemberInfo;
@@ -469,10 +486,18 @@ export interface PersonalKnowledgeLimits {
   maxTotalBytes: number;
 }
 
+/**
+ * 檢索方式：keyword 精確比對（只看字詞有沒有出現、出現幾次）、bm25 用
+ * BM25 演算法排序、hybrid 是 BM25 加上 embedding 模型的語意檢索。沒寫時
+ * 有 embeddingModel 就是 hybrid，沒有就是 bm25。
+ */
+export type KnowledgeSearchMode = "keyword" | "bm25" | "hybrid";
+
 /** 知識庫的檢索設定（和 harness.yaml 的鍵相同）。 */
 export interface KnowledgeSettings {
   name?: string;
   description?: string;
+  searchMode?: KnowledgeSearchMode | null;
   embeddingModel?: string | null;
   chunkSize?: number | null;
   /** 切片方式：paragraph（依段落，預設）或 regulation（法規一條一片）。 */
@@ -514,6 +539,19 @@ export interface KnowledgeAdminBase extends KnowledgeBaseInfo {
   maintainers?: string[];
 }
 
+/**
+ * 知識庫設定的下拉選單：模型連線上的 embedding 與 rerank 模型（管理者）。
+ *   GET /api/knowledge/models → KnowledgeModelChoices
+ * source：model_info 是 LiteLLM 的 /model/info 標明了用途；names 是依
+ * 模型名稱判斷；none 是沒有可以查的端點；error 是查詢失敗（看 error）。
+ */
+export interface KnowledgeModelChoices {
+  embedding: ModelChoice[];
+  rerank: ModelChoice[];
+  source: "model_info" | "names" | "none" | "error";
+  error?: string;
+}
+
 export interface KnowledgeAdminList {
   bases: KnowledgeAdminBase[];
   /** 能不能新增、刪除知識庫與修改設定（管理者）。 */
@@ -544,6 +582,8 @@ export interface KnowledgeDocuments {
   index:
     | {
         chunks: number;
+        /** 實際的檢索方式（見 KnowledgeSearchMode）。 */
+        searchMode: KnowledgeSearchMode;
         embedding: boolean;
         reranker: boolean;
         /** 略過的檔案與原因。 */
@@ -710,6 +750,11 @@ export interface ProjectInfo {
   models?: ModelOption[];
   /** ＋ 選單可以選的 skills（Python 版）。 */
   skills?: SkillInfo[];
+  /**
+   * 每段對話預設開啟的 skills（Python 版），使用者可以在 ＋ 選單逐一
+   * 關閉。SkillInfo.requires 的工具 agent 沒有時不會套用。
+   */
+  defaultSkills?: string[];
   /** 這個人在對話裡可以勾選的知識庫（Python 版，群組開放的）。 */
   knowledgeBases?: KnowledgeBaseInfo[];
   /** 這個人能不能打開管理平台的知識庫頁（管理者或知識庫的維護者）。 */

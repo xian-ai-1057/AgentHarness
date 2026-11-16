@@ -17,9 +17,12 @@ import {
   UploadIcon,
 } from "./icons.tsx";
 import {
+  activeDefaultSkills,
   type ComposerOptions,
   chosenKnowledge,
+  missingTool,
   toggleKnowledge,
+  toggleSkill,
 } from "./options.ts";
 import { focusTrigger, Popover } from "./Popover.tsx";
 
@@ -62,13 +65,29 @@ export function PlusMenu({
   const { skills, tools, value, knowledgeBases, defaultKnowledge } = options;
   const enabledTools = value.tools ?? tools.map((tool) => tool.name);
   const searched = chosenKnowledge(value, defaultKnowledge);
-
-  const toggleSkill = (name: string) => {
-    const next = value.skills.includes(name)
-      ? value.skills.filter((item) => item !== name)
-      : [...value.skills, name];
-    options.onChange({ skills: next });
-  };
+  const defaults = options.defaultSkills ?? [];
+  const activeDefaults = activeDefaultSkills(options);
+  // 預設開啟的排在前面，勾選狀態看有沒有被關掉。需要的工具在這段對話
+  // 被取消時不能勾選，說明要先開啟哪個工具。
+  const skillItems = [
+    ...skills.filter((skill) => defaults.includes(skill.name)),
+    ...skills.filter((skill) => !defaults.includes(skill.name)),
+  ].map((skill) => {
+    const missing = missingTool(options, skill.name);
+    return {
+      name: skill.name,
+      description: missing
+        ? `要先在「工具」開啟 ${missing} 才能使用。`
+        : skill.description,
+      tag: defaults.includes(skill.name) ? "預設" : undefined,
+      disabled: Boolean(missing),
+      checked:
+        !missing &&
+        (activeDefaults.includes(skill.name) ||
+          value.skills.includes(skill.name)),
+    };
+  });
+  const skillCount = skillItems.filter((item) => item.checked).length;
 
   const toggleTool = (name: string) => {
     const next = enabledTools.includes(name)
@@ -129,8 +148,8 @@ export function PlusMenu({
                 <span className="ch-pop-main">
                   <span className="ch-pop-title">Skills</span>
                 </span>
-                {value.skills.length > 0 && (
-                  <span className="ch-count">{value.skills.length}</span>
+                {skillCount > 0 && (
+                  <span className="ch-count">{skillCount}</span>
                 )}
                 <ChevronIcon size={14} />
               </button>
@@ -176,13 +195,13 @@ export function PlusMenu({
         {view === "skills" && (
           <Checklist
             title="Skills"
-            hint="勾選的 skill 會請 agent 先讀過再回答。"
-            items={skills.map((skill) => ({
-              name: skill.name,
-              description: skill.description,
-              checked: value.skills.includes(skill.name),
-            }))}
-            onToggle={toggleSkill}
+            hint={
+              defaults.length > 0
+                ? "標「預設」的 skill 每段對話都開著，需要時 agent 會自己使用，取消勾選就不用；其他勾選的 skill 會請 agent 先讀過再回答。"
+                : "勾選的 skill 會請 agent 先讀過再回答。"
+            }
+            items={skillItems}
+            onToggle={(name) => options.onChange(toggleSkill(options, name))}
             onBack={() => back("skills")}
           />
         )}
@@ -246,6 +265,10 @@ function Checklist({
     /** 顯示的名稱；沒有時顯示 name。 */
     label?: string;
     description: string;
+    /** 名稱旁邊的小標籤，例如「預設」。 */
+    tag?: string;
+    /** 不能勾選（例如需要的工具被取消了）。 */
+    disabled?: boolean;
     checked: boolean;
   }[];
   onToggle: (name: string) => void;
@@ -289,7 +312,7 @@ function Checklist({
             // 輸入框在表單裡，Enter 會送出訊息；改成勾選第一個符合的項目。
             if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
             event.preventDefault();
-            const first = shown[0];
+            const first = shown.find((item) => !item.disabled);
             if (first) onToggle(first.name);
           }}
         />
@@ -303,6 +326,7 @@ function Checklist({
             aria-checked={item.checked}
             className="ch-pop-item"
             title={item.description}
+            disabled={item.disabled}
             onClick={() => onToggle(item.name)}
           >
             <span className={`ch-box${item.checked ? " on" : ""}`}>
@@ -311,6 +335,7 @@ function Checklist({
             <span className="ch-pop-main">
               <span className={`ch-pop-title${item.label ? "" : " mono"}`}>
                 {item.label ?? item.name}
+                {item.tag && <span className="ch-pop-tag">{item.tag}</span>}
               </span>
               {item.description && (
                 <span className="ch-pop-sub clamp">{item.description}</span>

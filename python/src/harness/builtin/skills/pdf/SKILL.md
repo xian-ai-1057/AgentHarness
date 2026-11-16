@@ -8,6 +8,7 @@ name: pdf
 description: 處理 PDF 檔案時使用：讀取或擷取文字與表格、合併或分割 PDF、旋轉頁面、加浮水印、建立新的 PDF、填寫 PDF 表單、加密或解密、擷取圖片，以及對掃描檔做 OCR。使用者提到 .pdf 檔或要產出 PDF 時都用。
 license: Apache-2.0，完整條款見 LICENSE.txt
 tools: [files]
+requires: [run_python]
 ---
 
 # PDF 處理指南

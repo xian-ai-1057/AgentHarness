@@ -19,6 +19,7 @@ skills/
 name: refund                           # 省略時用資料夾名稱
 description: 處理退款申請，依退款政策判斷能不能退
 tools: [find_order, issue_refund]      # 選用，tools/ 裡的工具或 toolset
+requires: [run_python]                 # 選用，agent 要有這些工具才用得上
 ---
 1. 先用 find_order 查訂單，確認付款日期。
 2. 讀 policy.md 判斷是否在可退款期間內。
@@ -32,6 +33,10 @@ tools: [find_order, issue_refund]      # 選用，tools/ 裡的工具或 toolset
 - skill 的專屬工具在 skill 載入前不會出現在 agent 的工具裡（即使 agent
   沒寫 `tools` 欄位）。想讓 agent 隨時都能用，就在 agent 的 `tools`
   明確列出。
+- `requires` 列出 skill 用得上的前提工具（例如要在沙盒裡執行腳本的
+  skill 寫 `run_python`）。網頁上這段對話的 agent 沒有這些工具（專案沒有
+  沙盒、群組沒開放，或在「＋ → 工具」取消了）時，這個 skill 不會預設開啟，
+  使用者挑了也不會套用。
 - 載入狀態是從對話紀錄推算的，接續對話時已載入的 skill 仍然有效。
 
 ## 在程式裡使用
@@ -55,16 +60,26 @@ agent = harness.Agent(name="cs", instructions="...", skills=[refund])
 
 | skill | 用途 | 載入後開放的工具 |
 |---|---|---|
-| `skill-creator` | 建立或改寫 skill，附 SKILL.md 範本 | `files` |
+| `skill-creator` | 建立、改寫與測試 skill，附 SKILL.md 範本（改寫自官方） | `files` |
 | `code-review` | 審查 git 變更，依嚴重程度回報問題，附檢查清單 | `files`、`shell` |
 | `debugging` | 重現 → 縮小範圍 → 驗證假設 → 修正 → 確認 | `files`、`shell`、`plan` |
 | `planning` | 把多步驟工作拆成計畫並持續更新進度 | `plan` |
 | `web-research` | 查證網路資料，整理成附來源的回答 | `web` |
 | `git-commit` | 檢查變更、撰寫 commit 訊息，經確認後 commit | `shell` |
+| `doc-coauthoring` | 帶使用者寫提案、規格、決策文件：蒐集背景 → 架構 → 逐節撰寫 → 讀者測試 | `files` |
 | `xlsx` | 建立、編輯、分析試算表，公式用 LibreOffice 重算並檢查錯誤 | `files`（另需 `sandbox`） |
 | `docx` | 建立、編輯 Word 文件，追蹤修訂、註解、轉成 PDF | `files`（另需 `sandbox`） |
 | `pptx` | 建立結構化簡報（佈景主題、版面配置、原生圖表），編輯範本並檢查 | `files`（另需 `sandbox`） |
 | `pdf` | 擷取文字與表格、合併分割、產生中文 PDF、填寫表單、OCR | `files`（另需 `sandbox`） |
+| `internal-comms` | 依格式寫週報、3P 更新、電子報、FAQ、事件報告 | `files` |
+| `brand-guidelines` | 套用 Anthropic 的品牌色與字型（可複製改成自己公司的） | `files` |
+| `theme-factory` | 10 套配色與字型主題，套用到簡報、文件、網頁 | `files` |
+| `frontend-design` | 有辨識度的網頁與介面設計指引 | `files` |
+| `canvas-design` | 以設計哲學創作海報、主視覺（PNG／PDF） | `files`（另需 `sandbox`） |
+| `algorithmic-art` | 用 p5.js 創作可調參數的生成藝術（單一 HTML） | `files`（建議 `sandbox`） |
+| `web-artifacts-builder` | React + Tailwind + shadcn/ui 的複雜網頁應用，打包成單一 HTML | `files`（另需 `sandbox`） |
+| `webapp-testing` | 用 Playwright 測試沙盒裡的網頁、截圖、讀主控台 | `files`（另需 `sandbox`） |
+| `mcp-builder` | 設計、實作、測試 MCP 伺服器（Python 或 TypeScript） | `files`（另需 `sandbox`） |
 
 ```yaml
 skills: [code-review, git-commit]
@@ -113,15 +128,34 @@ Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown �
 - **用自己的映像檔時**，把 `python/src/harness/builtin/skills` 複製到映像檔的
   `/opt/skills`，並裝好上面的工具；`pyharness sandbox` 會列出缺少的項目。
 
-**開啟：** 新建立的助手在有沙盒時會自動列在 `agents/main.md` 的 `skills`。
-既有的專案要自己加上：
+**在網頁上預設開啟。** 和 Claude 一樣，網頁上的每段對話預設就能用這四個
+skill 與[其他改寫自官方的 skills](#其他改寫自官方的-skills)，不用在 agent 的
+`skills` 裡列出，伺服器自動把它們加進技能清單。agent 只在工作需要時才載入，
+不會每次都讀。
+
+- 需要執行程式的（`SKILL.md` 寫了 `requires: [run_python]`：這四個加上
+  `algorithmic-art`、`canvas-design`、`web-artifacts-builder`、
+  `webapp-testing`）只在專案有開沙盒，而且這段對話的 agent 能執行程式時
+  才開：工具有 `run_python`，沒有被群組或這段對話關掉，也不是「舊資料」
+  資料夾。群組沒有開放沙盒時，「＋ → Skills」也不列出它們。
+- 使用者可以在「＋ → Skills」取消勾選（標「預設」的項目），只影響這段
+  對話；輸入框會顯示「已關閉 N 個預設 skill」，按 × 全部開回來。
+- 在「＋ → 工具」取消 `run_python` 時，需要它的 skill 變成灰色、不能勾選，
+  並說明要先開啟 `run_python`。
+- 要換成別的清單或全部關掉，在 `harness.yaml` 設定（只能列內建或專案裡
+  有的 skill）：
+
+```yaml
+web:
+  defaultSkills: [xlsx, pdf]   # [] 表示不預設開啟任何 skill
+```
+
+命令列（`pyharness chat`）與 API 不套用預設，要用的話在 agent 列出：
 
 ```yaml
 tools: [files, plan, web, sandbox]
 skills: [planning, web-research, xlsx, docx, pptx, pdf]
 ```
-
-也可以在網頁上每段對話的「＋ → Skills」臨時選用。
 
 **目前的限制：**
 
@@ -137,3 +171,37 @@ skills: [planning, web-research, xlsx, docx, pptx, pdf]
 （以及 pdf 的 `REFERENCE.md`、`FORMS.md`）覆蓋過來，比對官方 `SKILL.md` 的
 差異後改寫到我們的繁體中文版，更新 `SKILL.md` 開頭的 commit，再重新建置
 沙盒映像檔（`docker compose build sandbox-image`）。
+
+### 其他改寫自官方的 skills {#其他改寫自官方的-skills}
+
+除了上面的文件 skills，[anthropics/skills](https://github.com/anthropics/skills)
+（commit `1780c5e`）的範例 skills 也收錄了，只有 `slack-gif-creator` 沒有
+加。網頁上每段對話**預設開啟**（見上面的「在網頁上預設開啟」），需要執行
+程式的只在能執行程式時才開；命令列與 API 要在 agent 的 `skills` 列出。授權與改寫方式和文件 skills 相同：保留
+`LICENSE.txt`（Apache 2.0），`SKILL.md` 開頭註明來源與修改內容，附帶的腳本、
+範本、參考文件照原樣收錄。
+
+- **`doc-coauthoring` 是自己寫的。** 官方的同名 skill 沒有附授權條款，不能
+  確定可以轉載，所以沒有收錄或翻譯它，改寫一份同樣用途、內容獨立的版本。
+- **`skill-creator` 換成官方版改寫。** 原本內建的 skill-creator 併進來
+  （`template.md` 與 Agent Harness 的 frontmatter 說明）；官方流程裡需要
+  subagent 或 `claude` 命令列的步驟（平行測試、基準比較、自動最佳化描述）
+  改成自己逐一測試與人工檢視。
+- **`brand-guidelines` 是 Anthropic 的品牌。** 要套用自己公司的品牌，把它
+  複製到專案的 `skills/` 改成自己的色碼與字型。
+
+**沙盒裡都在建置時裝好，執行時不下載任何東西：**
+
+| skill | 沙盒映像檔裡準備的東西 | 限制 |
+|---|---|---|
+| `web-artifacts-builder` | 用官方 `init-artifact.sh` 建好的 React 專案範本 `/opt/web-artifact`（含 Parcel、html-inline）；`offline/init-artifact.sh` 複製範本並連結它的 `node_modules`，`offline/bundle-artifact.sh` 不用 `pnpm add` 直接打包 | 只能用範本裡已有的套件；打包約數秒到數十秒 |
+| `webapp-testing` | Playwright（Python）與無頭 Chromium | 沙盒沒有網路，只能測工作資料夾裡的 HTML 或在沙盒裡啟動的伺服器 |
+| `mcp-builder` | Python `mcp` 1.x（FastMCP）、Node 的 MCP SDK v2／v1、express、zod、`tsc`、`tsx` | MCP Inspector 與 `scripts/evaluation.py`（要 Anthropic API 與網路）不能在沙盒裡執行；做好的伺服器由管理者加到 `harness.yaml` 的 `mcpServers` |
+| `algorithmic-art` | p5.js 1.7.0；`offline/inline_p5.py` 把它內嵌進 HTML 並拿掉 Google Fonts 連結 | 產出的 HTML 下載後用瀏覽器開啟 |
+| `canvas-design` | 附帶的 54 個字型（SIL OFL）登記成系統字型，LibreOffice、matplotlib 也能用 | 字型都是英數字型，中文用 Noto CJK；agent 看不到成品，改用程式量測版面並請使用者預覽 |
+
+`frontend-design`、`theme-factory`、`internal-comms`、`brand-guidelines`、
+`doc-coauthoring` 只是寫作與設計的指引，不需要沙盒（`theme-factory` 有沙盒
+時會把主題展示 PDF 複製給使用者看）。`internal-comms` 官方提到用 Slack、
+Google Drive 找資料，這裡改成用上傳的檔案、知識庫與網頁工具。
+

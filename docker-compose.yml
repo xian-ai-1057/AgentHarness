@@ -49,7 +49,10 @@ services:
         （node 腳本直接 require，不用安裝）。要執行 shell 指令時在程式裡用
         subprocess。處理 Excel、Word、PowerPoint、PDF 檔之前，先用 load_skill
         載入對應的 xlsx、docx、pptx、pdf 技能（有的話），它們的腳本在
-        /opt/skills/。
+        /opt/skills/。另外裝好 Playwright 與無頭 Chromium（只能開沙盒裡的
+        網頁）、Python mcp 與 Node 的 MCP SDK、typescript（tsc），以及
+        web-artifacts-builder 的 React 專案範本（/opt/web-artifact）。沙盒
+        沒有網路，不能 pip install 或 npm install。
     volumes:
       # 專案、帳號、每個人的對話紀錄、上傳的檔案與金鑰都在這個 volume 裡。
       - harness-data:/assistant

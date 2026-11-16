@@ -2,6 +2,8 @@
 
 import type {
   KnowledgeAdminBase,
+  KnowledgeModelChoices,
+  KnowledgeSearchMode,
   KnowledgeSettings,
 } from "../../../../src/web/protocol.ts";
 
@@ -9,6 +11,8 @@ import type {
 export interface SettingsDraft {
   name: string;
   description: string;
+  /** "" 表示沒有設定：有 embeddingModel 就是 hybrid，沒有就是 bm25。 */
+  searchMode: "" | KnowledgeSearchMode;
   embeddingModel: string;
   chunkSize: string;
   /** "" 表示沒有設定（沿用預設或 knowledge 區塊）。 */
@@ -39,6 +43,7 @@ export function toSettingsDraft(base: KnowledgeAdminBase): SettingsDraft {
   return {
     name: base.name,
     description: base.description,
+    searchMode: own.searchMode ?? "",
     embeddingModel: text(own.embeddingModel),
     chunkSize: text(own.chunkSize),
     chunking: own.chunking ?? "",
@@ -71,6 +76,9 @@ export function settingsChanges(
   }
   if (draft.chunking !== initial.chunking) {
     changes.chunking = draft.chunking || null;
+  }
+  if (draft.searchMode !== initial.searchMode) {
+    changes.searchMode = draft.searchMode || null;
   }
   for (const key of TEXT_KEYS) {
     const value = draft[key].trim();
@@ -116,4 +124,93 @@ function sameMembers(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const set = new Set(a);
   return b.every((item) => set.has(item));
+}
+
+/**
+ * 「Embedding 模型」下拉選單的值：keyword（關鍵字，精確比對）、bm25
+ * （演算法）、model:<名稱>、custom（自行輸入），或 ""（沿用預設知識庫，
+ * 只有其他知識庫有）。預設知識庫沒有設定時就是 bm25。
+ */
+export const CUSTOM_CHOICE = "custom";
+export const MODEL_PREFIX = "model:";
+
+type SearchFields = Pick<SettingsDraft, "searchMode" | "embeddingModel">;
+
+export function searchChoice(
+  fields: SearchFields,
+  builtin: boolean,
+  custom: boolean,
+): string {
+  if (fields.searchMode === "keyword" || fields.searchMode === "bm25") {
+    return fields.searchMode;
+  }
+  if (custom) return CUSTOM_CHOICE;
+  if (fields.embeddingModel) return MODEL_PREFIX + fields.embeddingModel;
+  return builtin ? "bm25" : "";
+}
+
+/**
+ * 選了下拉選單的某一項後，草稿裡的 searchMode 與 embeddingModel。
+ *
+ * 選模型時不寫 searchMode（有模型就是 hybrid）。預設知識庫選演算法時
+ * 兩個都清掉（本來就是 BM25）；其他知識庫要寫明 bm25，才不會沿用預設
+ * 知識庫的 embedding 模型。
+ */
+export function applySearchChoice(
+  choice: string,
+  builtin: boolean,
+): SearchFields {
+  if (choice === "keyword")
+    return { searchMode: "keyword", embeddingModel: "" };
+  if (choice === "bm25") {
+    return { searchMode: builtin ? "" : "bm25", embeddingModel: "" };
+  }
+  if (choice.startsWith(MODEL_PREFIX)) {
+    return {
+      searchMode: "",
+      embeddingModel: choice.slice(MODEL_PREFIX.length),
+    };
+  }
+  return { searchMode: "", embeddingModel: "" };
+}
+
+/** 實際生效的檢索方式，給「沿用預設知識庫（目前：…）」用。 */
+export function describeSearch(retrieval: {
+  searchMode: KnowledgeSearchMode | null;
+  embeddingModel: string | null;
+}): string {
+  if (retrieval.searchMode === "keyword") return "關鍵字";
+  if (retrieval.searchMode === "hybrid" || retrieval.embeddingModel) {
+    return retrieval.embeddingModel ?? "embedding";
+  }
+  return "演算法（BM25）";
+}
+
+/**
+ * 「Embedding 模型」下方的提醒：模型網址上沒有 embedding 模型、查詢失敗，
+ * 或目前設定的模型不在網址上。沒有要提醒的時候回傳 ""。
+ */
+export function embeddingWarning(
+  found: KnowledgeModelChoices | undefined,
+  current: string,
+): string {
+  if (!found) return "";
+  if (found.source === "none") {
+    return "目前的模型連線沒有模型網址（或是直接連 Anthropic 等沒有 embedding 模型的供應商），沒有可以選的 embedding 模型，只能選關鍵字或演算法（BM25）。要用語意檢索，請到「管理平台 → 模型」改連有 embedding 模型的網址（例如 LiteLLM Proxy），或選「其他」自行輸入。";
+  }
+  if (found.source === "error") {
+    return `列不出模型網址上的 embedding 模型（${found.error ?? "查詢失敗"}），目前只能選關鍵字或演算法，或選「其他」自行輸入模型名稱。`;
+  }
+  if (found.embedding.length === 0) {
+    return "這個模型網址上沒有 embedding 模型，只能選關鍵字或演算法（BM25）。要用語意檢索，請先在模型中台加上 embedding 模型（LiteLLM 請在 model_info 標明 mode: embedding），或選「其他」自行輸入。";
+  }
+  // 依名稱猜的清單可能漏掉，只有 LiteLLM 標明用途時才提醒不在清單上。
+  if (
+    found.source === "model_info" &&
+    current &&
+    !found.embedding.some((model) => model.name === current)
+  ) {
+    return `目前設定的「${current}」不在這個模型網址上，搜尋時可能會失敗，請改選清單裡的模型。`;
+  }
+  return "";
 }

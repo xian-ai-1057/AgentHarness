@@ -42,6 +42,7 @@ import logging
 import os
 import pathlib
 import re
+import shutil
 import sys
 import time
 import uuid
@@ -107,6 +108,28 @@ WEB_INSTRUCTIONS = "\n".join(
         "伺服器。",
         "- 引用資料裡的數字時，只用你的程式實際印出來的值。",
     )
+)
+# 和 Claude 一樣：每段對話預設開啟這些 skills（改寫自 Anthropic 官方的），
+# 需要時由 agent 自己載入；使用者可以在對話裡關掉。需要執行程式的
+# （SKILL.md 寫了 requires: [run_python]）只在 agent 這一輪能在沙盒裡執行
+# 程式時才開。harness.yaml 的 web.defaultSkills 可以換成別的清單，[] 表示
+# 都不開。
+DEFAULT_SKILLS = (
+    "xlsx",
+    "docx",
+    "pptx",
+    "pdf",
+    "algorithmic-art",
+    "brand-guidelines",
+    "canvas-design",
+    "doc-coauthoring",
+    "frontend-design",
+    "internal-comms",
+    "mcp-builder",
+    "skill-creator",
+    "theme-factory",
+    "web-artifacts-builder",
+    "webapp-testing",
 )
 _UNTITLED = "新對話"
 _TITLE_LENGTH = 40
@@ -475,9 +498,12 @@ class Workspace:
                     "name": item.name,
                     "description": item.description,
                     "builtin": builtin_skill,
+                    "requires": list(item.requires),
                 }
                 for item, builtin_skill in self._available_skills().values()
             ],
+            # 每段對話預設開啟的 skills；requires 的工具 agent 沒有時不開。
+            "defaultSkills": self._default_skill_names(),
             "model": {
                 "config": dict(self._settings),
                 "env": {
@@ -584,6 +610,79 @@ class Workspace:
         assert group is not None
         return group.info()
 
+    def check_group_ids(self, group_ids: Any) -> None:
+        """group_ids 是存在的群組（不含「所有人」）的識別碼清單。
+
+        Raises:
+            WebError: 不是帳號模式、格式不對，或有不存在的群組。
+        """
+        store = self._require_groups()
+        with _group_errors():
+            groups_lib.check_ids(store, group_ids)
+
+    def set_member_groups(self, user_id: str, group_ids: Any) -> list[str]:
+        """從成員那一邊調整所屬群組，回傳調整後的群組識別碼（不含「所有人」）。"""
+        store = self._require_groups()
+        with _group_errors():
+            groups = store.set_groups_of(user_id, group_ids)
+        self.refresh_project()
+        return [item.id for item in groups if not item.builtin]
+
+    def group_info(self, group_id: str) -> dict[str, Any] | None:
+        """一個群組的 GroupInfo；找不到或不是帳號模式時為 None。"""
+        if self._groups is None:
+            return None
+        group = self._groups.get_group(group_id)
+        return None if group is None else group.info()
+
+    def group_names(self) -> dict[str, str]:
+        """群組識別碼 → 名稱（稽核紀錄用）。"""
+        if self._groups is None:
+            return {}
+        return {item.id: item.name for item in self._groups.list_groups()}
+
+    def member_groups(self) -> dict[str, list[str]]:
+        """每位成員另外加入的群組（不含「所有人」）；不是帳號模式時是空的。"""
+        if self._groups is None:
+            return {}
+        found: dict[str, list[str]] = {}
+        for group in self._groups.list_groups():
+            for user_id in group.members:
+                found.setdefault(user_id, []).append(group.id)
+        return found
+
+    def purge_member(self, user: accounts_lib.User) -> None:
+        """清掉已刪除帳號的所有資料。
+
+        帳號本身由 AccountStore.delete_user 刪除；這裡清掉這個人的對話、
+        記憶、「我的檔案」、個人知識庫、自建 agent，以及群組與知識庫維護
+        者的記錄。稽核紀錄不動。
+        """
+        for session_id, state in list(self._states.items()):
+            if state.owner != user.id:
+                continue
+            if state.task is not None:
+                state.stop_notice = ACCOUNT_CHANGED_NOTICE
+                state.task.cancel()
+            del self._states[session_id]
+        if self._groups is not None:
+            self._groups.remove_member(user.id)
+        if self._maintainers is not None:
+            self._maintainers.forget_user(user.id)
+        if self._user_agents is not None:
+            for agent in self._user_agents.owned_by(user.id):
+                self._user_agents.delete(agent.id)
+        for base in self.personal.owned_by(user.id):
+            self.personal.delete(base.id)
+        self._model_access.pop(user.username, None)
+        if self.auth_mode != "local":
+            for directory in (
+                migration.user_dir(self.project.root, user.id),
+                self.folders.private(user).path,
+            ):
+                shutil.rmtree(directory, ignore_errors=True)
+        self.refresh_project()
+
     async def list_knowledge(self, user: accounts_lib.User) -> dict[str, Any]:
         """管理平台的知識庫頁：這個人可以管理的知識庫。
 
@@ -615,6 +714,7 @@ class Workspace:
                 "documents": len(knowledge.files()),
                 "settings": knowledge_admin.describe_settings(spec),
                 "retrieval": {
+                    "searchMode": knowledge.search_mode,
                     "embeddingModel": knowledge.embedding_model,
                     "chunkSize": knowledge.chunk_size,
                     "chunking": knowledge.chunking,
@@ -645,6 +745,28 @@ class Workspace:
                 or knowledge_lib.DEFAULT_PARSERS
             ),
         }
+
+    async def knowledge_models(self) -> dict[str, Any]:
+        """知識庫設定的下拉選單：模型連線上的 embedding 與 rerank 模型。
+
+        查不到時不算錯誤（選單仍然可以選關鍵字、演算法或自行輸入），
+        原因放在 error 給畫面顯示。
+
+        Returns:
+            {"embedding": [{"name", "label"}], "rerank": [...],
+             "source": "model_info" | "names" | "none" | "error",
+             "error"?: str}
+        """
+        try:
+            found = await model_catalog.list_retrieval_models()
+        except model_catalog.CatalogError as error:
+            return {
+                "embedding": [],
+                "rerank": [],
+                "source": "error",
+                "error": str(error),
+            }
+        return found.to_json()
 
     def create_knowledge(self, body: dict[str, Any]) -> dict[str, Any]:
         """新增知識庫：寫進 harness.yaml 的 knowledgeBases，建立資料夾。
@@ -774,6 +896,7 @@ class Workspace:
             stats = await base.knowledge.stats()
             index = {
                 "chunks": stats["chunks"],
+                "searchMode": base.knowledge.search_mode,
                 "embedding": stats["embedding"],
                 "reranker": stats["reranker"],
                 "warnings": stats["warnings"],
@@ -3096,6 +3219,17 @@ class Workspace:
             if unknown:
                 raise WebError(400, f"沒有這些 skill：{'、'.join(unknown)}")
             options["skills"] = chosen
+        if "disabledSkills" in changes:
+            off = _string_list(
+                changes["disabledSkills"] or [], "disabledSkills"
+            )
+            defaults = self._default_skill_names()
+            unknown = [name for name in off if name not in defaults]
+            if unknown:
+                raise WebError(
+                    400, f"這些不是預設開啟的 skill：{'、'.join(unknown)}"
+                )
+            options["disabledSkills"] = off
         if "folder" in changes:
             folder_id = changes["folder"] or folders_lib.PRIVATE_ID
             if self.folders.find(user, folder_id) is None:
@@ -3311,9 +3445,16 @@ class Workspace:
             # 繞過使用者關掉的工具。
             copy.skills = [_limit_tools(item, allowed) for item in agent.skills]
         available = self._available_skills()
-        chosen = [available[n][0] for n in options["skills"] if n in available]
+        usable = self._usable_tools(state, copy.tools)
+        copy.skills = self._with_default_skills(state, copy, available, usable)
+        # 需要的工具這一輪用不到的 skill 不列出（例如群組沒有沙盒）。
+        chosen = [
+            available[n][0]
+            for n in options["skills"]
+            if n in available and set(available[n][0].requires) <= usable
+        ]
         if chosen:
-            own = {item.name for item in agent.skills}
+            own = {item.name for item in copy.skills}
             # 使用者挑的 skill 不能帶進 agent 原本沒有的工具。
             tools = {item.name for item in copy.tools}
             copy.skills = [
@@ -3348,6 +3489,69 @@ class Workspace:
             for target in agent.handoffs
         ]
         return copy
+
+    def _default_skill_names(self) -> list[str]:
+        """每段對話預設開啟的 skill 名稱（只留存在的）。"""
+        names: Any = DEFAULT_SKILLS
+        web = config_lib.read_config(self.project.root).get("web")
+        if isinstance(web, dict) and "defaultSkills" in web:
+            names = web["defaultSkills"]
+            if not isinstance(names, list):
+                names = []
+        available = self._available_skills()
+        return [str(name) for name in names if str(name) in available]
+
+    def _with_default_skills(
+        self,
+        state: _State,
+        agent: agents_lib.Agent,
+        available: dict[str, tuple[skills_lib.Skill, bool]],
+        usable: set[str],
+    ) -> list[skills_lib.Skill]:
+        """agent 的 skills 加上預設開啟的，扣掉這段對話關掉的。
+
+        預設 skill 的 requires（例如 run_python）要都在 usable 裡才加，
+        也只開放 agent 原本就有的工具。
+        """
+        defaults = self._default_skill_names()
+        off = set(state.options.get("disabledSkills") or []) & set(defaults)
+        kept = [item for item in agent.skills if item.name not in off]
+        present = {item.name for item in kept}
+        tools = {item.name for item in agent.tools}
+        added = [
+            _limit_tools(available[name][0], tools)
+            for name in defaults
+            if name not in off
+            and name not in present
+            and set(available[name][0].requires) <= usable
+        ]
+        return [*kept, *added]
+
+    def _usable_tools(
+        self, state: _State, tools: list[tools_lib.Tool]
+    ) -> set[str]:
+        """agent 這一輪真的能用的工具名稱（判斷 skill 的 requires 用）。
+
+        群組沒開放的不算；run_python 要專案有沙盒、使用者的群組有開放，
+        而且不是不能執行程式的「舊資料」資料夾（見 _runs_code）。
+        """
+        hidden = self._hidden_tools(state.run_user or accounts_lib.LOCAL_USER)
+        names = {item.name for item in tools if id(item) not in hidden}
+        if not self._runs_code(state, tools):
+            names.discard(sandbox_lib.TOOL_NAME)
+        return names
+
+    def _runs_code(self, state: _State, tools: list[tools_lib.Tool]) -> bool:
+        """這一輪 agent 能不能在沙盒裡執行程式。"""
+        if self.project.sandbox is None:
+            return False
+        if state.run_folder is not None and state.run_folder.is_legacy:
+            return False
+        hidden = self._hidden_tools(state.run_user or accounts_lib.LOCAL_USER)
+        return any(
+            item.name == sandbox_lib.TOOL_NAME and id(item) not in hidden
+            for item in tools
+        )
 
     def _chosen_knowledge(
         self,
@@ -3881,12 +4085,14 @@ def _restore_meta(state: _State, meta: dict[str, Any]) -> None:
         model = options.get("model")
         tools = options.get("tools")
         chosen = options.get("skills")
+        off = options.get("disabledSkills")
         folder = options.get("folder")
         bases = options.get("knowledge")
         state.options = {
             "model": model if isinstance(model, str) else None,
             "tools": tools if _is_string_list(tools) else None,
             "skills": chosen if _is_string_list(chosen) else [],
+            "disabledSkills": off if _is_string_list(off) else [],
             "folder": folder
             if isinstance(folder, str) and folder
             else folders_lib.PRIVATE_ID,
@@ -3992,6 +4198,8 @@ def _default_options() -> dict[str, Any]:
         "model": None,
         "tools": None,
         "skills": [],
+        # 這段對話關掉的預設 skill（見 DEFAULT_SKILLS）。
+        "disabledSkills": [],
         "folder": folders_lib.PRIVATE_ID,
         # 這段對話要搜尋的知識庫；None 表示跟著 agent 的設定。
         "knowledge": None,

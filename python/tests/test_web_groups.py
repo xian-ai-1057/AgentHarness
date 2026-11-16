@@ -9,6 +9,8 @@ import pytest
 
 from harness.web import accounts as accounts_lib
 from harness.web import groups as groups_lib
+from harness.web import personal_knowledge as personal_lib
+from harness.web import user_agents as user_agents_lib
 from tests import conftest
 from tests import test_web_accounts
 from tests.test_web_accounts import AGENT
@@ -357,3 +359,191 @@ class TestKnowledge:
         assert "public.md" in alice_found
         assert "hr.md" not in alice_found
         assert "hr.md" in bob_found
+
+
+class TestMemberGroups:
+    """從成員那一邊調整群組，以及新增成員時一起選群組。"""
+
+    def test_set_groups_of_replaces_only_this_member(self, tmp_path):
+        store = groups_of(tmp_path)
+        first = store.create_group("資訊處", members=["id-amy", "id-ben"])
+        second = store.create_group("法遵")
+
+        groups = store.set_groups_of("id-amy", [second.id, second.id])
+
+        assert [item.id for item in groups] == ["everyone", second.id]
+        assert store.get_group(first.id).members == ("id-ben",)
+        assert store.get_group(second.id).members == ("id-amy",)
+        with pytest.raises(groups_lib.GroupError):
+            store.set_groups_of("id-amy", ["everyone"])
+        with pytest.raises(groups_lib.GroupError):
+            store.set_groups_of("id-amy", "nope")
+
+    async def test_admin_sets_groups_from_member_side(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        alice_id = user_id(s.root, "alice")
+        bob_id = user_id(s.root, "bob")
+        _, group = await boss.api("POST", "/admin/groups", {"name": "資訊處"})
+
+        status, changed = await boss.api(
+            "PUT", f"/admin/users/{alice_id}/groups", {"groups": [group["id"]]}
+        )
+        _, members = await boss.api("GET", "/admin/users")
+        missing, _ = await boss.api(
+            "PUT", f"/admin/users/{alice_id}/groups", {"groups": ["nope"]}
+        )
+        nobody, _ = await boss.api(
+            "PUT", "/admin/users/nobody/groups", {"groups": []}
+        )
+        forbidden, _ = await alice.api(
+            "PUT", f"/admin/users/{bob_id}/groups", {"groups": [group["id"]]}
+        )
+
+        assert status == 200
+        assert changed["groups"] == [group["id"]]
+        by_name = {item["username"]: item for item in members}
+        assert by_name["alice"]["groups"] == [group["id"]]
+        assert by_name["bob"]["groups"] == []
+        assert missing == 404
+        assert nobody == 404
+        assert forbidden == 403
+        assert groups_of(s.root).get_group(group["id"]).members == (alice_id,)
+
+    async def test_add_member_with_groups(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+        _, group = await boss.api("POST", "/admin/groups", {"name": "資訊處"})
+
+        status, issued = await boss.api(
+            "POST",
+            "/admin/users",
+            {
+                "username": "carol",
+                "displayName": "卡蘿",
+                "groups": [group["id"]],
+            },
+        )
+        bad, _ = await boss.api(
+            "POST", "/admin/users", {"username": "dave", "groups": ["nope"]}
+        )
+
+        assert status == 201
+        assert issued["user"]["groups"] == [group["id"]]
+        assert bad == 404
+        # 群組不對時不會留下建了一半的帳號。
+        assert (
+            accounts_lib.AccountStore.for_project(s.root).find_user("dave")
+            is None
+        )
+
+
+class TestDeleteMember:
+    async def test_admin_deletes_member_and_their_data(self, site):
+        s = await site([conftest.text_response("好")])
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        alice_id = user_id(s.root, "alice")
+        _, group = await boss.api(
+            "POST", "/admin/groups", {"name": "資訊處", "members": [alice_id]}
+        )
+        _, created = await alice.api("POST", "/sessions", {"text": "嗨"})
+        await alice.wait_idle(created["id"])
+        _, base = await alice.api("POST", "/my/knowledge", {"name": "筆記"})
+        _, agent = await alice.api("POST", "/agents", {"name": "小幫手"})
+        private = test_web_accounts.private(s.root, alice_id)
+        private.mkdir(parents=True, exist_ok=True)
+        (private / "a.txt").write_text("hi", "utf-8")
+        user_dir = s.root / accounts_lib.USERS_DIR / alice_id
+        assert user_dir.exists()
+
+        status, _ = await boss.api("DELETE", f"/admin/users/{alice_id}")
+        _, members = await boss.api("GET", "/admin/users")
+        after, _ = await alice.api("GET", "/sessions")
+        again, _ = await boss.api("DELETE", f"/admin/users/{alice_id}")
+        _, audit = await boss.api("GET", "/admin/audit")
+
+        assert status == 200
+        assert "alice" not in [item["username"] for item in members]
+        assert after == 401
+        assert again == 404
+        assert not user_dir.exists()
+        assert not private.exists()
+        assert groups_of(s.root).get_group(group["id"]).members == ()
+        personal = personal_lib.PersonalKnowledgeStore(s.root)
+        assert personal.owned_by(alice_id) == []
+        assert not personal.files_path(base["id"]).exists()
+        agents = user_agents_lib.UserAgentStore.for_project(s.root)
+        assert agents.get(agent["id"]) is None
+        actions = [item["action"] for item in audit["entries"]]
+        assert "member.delete" in actions
+        # 名稱可以再用。
+        reuse, issued = await boss.api(
+            "POST", "/admin/users", {"username": "alice"}
+        )
+        assert reuse == 201
+        assert issued["user"]["id"] != alice_id
+
+    async def test_cannot_delete_self_or_last_admin(self, site):
+        s = await site(users=(("boss", "admin"), ("alice", "member")))
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        boss_id = user_id(s.root, "boss")
+
+        own, error = await boss.api("DELETE", f"/admin/users/{boss_id}")
+        forbidden, _ = await alice.api("DELETE", f"/admin/users/{boss_id}")
+
+        assert own == 400
+        assert "自己" in error["error"]
+        assert forbidden == 403
+        store = accounts_lib.AccountStore.for_project(s.root)
+        assert store.find_user("boss") is not None
+        with pytest.raises(accounts_lib.AccountError):
+            store.delete_user(boss_id)
+
+
+class TestGroupAudit:
+    async def test_group_page_save_records_only_real_changes(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+        alice_id = user_id(s.root, "alice")
+        bob_id = user_id(s.root, "bob")
+        _, group = await boss.api(
+            "POST", "/admin/groups", {"name": "資訊處", "members": [alice_id]}
+        )
+        # 群組頁存檔會送出全部欄位；只有成員有變。
+        full = {
+            key: group[key]
+            for key in (
+                "name",
+                "description",
+                "agents",
+                "toolsets",
+                "knowledgeBases",
+                "knowledge",
+            )
+        }
+        await boss.api(
+            "PATCH",
+            f"/admin/groups/{group['id']}",
+            {**full, "members": [bob_id]},
+        )
+        await boss.api(
+            "PATCH",
+            f"/admin/groups/{group['id']}",
+            {**full, "members": [bob_id]},
+        )
+
+        _, audit = await boss.api("GET", "/admin/audit?category=group")
+        updates = [
+            item
+            for item in audit["entries"]
+            if item["action"] == "group.update"
+        ]
+
+        # 第二次什麼都沒改，不記。
+        assert len(updates) == 1
+        assert updates[0]["detail"]["changes"] == {}
+        assert updates[0]["detail"]["membersAdded"] == ["bob"]
+        assert updates[0]["detail"]["membersRemoved"] == ["alice"]

@@ -605,6 +605,7 @@ def _load_skills(
                 meta.get("tools") or [], toolsets, project_tools
             ),
             root=folder,
+            requires=[str(item) for item in meta.get("requires") or []],
         )
     return loaded
 
@@ -672,6 +673,10 @@ def load_knowledge_bases(
             for key, value in defaults.items()
             if key in _RETRIEVAL_FIELDS
         }
+        # 自己選了 embedding 模型、沒寫檢索方式時，就是要用那個模型：
+        # 不沿用預設知識庫的 searchMode（例如 keyword）。
+        if "embeddingModel" in settings and "searchMode" not in settings:
+            inherited.pop("searchMode", None)
         specs[base_id] = {
             **inherited,
             **settings,
@@ -704,14 +709,9 @@ def load_knowledge_bases(
             description=str(spec.get("description") or ""),
             knowledge=knowledge_lib.Knowledge(
                 path,
-                embedding_model=spec.get("embeddingModel"),
-                chunk_size=spec.get("chunkSize") or 800,
+                **retrieval_options(spec, f"知識庫 {base_id}"),
                 chunking=spec.get("chunking") or "paragraph",
                 cache_dir=cache,
-                reranker=spec.get("reranker"),
-                rerank_candidates=spec.get("rerankCandidates") or 20,
-                min_similarity=spec.get("minSimilarity"),
-                min_rerank_score=spec.get("minRerankScore"),
                 exclude=[
                     other
                     for other in paths.values()
@@ -720,6 +720,45 @@ def load_knowledge_bases(
             ),
         )
     return bases
+
+
+def retrieval_options(spec: dict[str, Any], where: str) -> dict[str, Any]:
+    """把 harness.yaml 的檢索設定換成 Knowledge 的參數（切片方式除外）。
+
+    searchMode 決定檢索方式：
+        keyword  精確比對，不用 embedding（有寫 embeddingModel 也不用）
+        bm25     BM25 演算法，不用 embedding
+        hybrid   BM25 加上 embeddingModel 的語意檢索
+    沒寫時：有 embeddingModel 就是 hybrid，沒有就是 bm25。不用 embedding
+    時 minSimilarity 沒有作用，直接略過。
+
+    Args:
+        spec: 知識庫的設定（已經合併 knowledge 區塊沿用的值）。
+        where: 錯誤訊息裡的位置。
+
+    Raises:
+        ValueError: searchMode 不對，或 hybrid 卻沒有 embeddingModel。
+    """
+    mode = spec.get("searchMode")
+    if mode is not None and mode not in SEARCH_MODES:
+        raise ValueError(
+            f"{where} 的 searchMode 必須是 {'、'.join(SEARCH_MODES)} 其中之一"
+        )
+    model = spec.get("embeddingModel") or None
+    if mode == "hybrid" and not model:
+        raise ValueError(
+            f"{where} 的 searchMode 是 hybrid，需要 embeddingModel"
+        )
+    embedding = model if mode in (None, "hybrid") else None
+    return {
+        "embedding_model": embedding,
+        "keyword_search": "exact" if mode == "keyword" else "bm25",
+        "chunk_size": spec.get("chunkSize") or 800,
+        "reranker": spec.get("reranker") or None,
+        "rerank_candidates": spec.get("rerankCandidates") or 20,
+        "min_similarity": spec.get("minSimilarity") if embedding else None,
+        "min_rerank_score": spec.get("minRerankScore"),
+    }
 
 
 def _check_fields(
@@ -734,7 +773,10 @@ def _check_fields(
 
 
 # 檢索設定：knowledgeBases 裡沒寫時沿用 knowledge 區塊的值。
+# 檢索方式（見 retrieval_options）。
+SEARCH_MODES = ("keyword", "bm25", "hybrid")
 _RETRIEVAL_FIELDS = {
+    "searchMode",
     "embeddingModel",
     "chunkSize",
     "chunking",

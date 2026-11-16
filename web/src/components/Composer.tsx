@@ -341,6 +341,8 @@ const CHIP_EXIT_MS = 140;
 const TOOLS_CHIP = ":tools";
 /** 「知識庫：…」標籤的 key。 */
 const KNOWLEDGE_CHIP = ":knowledge";
+/** 「已關閉 N 個預設 skill」標籤的 key。 */
+const DEFAULT_SKILLS_CHIP = ":default-skills";
 
 /** 選了的 skills、另外勾選的知識庫與停用的工具，顯示成可以移除的小標籤。 */
 function OptionChips({ options }: { options: ComposerOptions }) {
@@ -366,7 +368,12 @@ function OptionChips({ options }: { options: ComposerOptions }) {
         .filter((base) => value.knowledge?.includes(base.id))
         .map((base) => base.name)
     : undefined;
-  if (value.skills.length === 0 && disabled === 0 && !picked) return null;
+  const skillsOff = (options.defaultSkills ?? []).filter((name) =>
+    value.disabledSkills?.includes(name),
+  ).length;
+  if (value.skills.length === 0 && disabled === 0 && !picked && !skillsOff) {
+    return null;
+  }
 
   const apply = (key: string) => {
     const current = latest.current;
@@ -378,13 +385,17 @@ function OptionChips({ options }: { options: ComposerOptions }) {
       current.onChange({ knowledge: null });
       return;
     }
+    if (key === DEFAULT_SKILLS_CHIP) {
+      current.onChange({ disabledSkills: [] });
+      return;
+    }
     current.onChange({
       skills: current.value.skills.filter((item) => !removed.current.has(item)),
     });
   };
 
   const remove = (key: string) => {
-    if (key !== TOOLS_CHIP && key !== KNOWLEDGE_CHIP) {
+    if (!key.startsWith(":")) {
       removed.current.add(key);
     }
     const reduce = window.matchMedia?.(
@@ -431,6 +442,20 @@ function OptionChips({ options }: { options: ComposerOptions }) {
             type="button"
             aria-label="改回 agent 預設的知識庫"
             onClick={() => remove(KNOWLEDGE_CHIP)}
+          >
+            <CloseIcon size={12} />
+          </button>
+        </li>
+      )}
+      {skillsOff > 0 && (
+        <li
+          className={`ch-chip${leaving.includes(DEFAULT_SKILLS_CHIP) ? " leaving" : ""}`}
+        >
+          <span className="ch-chip-name">已關閉 {skillsOff} 個預設 skill</span>
+          <button
+            type="button"
+            aria-label="重新開啟預設的 skills"
+            onClick={() => remove(DEFAULT_SKILLS_CHIP)}
           >
             <CloseIcon size={12} />
           </button>

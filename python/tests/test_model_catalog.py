@@ -50,6 +50,26 @@ RESPONSES = {
         ]
     },
     "/openrouter": {"data": [{"id": "meta/llama-4", "name": "Llama 4"}]},
+    "/litellm/model/info": {
+        "data": [
+            {
+                "model_name": "text-embedding-3-small",
+                "model_info": {"mode": "embedding"},
+            },
+            {"model_name": "cohere-rerank", "model_info": {"mode": "rerank"}},
+            {"model_name": "gpt-5", "model_info": {"mode": "chat"}},
+            # 沒標明用途的依名稱猜。
+            {"model_name": "bge-m3", "model_info": {}},
+            {"model_name": "my-chat"},
+        ]
+    },
+    "/vllm/v1/models": {
+        "data": [
+            {"id": "Qwen3-Embedding-8B"},
+            {"id": "bge-reranker-v2-m3"},
+            {"id": "gemma-4-31b"},
+        ]
+    },
     "/api/tags": {"models": [{"name": "hermes3:latest"}, {"name": "qwen3"}]},
 }
 # Anthropic 的清單分兩頁：第一頁 has_more，第二頁用 after_id 取。
@@ -306,3 +326,64 @@ async def test_anthropic_endpoint_needs_a_key(fake, monkeypatch):
 
     with pytest.raises(model_catalog.CatalogError, match="Anthropic 的金鑰"):
         await model_catalog.list_models(providers.ENDPOINT, f"{base}/v1", "")
+
+
+class TestRetrievalModels:
+    """知識庫設定用的 embedding 與 rerank 模型清單。"""
+
+    @pytest.fixture(autouse=True)
+    def no_connection(self, monkeypatch):
+        monkeypatch.delenv("HARNESS_BASE_URL", raising=False)
+
+    async def test_litellm_model_info_says_what_each_model_is(
+        self, fake, monkeypatch
+    ):
+        base, seen = fake
+        monkeypatch.setenv("HARNESS_BASE_URL", f"{base}/litellm/v1")
+        monkeypatch.setenv("HARNESS_API_KEY", "sk-proxy")
+
+        found = await model_catalog.list_retrieval_models()
+
+        assert seen[0][0] == "/litellm/model/info"
+        assert seen[0][1]["Authorization"] == "Bearer sk-proxy"
+        assert found.source == "model_info"
+        assert names(found.embedding) == ["bge-m3", "text-embedding-3-small"]
+        assert names(found.rerank) == ["cohere-rerank"]
+
+    async def test_other_endpoints_are_guessed_by_name(self, fake, monkeypatch):
+        base, seen = fake
+        monkeypatch.setenv("HARNESS_BASE_URL", f"{base}/vllm/v1")
+
+        found = await model_catalog.list_retrieval_models()
+
+        assert [path for path, _ in seen] == [
+            "/vllm/model/info",
+            "/vllm/v1/models",
+        ]
+        assert found.source == "names"
+        assert names(found.embedding) == ["Qwen3-Embedding-8B"]
+        assert names(found.rerank) == ["bge-reranker-v2-m3"]
+
+    async def test_openai_lists_its_embedding_models(self, fake, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+
+        found = await model_catalog.list_retrieval_models()
+
+        assert names(found.embedding) == ["openai/text-embedding-3-small"]
+        assert found.rerank == []
+
+    async def test_without_a_connection_there_is_no_list(self, fake):
+        found = await model_catalog.list_retrieval_models()
+
+        assert found.to_json() == {
+            "embedding": [],
+            "rerank": [],
+            "source": "none",
+        }
+
+    async def test_endpoint_problems_are_explained(self, fake, monkeypatch):
+        base, _ = fake
+        monkeypatch.setenv("HARNESS_BASE_URL", f"{base}/denied")
+
+        with pytest.raises(model_catalog.CatalogError, match="金鑰"):
+            await model_catalog.list_retrieval_models()

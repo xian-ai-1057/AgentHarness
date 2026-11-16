@@ -3795,6 +3795,8 @@ h3 {
 .group-danger {
   padding-top: 20px;
   border-top: 1px solid var(--line);
+  /* 有未儲存的變更時，底部浮動的儲存列不會蓋住「刪除群組」。 */
+  padding-bottom: 88px;
 }
 
 /* ── 管理平台 → 知識庫 ──────────────────────────────── */
@@ -4493,6 +4495,16 @@ a.kb-card:focus-visible {
   align-items: flex-start;
   gap: 6px;
   margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  font-size: 13px;
+}
+
+/* 下拉選單下方的提醒，例如模型網址上沒有 embedding 模型。 */
+.field-warning {
+  margin-top: 6px;
   padding: 8px 12px;
   border-radius: var(--r-md);
   background: var(--warn-bg);

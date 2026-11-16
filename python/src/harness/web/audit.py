@@ -41,6 +41,8 @@ ACTIONS = {
     "member.create": "新增成員",
     "member.update": "修改成員",
     "member.password_reset": "重設成員密碼",
+    "member.groups": "調整成員的群組",
+    "member.delete": "刪除成員",
     "group.create": "新增群組",
     "group.update": "修改群組",
     "group.delete": "刪除群組",

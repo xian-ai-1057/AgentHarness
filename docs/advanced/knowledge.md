@@ -28,10 +28,15 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 文件多了以後，可以依主題或部門分成[好幾個知識庫](#分成好幾個知識庫)，
 各自有自己的資料夾、檢索設定與維護者。
 
-- **檢索方式。** 預設用關鍵字比對（BM25），不需要任何模型，中文也能
-  用（以單字與相鄰兩字比對，不用另外斷詞）。設定 `embeddingModel` 後
-  再加上語意檢索，兩者的排名合併（hybrid search），同義詞、換句話說
-  也找得到。
+- **檢索方式。** 有三種，用 `searchMode` 選（見[檢索方式](#檢索方式)）：
+  - **關鍵字**（`keyword`）：精確比對，只看查詢的字詞有沒有出現、出現
+    幾次，不需要任何模型。適合查表單編號、專有名詞。
+  - **演算法**（`bm25`，沒有 embedding 模型時的預設）：BM25 演算法依字詞
+    的稀有度與片段長度排序，不需要任何模型。中文也能用（以單字與相鄰
+    兩字比對，不用另外斷詞）。
+  - **BM25 + 語意**（`hybrid`，設定 `embeddingModel` 時的預設）：再加上
+    embedding 模型的語意檢索，兩者的排名合併（hybrid search），同義詞、
+    換句話說也找得到。
 - **檔案改了會自動更新。** 每次搜尋前會檢查檔案有沒有變動，有就重建
   索引。embedding 存在內建的向量資料庫，沒變的片段不會重新計算（見
   [向量資料庫](#向量資料庫)）。
@@ -55,7 +60,8 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 ```yaml
 knowledge:
   path: knowledge                              # 預設
-  embeddingModel: openai/text-embedding-3-small  # 省略時只用關鍵字
+  searchMode: hybrid            # keyword、bm25 或 hybrid；省略時依有沒有 embeddingModel
+  embeddingModel: openai/text-embedding-3-small  # 省略時只用 BM25
   chunkSize: 800                               # 預設
   chunking: paragraph           # 預設；regulation 是依條文切片
   minSimilarity: 0.3            # 選用，語意相似度門檻（需要 embeddingModel）
@@ -69,6 +75,44 @@ knowledge:
 模型一樣，名稱要寫端點上的名稱；用 LiteLLM Proxy 時就是它設定檔裡的
 `model_name`（見[模型設定](/guide/model)）。reranker 走 Proxy 的
 `/v1/rerank`。
+
+## 檢索方式
+
+`searchMode` 決定怎麼找片段：
+
+| 值 | 網頁版的選項 | 做法 | 需要模型 |
+|---|---|---|---|
+| `keyword` | 關鍵字（精確比對） | 片段裡原樣出現查詢字詞（以空白分開的每一段）的排前面，再依命中幾個詞、出現幾次排序；中文只用相鄰兩字比對，單一個字不算 | 不用 |
+| `bm25` | 演算法（BM25） | BM25：越少見的詞分數越高，並依片段長度調整 | 不用 |
+| `hybrid` | 選一個 embedding 模型 | BM25 加上語意檢索，排名合併 | `embeddingModel` |
+
+沒寫 `searchMode` 時，有 `embeddingModel` 就是 `hybrid`，沒有就是 `bm25`。
+選了 `keyword` 或 `bm25` 時不會呼叫 embedding 模型，`minSimilarity` 也不
+生效。其他知識庫沒寫時沿用 `knowledge` 區塊的 `searchMode`；自己寫了
+`embeddingModel` 卻沒寫 `searchMode` 時，表示要用那個模型（`hybrid`），
+不沿用預設知識庫的關鍵字或 BM25。
+
+網頁版「管理平台 → 知識庫」的「Embedding 模型」與「Reranker」是下拉選單：
+「Embedding 模型」依序是「關鍵字（精確比對）」「演算法（BM25）」、模型
+連線上的 embedding 模型、「其他（自行輸入）」，其他知識庫最後還有
+「沿用預設知識庫」；「Reranker」是「不重新排序」（其他知識庫是「沿用
+預設知識庫」）、模型連線上的 rerank 模型與「其他（自行輸入）」。模型
+清單的來源（`GET /api/knowledge/models`）：
+
+- 連 LiteLLM Proxy 時讀它的 `/model/info`，依 `model_info.mode` 分出
+  `embedding` 與 `rerank` 模型（只列這把金鑰能用的）。自架模型 LiteLLM
+  不認得時，在 Proxy 設定檔的 `model_info` 寫上 `mode: embedding` 或
+  `mode: rerank`，或取名時帶 embed、rerank 等字樣。
+- 其他 OpenAI 相容端點（例如 vLLM）沒有 `/model/info`，改用 `/models` 的
+  名稱判斷：名稱有 rerank 的是 rerank 模型；有 embed、bge、e5、gte、
+  nomic 等字樣的是 embedding 模型。
+- 直接連 OpenAI 時列出 text-embedding 系列；其他供應商沒有清單，選
+  「其他」自行輸入。
+
+模型網址上沒有任何 embedding 模型、查不到清單，或根本沒有模型網址（例如
+直接連 Anthropic）時，「Embedding 模型」
+下方會顯示提醒：只能選關鍵字或演算法，要用語意檢索得先在模型中台加上
+embedding 模型。LiteLLM 標明用途時，目前設定的模型不在網址上也會提醒。
 
 ## 分成好幾個知識庫
 
@@ -107,7 +151,7 @@ knowledge/
 ```
 
 - **每個知識庫是獨立的。** 有自己的名稱、說明、資料夾與檢索設定
-  （`embeddingModel`、`chunkSize`、`chunking`、`reranker`、
+  （`searchMode`、`embeddingModel`、`chunkSize`、`chunking`、`reranker`、
   `rerankCandidates`、`minSimilarity`、`minRerankScore`）；沒寫的檢索設定沿用 `knowledge`
   區塊的。
 - **原本的 `knowledge/` 就是預設知識庫**（識別碼 `default`），舊的設定
@@ -247,7 +291,7 @@ agent 可能拿不相關的內容硬湊答案。兩種設定可以擋掉這些�
 
 ```
 $ pyharness knowledge "特休怎麼算"
-3 個檔案、12 個片段，檢索方式：關鍵字 + 語意（embedding），再用 reranker 重新排序
+3 個檔案、12 個片段，檢索方式：BM25 + 語意（embedding），再用 reranker 重新排序
 門檻：相似度 ≥ 0.3、rerank ≥ 0.2
 
 [1] 來源：hr/leave.md › 請假規定 › 特休（相似度 0.712、rerank 0.954）

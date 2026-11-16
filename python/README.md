@@ -657,10 +657,15 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 網頁版回覆裡的 `[1]` 可以點，在右側打開原文（PDF 跳到那一頁）；對不到
 搜尋結果的編號會標成「可能不正確」。
 
-- **檢索方式。** 預設用關鍵字比對（BM25），不需要任何模型，中文也能
-  用（以單字與相鄰兩字比對，不用另外斷詞）。設定 `embeddingModel` 後
-  再加上語意檢索，兩者的排名合併（hybrid search），同義詞、換句話說
-  也找得到。
+- **檢索方式。** 有三種，用 `searchMode` 選（見[檢索方式](#檢索方式)）：
+  - **關鍵字**（`keyword`）：精確比對，只看查詢的字詞有沒有出現、出現
+    幾次，不需要任何模型。適合查表單編號、專有名詞。
+  - **演算法**（`bm25`，沒有 embedding 模型時的預設）：BM25 演算法依字詞
+    的稀有度與片段長度排序，不需要任何模型。中文也能用（以單字與相鄰
+    兩字比對，不用另外斷詞）。
+  - **BM25 + 語意**（`hybrid`，設定 `embeddingModel` 時的預設）：再加上
+    embedding 模型的語意檢索，兩者的排名合併（hybrid search），同義詞、
+    換句話說也找得到。
 - **檔案改了會自動更新。** 每次搜尋前會檢查檔案有沒有變動，有就重建
   索引。embedding 存在內建的向量資料庫，沒變的片段不會重新計算（見
   [向量資料庫](#向量資料庫)）。
@@ -683,7 +688,8 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 ```yaml
 knowledge:
   path: knowledge                              # 預設
-  embeddingModel: openai/text-embedding-3-small  # 省略時只用關鍵字
+  searchMode: hybrid            # keyword、bm25 或 hybrid；省略時依有沒有 embeddingModel
+  embeddingModel: openai/text-embedding-3-small  # 省略時只用 BM25
   chunkSize: 800                               # 預設
   minSimilarity: 0.3            # 選用，語意相似度門檻（需要 embeddingModel）
   reranker: cohere/rerank-v3.5  # 選用，重新排序用的模型
@@ -696,6 +702,44 @@ knowledge:
 模型一樣，名稱要寫端點上的名稱；用 LiteLLM Proxy 時就是它設定檔裡的
 `model_name`（見[模型設定](#模型設定)）。reranker 走 Proxy 的
 `/v1/rerank`。
+
+### 檢索方式
+
+`searchMode` 決定怎麼找片段：
+
+| 值 | 網頁版的選項 | 做法 | 需要模型 |
+|---|---|---|---|
+| `keyword` | 關鍵字（精確比對） | 片段裡原樣出現查詢字詞（以空白分開的每一段）的排前面，再依命中幾個詞、出現幾次排序；中文只用相鄰兩字比對，單一個字不算 | 不用 |
+| `bm25` | 演算法（BM25） | BM25：越少見的詞分數越高，並依片段長度調整 | 不用 |
+| `hybrid` | 選一個 embedding 模型 | BM25 加上語意檢索，排名合併 | `embeddingModel` |
+
+沒寫 `searchMode` 時，有 `embeddingModel` 就是 `hybrid`，沒有就是 `bm25`。
+選了 `keyword` 或 `bm25` 時不會呼叫 embedding 模型，`minSimilarity` 也不
+生效。其他知識庫沒寫時沿用 `knowledge` 區塊的 `searchMode`；自己寫了
+`embeddingModel` 卻沒寫 `searchMode` 時，表示要用那個模型（`hybrid`），
+不沿用預設知識庫的關鍵字或 BM25。
+
+網頁版「管理平台 → 知識庫」的「Embedding 模型」與「Reranker」是下拉選單：
+「Embedding 模型」依序是「關鍵字（精確比對）」「演算法（BM25）」、模型
+連線上的 embedding 模型、「其他（自行輸入）」，其他知識庫最後還有
+「沿用預設知識庫」；「Reranker」是「不重新排序」（其他知識庫是「沿用
+預設知識庫」）、模型連線上的 rerank 模型與「其他（自行輸入）」。模型
+清單的來源（`GET /api/knowledge/models`）：
+
+- 連 LiteLLM Proxy 時讀它的 `/model/info`，依 `model_info.mode` 分出
+  `embedding` 與 `rerank` 模型（只列這把金鑰能用的）。自架模型 LiteLLM
+  不認得時，在 Proxy 設定檔的 `model_info` 寫上 `mode: embedding` 或
+  `mode: rerank`，或取名時帶 embed、rerank 等字樣。
+- 其他 OpenAI 相容端點（例如 vLLM）沒有 `/model/info`，改用 `/models` 的
+  名稱判斷：名稱有 rerank 的是 rerank 模型；有 embed、bge、e5、gte、
+  nomic 等字樣的是 embedding 模型。
+- 直接連 OpenAI 時列出 text-embedding 系列；其他供應商沒有清單，選
+  「其他」自行輸入。
+
+模型網址上沒有任何 embedding 模型、查不到清單，或根本沒有模型網址（例如
+直接連 Anthropic）時，「Embedding 模型」
+下方會顯示提醒：只能選關鍵字或演算法，要用語意檢索得先在模型中台加上
+embedding 模型。LiteLLM 標明用途時，目前設定的模型不在網址上也會提醒。
 
 ### 相似度門檻與 reranker
 
@@ -720,7 +764,7 @@ agent 可能拿不相關的內容硬湊答案。兩種設定可以擋掉這些�
 
 ```
 $ pyharness knowledge "特休怎麼算"
-3 個檔案、12 個片段，檢索方式：關鍵字 + 語意（embedding），再用 reranker 重新排序
+3 個檔案、12 個片段，檢索方式：BM25 + 語意（embedding），再用 reranker 重新排序
 門檻：相似度 ≥ 0.3、rerank ≥ 0.2
 
 [1] 來源：hr/leave.md › 請假規定 › 特休（相似度 0.712、rerank 0.954）
@@ -842,6 +886,7 @@ skills/
 name: refund                           # 省略時用資料夾名稱
 description: 處理退款申請，依退款政策判斷能不能退
 tools: [find_order, issue_refund]      # 選用，tools/ 裡的工具或 toolset
+requires: [run_python]                 # 選用，agent 要有這些工具才用得上
 ---
 1. 先用 find_order 查訂單，確認付款日期。
 2. 讀 policy.md 判斷是否在可退款期間內。
@@ -855,6 +900,10 @@ tools: [find_order, issue_refund]      # 選用，tools/ 裡的工具或 toolset
 - skill 的專屬工具在 skill 載入前不會出現在 agent 的工具裡（即使 agent
   沒寫 `tools` 欄位）。想讓 agent 隨時都能用，就在 agent 的 `tools`
   明確列出。
+- `requires` 列出 skill 用得上的前提工具（例如要在沙盒裡執行腳本的
+  skill 寫 `run_python`）。網頁上這段對話的 agent 沒有這些工具（專案沒有
+  沙盒、群組沒開放，或在「＋ → 工具」取消了）時，這個 skill 不會預設開啟，
+  使用者挑了也不會套用。
 - 載入狀態是從對話紀錄推算的，接續對話時已載入的 skill 仍然有效。
 
 在程式裡使用：
@@ -878,16 +927,26 @@ agent = harness.Agent(name="cs", instructions="...", skills=[refund])
 
 | skill | 用途 | 載入後開放的工具 |
 |---|---|---|
-| `skill-creator` | 建立或改寫 skill，附 SKILL.md 範本 | `files` |
+| `skill-creator` | 建立、改寫與測試 skill，附 SKILL.md 範本（改寫自官方） | `files` |
 | `code-review` | 審查 git 變更，依嚴重程度回報問題，附檢查清單 | `files`、`shell` |
 | `debugging` | 重現 → 縮小範圍 → 驗證假設 → 修正 → 確認 | `files`、`shell`、`plan` |
 | `planning` | 把多步驟工作拆成計畫並持續更新進度 | `plan` |
 | `web-research` | 查證網路資料，整理成附來源的回答 | `web` |
 | `git-commit` | 檢查變更、撰寫 commit 訊息，經確認後 commit | `shell` |
+| `doc-coauthoring` | 帶使用者寫提案、規格、決策文件：蒐集背景 → 架構 → 逐節撰寫 → 讀者測試 | `files` |
 | `xlsx` | 建立、編輯、分析試算表，公式用 LibreOffice 重算並檢查錯誤 | `files`（另需 `sandbox`） |
 | `docx` | 建立、編輯 Word 文件，追蹤修訂、註解、轉成 PDF | `files`（另需 `sandbox`） |
 | `pptx` | 建立結構化簡報（佈景主題、版面配置、原生圖表），編輯範本並檢查 | `files`（另需 `sandbox`） |
 | `pdf` | 擷取文字與表格、合併分割、產生中文 PDF、填寫表單、OCR | `files`（另需 `sandbox`） |
+| `internal-comms` | 依格式寫週報、3P 更新、電子報、FAQ、事件報告 | `files` |
+| `brand-guidelines` | 套用 Anthropic 的品牌色與字型（可複製改成自己公司的） | `files` |
+| `theme-factory` | 10 套配色與字型主題，套用到簡報、文件、網頁 | `files` |
+| `frontend-design` | 有辨識度的網頁與介面設計指引 | `files` |
+| `canvas-design` | 以設計哲學創作海報、主視覺（PNG／PDF） | `files`（另需 `sandbox`） |
+| `algorithmic-art` | 用 p5.js 創作可調參數的生成藝術（單一 HTML） | `files`（建議 `sandbox`） |
+| `web-artifacts-builder` | React + Tailwind + shadcn/ui 的複雜網頁應用，打包成單一 HTML | `files`（另需 `sandbox`） |
+| `webapp-testing` | 用 Playwright 測試沙盒裡的網頁、截圖、讀主控台 | `files`（另需 `sandbox`） |
+| `mcp-builder` | 設計、實作、測試 MCP 伺服器（Python 或 TypeScript） | `files`（另需 `sandbox`） |
 
 ```yaml
 skills: [code-review, git-commit]
@@ -936,15 +995,27 @@ Node.js 與 pptxgenjs、docx、pdf-lib，以及 pypdf、reportlab、markitdown �
 - **用自己的映像檔時**，把 `python/src/harness/builtin/skills` 複製到映像檔的
   `/opt/skills`，並裝好上面的工具；`pyharness sandbox` 會列出缺少的項目。
 
-**開啟：** 新建立的助手在有沙盒時會自動列在 `agents/main.md` 的 `skills`。
-既有的專案要自己加上：
+**在網頁上預設開啟。** 和 Claude 一樣，網頁上的每段對話預設就能用這四個
+skill 與下面「其他改寫自官方的 skills」，伺服器自動把它們加進技能清單，
+agent 需要時才載入。需要執行程式的（`SKILL.md` 寫了
+`requires: [run_python]`：這四個加上 `algorithmic-art`、`canvas-design`、
+`web-artifacts-builder`、`webapp-testing`）只在專案有開沙盒、而且 agent 能
+執行程式（工具有 `run_python`，沒有被群組或這段對話關掉）時才開；群組沒有
+開放沙盒時「＋ → Skills」也不列出它們，在「＋ → 工具」取消 `run_python`
+時它們變成灰色、不能勾選。使用者可以在「＋ → Skills」取消勾選標「預設」的
+項目（只影響這段對話）。要換成別的清單或全部關掉：
+
+```yaml
+web:
+  defaultSkills: [xlsx, pdf]   # [] 表示不預設開啟任何 skill
+```
+
+命令列與 API 不套用預設，要用的話在 agent 列出：
 
 ```yaml
 tools: [files, plan, web, sandbox]
 skills: [planning, web-research, xlsx, docx, pptx, pdf]
 ```
-
-也可以在網頁上每段對話的「＋ → Skills」臨時選用。
 
 **目前的限制：**
 
@@ -960,6 +1031,39 @@ skills: [planning, web-research, xlsx, docx, pptx, pdf]
 （以及 pdf 的 `REFERENCE.md`、`FORMS.md`）覆蓋過來，比對官方 `SKILL.md` 的
 差異後改寫到我們的繁體中文版，更新 `SKILL.md` 開頭的 commit，再重新建置
 沙盒映像檔（`docker compose build sandbox-image`）。
+
+#### 其他改寫自官方的 skills
+
+除了上面的文件 skills，[anthropics/skills](https://github.com/anthropics/skills)
+（commit `1780c5e`）的範例 skills 也收錄了，只有 `slack-gif-creator` 沒有
+加。網頁上每段對話**預設開啟**（見上面的「在網頁上預設開啟」），需要執行
+程式的只在能執行程式時才開；命令列與 API 要在 agent 的 `skills` 列出。授權與改寫方式和文件 skills 相同：保留
+`LICENSE.txt`（Apache 2.0），`SKILL.md` 開頭註明來源與修改內容，附帶的腳本、
+範本、參考文件照原樣收錄。
+
+- **`doc-coauthoring` 是自己寫的。** 官方的同名 skill 沒有附授權條款，不能
+  確定可以轉載，所以沒有收錄或翻譯它，改寫一份同樣用途、內容獨立的版本。
+- **`skill-creator` 換成官方版改寫。** 原本內建的 skill-creator 併進來
+  （`template.md` 與 Agent Harness 的 frontmatter 說明）；官方流程裡需要
+  subagent 或 `claude` 命令列的步驟（平行測試、基準比較、自動最佳化描述）
+  改成自己逐一測試與人工檢視。
+- **`brand-guidelines` 是 Anthropic 的品牌。** 要套用自己公司的品牌，把它
+  複製到專案的 `skills/` 改成自己的色碼與字型。
+
+**沙盒裡都在建置時裝好，執行時不下載任何東西：**
+
+| skill | 沙盒映像檔裡準備的東西 | 限制 |
+|---|---|---|
+| `web-artifacts-builder` | 用官方 `init-artifact.sh` 建好的 React 專案範本 `/opt/web-artifact`（含 Parcel、html-inline）；`offline/init-artifact.sh` 複製範本並連結它的 `node_modules`，`offline/bundle-artifact.sh` 不用 `pnpm add` 直接打包 | 只能用範本裡已有的套件；打包約數秒到數十秒 |
+| `webapp-testing` | Playwright（Python）與無頭 Chromium | 沙盒沒有網路，只能測工作資料夾裡的 HTML 或在沙盒裡啟動的伺服器 |
+| `mcp-builder` | Python `mcp` 1.x（FastMCP）、Node 的 MCP SDK v2／v1、express、zod、`tsc`、`tsx` | MCP Inspector 與 `scripts/evaluation.py`（要 Anthropic API 與網路）不能在沙盒裡執行；做好的伺服器由管理者加到 `harness.yaml` 的 `mcpServers` |
+| `algorithmic-art` | p5.js 1.7.0；`offline/inline_p5.py` 把它內嵌進 HTML 並拿掉 Google Fonts 連結 | 產出的 HTML 下載後用瀏覽器開啟 |
+| `canvas-design` | 附帶的 54 個字型（SIL OFL）登記成系統字型，LibreOffice、matplotlib 也能用 | 字型都是英數字型，中文用 Noto CJK；agent 看不到成品，改用程式量測版面並請使用者預覽 |
+
+`frontend-design`、`theme-factory`、`internal-comms`、`brand-guidelines`、
+`doc-coauthoring` 只是寫作與設計的指引，不需要沙盒（`theme-factory` 有沙盒
+時會把主題展示 PDF 複製給使用者看）。`internal-comms` 官方提到用 Slack、
+Google Drive 找資料，這裡改成用上傳的檔案、知識庫與網頁工具。
 
 ## 長期記憶
 
@@ -1428,7 +1532,8 @@ Python 版另外會處理：
 - **連接模型**：在網頁上選供應商、填金鑰與模型，不需要設定環境變數
   （見下方的[在網頁上連接模型](#在網頁上連接模型)）。
 - **每段對話選模型、工具與 skills**：輸入框右下角選模型，左下角的 ＋
-  勾選 skills 與工具，下一則訊息開始生效。要多開放幾個模型給使用者選，
+  勾選 skills 與工具，下一則訊息開始生效。改寫自 Anthropic 官方的 skills
+  預設開啟（需要執行程式的要有沙盒），可以在這裡關掉（見 [Skills](#skills)）。要多開放幾個模型給使用者選，
   在 `harness.yaml` 寫 `models: [openai/gpt-5, ...]`（每一項也可以是
   `{name, label}`）。
 - **帳號與工作資料夾**：讓其他人使用時每個人用自己的帳號登入，對話、
@@ -1480,8 +1585,10 @@ Python 版另外會處理：
 - 第一次這樣啟動時自動建立管理者 `admin`，密碼是網頁密碼（環境變數
   `HARNESS_WEB_PASSWORD`，沒有時自動產生並印出來）。從舊版升級時原本的
   密碼不變，使用者名稱填 `admin`。
-- 管理者在「管理平台 → 成員」（帳號選單 → 管理平台，網址 `/admin/members`）新增成員、改角色、停用或重設密碼；伺服器產生
-  的密碼只顯示一次。成員登入後可以自己改密碼（至少 10 個字元）。也可以
+- 管理者在「管理平台 → 成員」（帳號選單 → 管理平台，網址 `/admin/members`）新增或刪除成員、改角色、調整所屬群組、停用或重設密碼；伺服器產生
+  的密碼只顯示一次。刪除成員會連同他的對話、記憶、「我的檔案」、個人
+  知識庫與自建 Agent 一起清掉（無法復原，稽核紀錄保留），只想保留資料時
+  請用停用。成員登入後可以自己改密碼（至少 10 個字元）。也可以
   用命令列：
 
   ```bash

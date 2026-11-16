@@ -25,14 +25,19 @@
     GET    /api/admin/users              成員列表（管理者）
     POST   /api/admin/users              新增成員（管理者）
     PATCH  /api/admin/users/{id}         改顯示名稱、角色或停用（管理者）
+    DELETE /api/admin/users/{id}         刪除成員與他的所有資料（管理者）
     POST   /api/admin/users/{id}/password
                                          重設成員的密碼（管理者）
+    PUT    /api/admin/users/{id}/groups  調整成員所屬的群組，{"groups": [...]}
+                                         （管理者）
     GET    /api/admin/groups             存取群組與可以勾選的資源（管理者）
     POST   /api/admin/groups             新增存取群組（管理者）
     PATCH  /api/admin/groups/{id}        改名稱、說明、資源或成員（管理者）
     DELETE /api/admin/groups/{id}        刪除存取群組（管理者）
     GET    /api/knowledge                知識庫與設定（管理者，或維護者看自己
                                          維護的）
+    GET    /api/knowledge/models         模型連線上的 embedding 與 rerank
+                                         模型（管理者，設定的下拉選單用）
     POST   /api/knowledge                新增知識庫（管理者）
     PATCH  /api/knowledge/{id}           改名稱、說明、檢索設定或維護者
                                          （管理者）
@@ -739,7 +744,8 @@ def _account_routes(routes: web.RouteTableDef, mode: str) -> None:
         if local:
             return _json([])
         users = request.app[_ACCOUNTS].list_users()
-        return _json([accounts_lib.member_info(user) for user in users])
+        groups = _ws(request).member_groups()
+        return _json([_member(user, groups) for user in users])
 
     @routes.post("/api/admin/users")
     async def add_user(request: web.Request) -> web.Response:
@@ -748,20 +754,33 @@ def _account_routes(routes: web.RouteTableDef, mode: str) -> None:
         if local:
             raise workspace_lib.WebError(400, _LOCAL_NO_ACCOUNTS)
         store = request.app[_ACCOUNTS]
+        groups = body.get("groups")
+        ws = _ws(request)
+        if groups is not None:
+            # 先檢查群組，免得帳號建好了才發現群組不對。
+            ws.check_group_ids(groups)
         with _account_errors():
             user, password = store.create_user(
                 body.get("username"),
                 body.get("displayName"),
                 body.get("role", "member"),
             )
-        _audit(
-            request,
-            "member.create",
-            target=user.username,
-            detail={"displayName": user.display_name, "role": user.role},
-        )
+        detail: dict[str, Any] = {
+            "displayName": user.display_name,
+            "role": user.role,
+        }
+        if groups:
+            names = ws.group_names()
+            detail["groups"] = [
+                names.get(item, item)
+                for item in ws.set_member_groups(user.id, groups)
+            ]
+        _audit(request, "member.create", target=user.username, detail=detail)
         return _json(
-            {"user": accounts_lib.member_info(user), "password": password},
+            {
+                "user": _member(user, ws.member_groups()),
+                "password": password,
+            },
             status=201,
         )
 
@@ -812,7 +831,53 @@ def _account_routes(routes: web.RouteTableDef, mode: str) -> None:
             _ws(request).stop_runs_of(
                 user.id, workspace_lib.ACCOUNT_CHANGED_NOTICE
             )
-        return _json(accounts_lib.member_info(user))
+        return _json(_member(user, _ws(request).member_groups()))
+
+    @routes.delete("/api/admin/users/{user_id:[\\w-]+}")
+    async def delete_user(request: web.Request) -> web.Response:
+        _require_admin(request)
+        if local:
+            raise workspace_lib.WebError(400, _LOCAL_NO_ACCOUNTS)
+        user_id = request.match_info["user_id"]
+        if user_id == _user(request).id:
+            # 刪掉自己會把自己鎖在外面，也會清掉自己的對話。
+            raise workspace_lib.WebError(400, "不能刪除自己的帳號")
+        with _account_errors():
+            user = request.app[_ACCOUNTS].delete_user(user_id)
+        _ws(request).purge_member(user)
+        _audit(
+            request,
+            "member.delete",
+            target=user.username,
+            detail={"displayName": user.display_name, "role": user.role},
+        )
+        return _json({"ok": True})
+
+    @routes.put("/api/admin/users/{user_id:[\\w-]+}/groups")
+    async def set_user_groups(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        if local:
+            raise workspace_lib.WebError(400, _LOCAL_NO_ACCOUNTS)
+        user_id = request.match_info["user_id"]
+        user = request.app[_ACCOUNTS].get_user(user_id)
+        if user is None:
+            raise workspace_lib.WebError(404, "找不到這位成員")
+        ws = _ws(request)
+        before = ws.member_groups().get(user.id, [])
+        after = ws.set_member_groups(user.id, body.get("groups"))
+        if sorted(before) != sorted(after):
+            names = ws.group_names()
+            _audit(
+                request,
+                "member.groups",
+                target=user.username,
+                detail={
+                    "before": [names.get(item, item) for item in before],
+                    "after": [names.get(item, item) for item in after],
+                },
+            )
+        return _json(_member(user, ws.member_groups()))
 
     @routes.post("/api/admin/users/{user_id:[\\w-]+}/password")
     async def reset_password(request: web.Request) -> web.Response:
@@ -829,7 +894,10 @@ def _account_routes(routes: web.RouteTableDef, mode: str) -> None:
         assert user is not None
         _audit(request, "member.password_reset", target=user.username)
         response = _json(
-            {"user": accounts_lib.member_info(user), "password": password}
+            {
+                "user": _member(user, _ws(request).member_groups()),
+                "password": password,
+            }
         )
         # 重設自己的密碼會登出所有地方，這個瀏覽器重新登入。重設別人的
         # 密碼通常是帳號可能外洩：那個人正在執行的對話也停下來。
@@ -863,13 +931,16 @@ def _group_routes(routes: web.RouteTableDef) -> None:
         _require_admin(request)
         body = await _body(request)
         group_id = request.match_info["group_id"]
-        group = _ws(request).update_group(group_id, body)
-        _audit(
-            request,
-            "group.update",
-            target=group["name"],
-            detail={"id": group_id, "changes": body},
-        )
+        ws = _ws(request)
+        before = ws.group_info(group_id)
+        group = ws.update_group(group_id, body)
+        detail = _group_changes(request, before or {}, group, body)
+        if (
+            detail["changes"]
+            or "membersAdded" in detail
+            or ("membersRemoved" in detail)
+        ):
+            _audit(request, "group.update", target=group["name"], detail=detail)
         return _json(group)
 
     @routes.delete("/api/admin/groups/{group_id:[\\w-]+}")
@@ -931,6 +1002,11 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
     @routes.get("/api/knowledge")
     async def list_knowledge(request: web.Request) -> web.Response:
         return _json(await _ws(request).list_knowledge(_user(request)))
+
+    @routes.get("/api/knowledge/models")
+    async def knowledge_models(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(await _ws(request).knowledge_models())
 
     @routes.post("/api/knowledge")
     async def create_knowledge(request: web.Request) -> web.Response:
@@ -1339,6 +1415,53 @@ def _int_param(request: web.Request, name: str) -> int | None:
         return int(value)
     except ValueError as error:
         raise workspace_lib.WebError(400, f"{name} 必須是整數") from error
+
+
+def _group_changes(
+    request: web.Request,
+    before: dict[str, Any],
+    after: dict[str, Any],
+    body: dict[str, Any],
+) -> dict[str, Any]:
+    """群組稽核紀錄的內容：真的改了的欄位，以及加入、移出的成員帳號。
+
+    群組頁存檔時會送出所有欄位，只記有變的，免得看起來整個群組都改了。
+    """
+
+    def same(key: str) -> bool:
+        old, new = before.get(key), after.get(key)
+        if isinstance(old, list) and isinstance(new, list):
+            return sorted(old) == sorted(new)
+        return old == new
+
+    detail: dict[str, Any] = {
+        "id": after["id"],
+        "changes": {
+            key: after[key]
+            for key in body
+            if key in after and key != "members" and not same(key)
+        },
+    }
+    old_members = set(before.get("members") or [])
+    new_members = set(after.get("members") or [])
+    store = request.app[_ACCOUNTS]
+
+    def names(ids: set[str]) -> list[str]:
+        users = (store.get_user(item) for item in sorted(ids))
+        return sorted(user.username for user in users if user is not None)
+
+    if new_members - old_members:
+        detail["membersAdded"] = names(new_members - old_members)
+    if old_members - new_members:
+        detail["membersRemoved"] = names(old_members - new_members)
+    return detail
+
+
+def _member(
+    user: accounts_lib.User, groups: dict[str, list[str]]
+) -> dict[str, object]:
+    """MemberInfo，附上這個人另外加入的群組（不含「所有人」）。"""
+    return {**accounts_lib.member_info(user), "groups": groups.get(user.id, [])}
 
 
 def _changes(

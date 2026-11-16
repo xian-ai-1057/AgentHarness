@@ -19,6 +19,7 @@ from harness import cli
 from harness import datatypes
 from harness import sandbox
 from harness import tools
+from harness.builtin import paths
 from tests import conftest
 
 FAKE_DOCKER = """#!{python}
@@ -212,6 +213,67 @@ class TestRun:
 
         assert output == sandbox.NO_OUTPUT
 
+    async def test_concurrent_runs_only_list_their_own_files(
+        self, box, context
+    ):
+        [tool] = box.tools()
+
+        async def later():
+            await asyncio.sleep(0.2)
+            return await _invoke(tool, "open('b.txt', 'w').write('b')", context)
+
+        first, second = await asyncio.gather(
+            _invoke(
+                tool,
+                "import time\ntime.sleep(1.2)\nopen('a.txt', 'w').write('a')",
+                context,
+            ),
+            later(),
+        )
+
+        marker = sandbox.PRODUCED_MARKER
+        assert first == f"{sandbox.NO_OUTPUT}\n\n{marker}workspace/a.txt"
+        assert second.startswith(
+            f"{sandbox.NO_OUTPUT}\n\n{sandbox.PRODUCED_MARKER}workspace/b.txt"
+        )
+        assert "workspace/a.txt" not in second
+        assert "等了" in second
+
+    async def test_files_written_by_the_server_are_not_listed(
+        self, box, context
+    ):
+        box.workspace.mkdir()
+        [tool] = box.tools()
+
+        async def write_meanwhile():
+            await asyncio.sleep(0.3)
+            paths.write_text(context, "workspace/note.md", "別的對話寫的")
+
+        output, _ = await asyncio.gather(
+            _invoke(
+                tool,
+                "import time\ntime.sleep(0.8)\n"
+                "open('mine.txt', 'w').write('x')",
+                context,
+            ),
+            write_meanwhile(),
+        )
+
+        assert output == (
+            f"{sandbox.NO_OUTPUT}\n\n{sandbox.PRODUCED_MARKER}workspace/mine.txt"
+        )
+
+    async def test_file_changed_again_by_code_is_listed(self, box, context):
+        box.workspace.mkdir()
+        paths.write_text(context, "workspace/data.csv", "a\n")
+        [tool] = box.tools()
+
+        output = await _invoke(
+            tool, "open('data.csv', 'a').write('1\\n')", context
+        )
+
+        assert output.endswith(f"{sandbox.PRODUCED_MARKER}workspace/data.csv")
+
     def test_produced_list_is_capped_newest_first(self, tmp_path):
         before = {"old.txt": (1, 1)}
         after = {f"f{i}.txt": (100 + i, 1) for i in range(25)}
@@ -270,6 +332,22 @@ class TestRun:
         run, kill = fake_docker.calls()
         assert kill == ["kill", run[run.index("--name") + 1]]
 
+    async def test_timeout_mentions_files_without_cards(self, box, context):
+        box.timeout_seconds = 1
+        [tool] = box.tools()
+
+        with pytest.raises(tools.ToolError) as raised:
+            await _invoke(
+                tool,
+                "import time\nopen('t1.png', 'wb').write(b'x')\ntime.sleep(30)",
+                context,
+            )
+
+        message = str(raised.value)
+        assert "超過 1 秒" in message
+        assert "停止前寫出了 t1.png" in message
+        assert sandbox.PRODUCED_MARKER not in message
+
     async def test_cancelling_stops_the_container(self, box, fake_docker):
         task = asyncio.create_task(box.run("import time; time.sleep(30)"))
         await asyncio.sleep(0.5)
@@ -305,6 +383,8 @@ class TestRun:
         assert tool.name == "run_python"
         assert "沒有網路" in tool.description
         assert "30 秒" in tool.description
+        # 自己檢查用的截圖等暫存檔不要留在使用者的資料夾。
+        assert "寫在 /tmp" in tool.description
         assert tool.description.endswith("已安裝 pandas。")
         assert not tool.needs_approval
 

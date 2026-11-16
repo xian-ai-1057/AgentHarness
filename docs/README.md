@@ -17,7 +17,7 @@ npm run preview    # 預覽建置結果
 | `index.md` | 首頁 |
 | `guide/` | 開始與使用（兩個版本共通） |
 | `advanced/` | 只有 Python 版才有的進階功能 |
-| `reference/` | 版本比較、閱讀原始碼、目前的限制 |
+| `reference/` | 版本比較、閱讀原始碼、目前的限制、授權 |
 | `public/` | 圖片與 logo，網址從 `/` 開始，例如 `/images/web-chat.jpg` |
 | `.vitepress/config.mts` | 網站設定、上方選單與左側目錄 |
 | `.vitepress/theme/` | 品牌色與自訂樣式 |

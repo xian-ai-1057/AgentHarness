@@ -746,3 +746,16 @@ Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
   登入（OIDC、SAML），管理者的「執行指令」也還在伺服器行程裡執行
 - 網頁上的對話在伺服器重新啟動後可以繼續看與接著問，但「工作中」只
   列出這次啟動後跑過的對話（兩個版本的網頁版都一樣）
+
+## 授權
+
+Agent Harness 以 [Apache License 2.0](LICENSE) 授權，Copyright 2026
+[xian-ai-1057](https://github.com/xian-ai-1057)。
+
+- **可以自由使用、修改、商用、再散布**，不需要另外取得同意。
+- **散布或改作時要保留署名**：附上 `LICENSE`，保留原始碼裡的著作權與
+  署名聲明，並在散布的內容裡附上 [`NOTICE`](NOTICE) 的署名內容；修改過
+  的檔案要註明有修改。
+- 第三方元件（改寫自 Anthropic 官方的 skills、字型、PDF.js、網頁版打包的
+  JavaScript 套件）各自的授權列在 `NOTICE`，詳見說明文件的
+  [授權](https://agent-harness-docs-ten.vercel.app/reference/license)。

@@ -500,9 +500,10 @@ function ServerDialog({
             </div>
             <div className="help">
               {
-                "金鑰存在伺服器的 secrets 資料夾，存好後不會再顯示。也可以寫環境變數，例如 "
+                "金鑰存在伺服器的 secrets 資料夾，存好後不會再顯示。連模型中台時也可以寫 "
               }
-              <code>Bearer ${"{LITELLM_API_KEY}"}</code>。
+              <code>Bearer ${"{LITELLM_API_KEY}"}</code>
+              {"，沿用 .env 的金鑰（其他環境變數只能用 MCP_ 開頭的）。"}
             </div>
           </fieldset>
 

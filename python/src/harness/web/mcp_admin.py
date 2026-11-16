@@ -11,7 +11,8 @@ harness.yaml 的 mcpServers 是部署時寫好的，專案載入時就連線，�
   .harness/secrets/mcp-headers.json（0600，內建的檔案工具也讀不到），
   API 只回傳標頭名稱，不會把值送回瀏覽器。
 - 標頭的值可以寫 ${環境變數}（例如 Bearer ${LITELLM_API_KEY}），沿用
-  .env 裡的金鑰。
+  .env 裡的金鑰，但只限白名單（見 check_references）：不然管理者可以把
+  容器裡任何一把金鑰（例如模型供應商的）送到任意網址。網址不能寫。
 - 連線在背景建立，連不上只會讓這一台顯示錯誤，不影響網站其他功能。
 - 伺服器名稱就是工具組名稱；工具加到選定的 agent（預設全部的專案
   agent）。成員自建的 agent 可以在工具組清單勾選它。
@@ -51,6 +52,12 @@ _MAX_VALUE = 4000
 _MAX_URL = 2000
 _MAX_DESCRIPTION = 200
 STATUSES = ("connecting", "connected", "error", "disabled")
+# 標頭可以引用的環境變數：MCP_ 開頭的（部署的人特地留給 MCP 用）連哪裡
+# 都可以；模型中台的金鑰只能送到模型中台（HARNESS_BASE_URL 或
+# LITELLM_PROXY_URL 那一台）。
+ENV_PREFIX = "MCP_"
+GATEWAY_KEYS = ("LITELLM_API_KEY", "HARNESS_API_KEY")
+GATEWAY_URL_VARS = ("HARNESS_BASE_URL", "LITELLM_PROXY_URL")
 
 
 class McpAdminError(Exception):
@@ -210,10 +217,12 @@ class McpAdmin:
             raise McpAdminError(f"已經有名稱是 {name} 的 MCP 伺服器")
         self._check_free(name)
         headers = _checked_headers(body.get("headers"), {})
+        url = _checked_url(body.get("url"))
+        check_references(url, headers)
         now = time.time()
         server = Server(
             name=name,
-            url=_checked_url(body.get("url")),
+            url=url,
             description=_checked_description(body.get("description")),
             headers=tuple(headers),
             agents=self._checked_agents(body.get("agents")),
@@ -250,6 +259,10 @@ class McpAdmin:
         if "headers" in body:
             secrets = _checked_headers(body["headers"], self._secrets(name))
             changes["headers"] = tuple(secrets)
+        check_references(
+            changes.get("url", server.url),
+            self._secrets(name) if secrets is None else secrets,
+        )
         self._servers[name] = dataclasses.replace(
             server, **changes, updated_at=time.time()
         )
@@ -288,6 +301,7 @@ class McpAdmin:
         )
         headers = _checked_headers(body.get("headers"), stored)
         url = _checked_url(body.get("url"))
+        check_references(url, headers)
         name = str(body.get("name") or "test")
         try:
             connection = await asyncio.to_thread(self._open, name, url, headers)
@@ -372,6 +386,8 @@ class McpAdmin:
         self, name: str, url: str, headers: dict[str, str]
     ) -> mcp_servers.McpConnection:
         """建立連線（會等，要在背景執行緒呼叫）。"""
+        # 啟動時再檢查一次：HARNESS_BASE_URL 可能已經換成別台。
+        check_references(url, headers)
         return mcp_servers.from_config(
             name,
             {"type": "http", "url": url, "headers": headers},
@@ -556,6 +572,45 @@ def config_servers(root: pathlib.Path) -> dict[str, Any]:
     return servers if isinstance(servers, dict) else {}
 
 
+def check_references(url: str, headers: dict[str, str]) -> None:
+    """標頭裡的 ${環境變數} 只能用白名單裡的。
+
+    - MCP_ 開頭的環境變數：部署的人特地留給 MCP 伺服器用，連哪裡都可以。
+    - LITELLM_API_KEY、HARNESS_API_KEY：只能送到模型中台（網址和
+      HARNESS_BASE_URL 或 LITELLM_PROXY_URL 是同一台）。
+    - 其他（例如 ANTHROPIC_API_KEY、資料庫密碼）一律不行。
+
+    Raises:
+        McpAdminError: 用了不允許的環境變數。
+    """
+    for name, value in headers.items():
+        for match in mcp_servers._ENV_REFERENCE.finditer(value):  # noqa: SLF001
+            variable = match.group(1)
+            if variable.startswith(ENV_PREFIX):
+                continue
+            if variable in GATEWAY_KEYS:
+                if _is_gateway(url):
+                    continue
+                raise McpAdminError(
+                    f"標頭 {name} 的 ${{{variable}}} 只能送到模型中台"
+                    f"（{'、'.join(GATEWAY_URL_VARS)} 那一台）；"
+                    "其他伺服器請直接貼上它的金鑰"
+                )
+            raise McpAdminError(
+                f"標頭 {name} 不能引用環境變數 {variable}：只能用 "
+                f"{ENV_PREFIX} 開頭的，或模型中台的 "
+                f"{'、'.join(GATEWAY_KEYS)}；也可以直接貼上金鑰"
+            )
+
+
+def _is_gateway(url: str) -> bool:
+    """網址是不是模型中台那一台。"""
+    return any(
+        mcp_servers._same_origin(url, os.environ.get(var, ""))  # noqa: SLF001
+        for var in GATEWAY_URL_VARS
+    )
+
+
 def _gateway_origin() -> str:
     """模型中台（HARNESS_BASE_URL）的網址去掉 /v1，給 LiteLLM 範本用。"""
     base = os.environ.get("HARNESS_BASE_URL", "").strip().rstrip("/")
@@ -580,9 +635,11 @@ def _checked_url(value: Any) -> str:
     url = value.strip()
     if len(url) > _MAX_URL:
         raise McpAdminError("網址太長")
-    # ${環境變數} 在連線時才換掉，這裡先代入範例值檢查格式。
-    sample = mcp_servers._ENV_REFERENCE.sub("http://example", url)  # noqa: SLF001
-    parts = parse.urlsplit(sample)
+    if "${" in url:
+        raise McpAdminError(
+            "網址不能寫環境變數，請填完整的網址（標頭的值才可以引用）"
+        )
+    parts = parse.urlsplit(url)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise McpAdminError(
             "網址必須以 http:// 或 https:// 開頭，例如 "

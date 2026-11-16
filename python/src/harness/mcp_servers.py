@@ -19,6 +19,7 @@ MCP 的使用。連線是大家共用的，所以身分放在這次呼叫的 _me
 import asyncio
 import concurrent.futures
 import contextlib
+import ipaddress
 import json
 import os
 import pathlib
@@ -45,6 +46,18 @@ _ENV_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 # 工具呼叫的 _meta 裡放使用者身分標頭的欄位，以及可以轉成標頭的名稱。
 _IDENTITY_META = "agentharness/identity"
 _IDENTITY_HEADERS = (llm.END_USER_HEADER, llm.TRACE_HEADER, llm.METADATA_HEADER)
+# 遠端伺服器不能連到這些位址（雲端主機的 metadata 服務會給出主機的憑證）。
+# 轉址後的每一個請求也會檢查。內部網路與本機不擋：模型中台通常就在內網。
+_BLOCKED_NETWORKS = tuple(
+    ipaddress.ip_network(item)
+    for item in (
+        "0.0.0.0/8",
+        "169.254.0.0/16",
+        "100.100.100.200/32",
+        "fe80::/10",
+        "fd00:ec2::254/128",
+    )
+)
 _TRANSPORT_TYPES = {
     "stdio": "command",
     "http": "url",
@@ -480,9 +493,40 @@ async def _http_transport(
     hooks = http_client.event_hooks
     http_client.event_hooks = {
         **hooks,
-        "request": [*hooks.get("request", []), _identity_hook],
+        "request": [
+            *hooks.get("request", []),
+            _destination_guard,
+            _identity_hook,
+        ],
     }
     return streamable_http.streamable_http_client(url, http_client=http_client)
+
+
+async def _destination_guard(request: Any) -> None:
+    """送出 HTTP 請求前確認目的地不是雲端 metadata 這類保留位址。
+
+    httpx 跟隨轉址時每個請求都會經過這裡，所以轉址到 metadata 也擋得住。
+    """
+    host = request.url.host
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(host, port)
+    except OSError:
+        return  # 解析不到，連線本身會失敗並說明原因。
+    for info in infos:
+        address = ipaddress.ip_address(str(info[4][0]).split("%")[0])
+        mapped = getattr(address, "ipv4_mapped", None)
+        if mapped is not None:
+            address = mapped
+        if (
+            address.is_multicast
+            or address.is_unspecified
+            or any(address in network for network in _BLOCKED_NETWORKS)
+        ):
+            raise PermissionError(
+                f"不能連到 {host}（{address}）：這是保留位址（例如雲端主機的 "
+                "metadata 服務）"
+            )
 
 
 async def _identity_hook(request: Any) -> None:

@@ -304,7 +304,11 @@ def connect(
 
 
 def from_config(
-    name: str, config: dict[str, Any] | None, cwd: pathlib.Path
+    name: str,
+    config: dict[str, Any] | None,
+    cwd: pathlib.Path,
+    *,
+    startup_timeout_seconds: float = DEFAULT_STARTUP_TIMEOUT_SECONDS,
 ) -> McpConnection:
     """依 harness.yaml 裡 mcpServers 的一個項目建立連線。
 
@@ -314,6 +318,7 @@ def from_config(
             以及從 Claude Code 等工具複製過來時會有的 type）。args、env、
             url、headers 裡的 ${NAME} 會換成環境變數的值。
         cwd: 啟動本機伺服器時的工作目錄（專案根目錄）。
+        startup_timeout_seconds: 啟動並完成連線最多等幾秒。
 
     Returns:
         已連線的 McpConnection。
@@ -351,6 +356,7 @@ def from_config(
         url=expanded_url,
         headers={k: expand(v) for k, v in headers.items()},
         timeout_seconds=config.get("timeoutSeconds") or DEFAULT_TIMEOUT_SECONDS,
+        startup_timeout_seconds=startup_timeout_seconds,
         forward_user=forward,
     )
 

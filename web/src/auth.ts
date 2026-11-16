@@ -89,6 +89,7 @@ export function adminSections(
     return knowledge && project?.manageKnowledge ? ["knowledge"] : [];
   }
   const sections: AdminSection[] = ["model", "permissions"];
+  if (project?.features?.mcpServers) sections.push("mcp");
   if (knowledge) sections.push("knowledge");
   if (accountsMode(project)) sections.push("members");
   if (accountsMode(project) && project?.features?.groups) {

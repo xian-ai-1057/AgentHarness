@@ -1646,6 +1646,7 @@ class TestProjectChoices:
             "audit": True,
             # 自建 Agent（本機模式也有，擁有者是本機使用者）。
             "userAgents": True,
+            "mcpServers": True,
         }
         assert info["auth"] == {
             "mode": "local",

@@ -174,6 +174,7 @@ memory: true
 
 # 透過 LiteLLM Proxy 使用的網頁搜尋 MCP。在 .env 設定 LITELLM_PROXY_URL 與
 # LITELLM_API_KEY 後取消註解，並在 agents/main.md 的 tools 加上 webiq。
+# 也可以不改這裡：管理者在網頁的「管理平台 → MCP 工具」直接掛載。
 # mcpServers:
 #   webiq:
 #     url: ${LITELLM_PROXY_URL}/webiq/mcp

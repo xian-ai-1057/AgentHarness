@@ -293,6 +293,11 @@ export interface ServerFeatures {
    * 所屬群組開放的工具組與知識庫（見 UserAgentInfo）。
    */
   userAgents?: boolean;
+  /**
+   * 管理者掛載的 MCP 伺服器（Python 版）：管理平台的「MCP」頁可以新增
+   * 遠端 MCP 伺服器，工具和其他工具組一樣依存取群組開放（見 McpServerInfo）。
+   */
+  mcpServers?: boolean;
 }
 
 /**
@@ -406,6 +411,70 @@ export interface AccessGroup {
   /** 可以搜尋的知識庫標籤；沒有標籤的文件所有人都搜尋得到。 */
   knowledge: string[] | null;
 }
+
+/**
+ * 管理者在管理平台掛載的 MCP 伺服器（Python 版，features.mcpServers）。
+ *   GET    /api/admin/mcp → McpServerList
+ *   POST   /api/admin/mcp McpServerInput → McpServerInfo
+ *   PATCH  /api/admin/mcp/:name McpServerInput → McpServerInfo
+ *   DELETE /api/admin/mcp/:name
+ *   POST   /api/admin/mcp/:name/reconnect → McpServerInfo
+ *   POST   /api/admin/mcp/test McpServerInput & {existing?} → McpTestResult
+ * 只接受遠端（Streamable HTTP）伺服器。標頭的值（API 金鑰）存在伺服器的
+ * secrets 裡，API 只回傳名稱。伺服器名稱就是工具組名稱。
+ */
+export type McpStatus = "connecting" | "connected" | "error" | "disabled";
+
+export interface McpToolInfo {
+  name: string;
+  description: string;
+}
+
+export interface McpServerInfo {
+  name: string;
+  url: string;
+  description: string;
+  /** 只有名稱；值不會送回瀏覽器。 */
+  headers: { name: string; set: boolean }[];
+  /** 工具加到哪些專案 agent；null 表示全部。 */
+  agents: string[] | null;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+  status: McpStatus;
+  /** status 為 error 時的原因。 */
+  error: string;
+  tools: McpToolInfo[];
+}
+
+export interface McpServerInput {
+  name?: string;
+  url?: string;
+  description?: string;
+  /** value 留空表示沿用已經存的值（修改時）。 */
+  headers?: { name: string; value: string }[];
+  agents?: string[] | null;
+  enabled?: boolean;
+}
+
+export interface McpServerList {
+  servers: McpServerInfo[];
+  /** harness.yaml 的 mcpServers：部署時設定，網頁上只能看。 */
+  configured: {
+    name: string;
+    url: string;
+    command: boolean;
+    tools: string[];
+  }[];
+  /** 可以選的專案 agent。 */
+  agents: { name: string; description: string }[];
+  /** 模型中台（HARNESS_BASE_URL 去掉 /v1），LiteLLM 範本用；沒有時是空字串。 */
+  gateway: string;
+}
+
+export type McpTestResult =
+  | { ok: true; tools: McpToolInfo[] }
+  | { ok: false; message: string };
 
 /** 群組頁可以勾選的資源。 */
 export interface GroupCatalog {

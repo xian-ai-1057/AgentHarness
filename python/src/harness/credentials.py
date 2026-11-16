@@ -87,7 +87,7 @@ def update(root: str | pathlib.Path, values: dict[str, str | None]) -> None:
         else:
             saved[name] = value
             changed[name] = value
-    _write_private(
+    write_private(
         secrets_dir(root) / ENV_FILE,
         json.dumps(saved, ensure_ascii=False, indent=2) + "\n",
     )
@@ -124,7 +124,7 @@ def web_password(root: str | pathlib.Path) -> tuple[str, bool]:
     if existing:
         return existing, False
     password = secrets.token_urlsafe(_PASSWORD_BYTES)
-    _write_private(path, password + "\n")
+    write_private(path, password + "\n")
     return password, True
 
 
@@ -136,8 +136,13 @@ def _set_environment(values: dict[str, str]) -> None:
             os.environ.pop(name, None)
 
 
-def _write_private(path: pathlib.Path, text: str) -> None:
-    """寫入只有擁有者能讀的檔案。"""
+def write_private(path: pathlib.Path, text: str) -> None:
+    """寫入只有擁有者能讀的檔案（資料夾 0700、檔案 0600）。
+
+    Args:
+        path: 要寫入的檔案，通常在 secrets_dir 裡。
+        text: 檔案內容。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.parent.chmod(0o700)
     # 先以 0600 建立再寫入，內容不會有一瞬間能被其他使用者讀到。

@@ -111,6 +111,9 @@ litellm 直接連各家供應商。換模型只要改設定，不用改程式。
 `mcpServers`）。遠端伺服器的金鑰可以寫成 `${環境變數}` 從環境變數帶入，
 也能接上 LiteLLM Proxy 管理的 MCP 工具（例如網頁搜尋，見
 [文件](https://agent-harness-docs-ten.vercel.app/guide/mcp#litellm-proxy)）。
+Python 版的管理者也可以直接在網頁的「管理平台 → MCP 工具」掛載遠端 MCP
+伺服器，金鑰存在伺服器、不會再顯示，工具依存取群組開放（見
+[在管理平台掛載](https://agent-harness-docs-ten.vercel.app/guide/mcp#管理平台掛載)）。
 
 `examples/report_bot` 同時提供兩種工具寫法，兩個版本都能直接執行它。
 
@@ -620,6 +623,11 @@ harness web --port 8080     # 換埠號
   [在網頁上連接模型](python/README.md#在網頁上連接模型)）。管理者從帳號
   選單（不必登入時是側欄底部）進入管理平台，聊天介面對管理者與成員
   都一樣（見[說明文件的「管理平台」](https://agent-harness-docs-ten.vercel.app/guide/web#管理平台)）。
+- **MCP 工具**（Python 版）：管理者在「管理平台 → MCP 工具」掛載遠端 MCP
+  伺服器（有 LiteLLM webiq 範本），先測試連線再掛載；金鑰存在伺服器的
+  secrets、網頁上不再顯示，連不上也不影響網站。工具成為一個工具組，用
+  存取群組決定誰能用；一般成員不能新增（見
+  [說明文件](https://agent-harness-docs-ten.vercel.app/guide/mcp#管理平台掛載)）。
 - **存取群組**（Python 版要登入時）：管理者在「管理平台 → 群組」決定每位
   成員能用哪些 agent、工具組、知識庫與知識庫標籤。每位成員都屬於內建的
   「所有人」群組，加入其他群組後能用的是這些群組加起來的範圍；管理者不受

@@ -372,6 +372,10 @@ mcpServers:
 `harness.yaml`。LiteLLM Proxy 的設定與 Docker 部署的步驟見
 [文件](https://agent-harness-docs-ten.vercel.app/guide/mcp#litellm-proxy)。
 
+網頁版的管理者也可以不改 `harness.yaml`，直接在「管理平台 → MCP 工具」
+掛載遠端伺服器（金鑰存在 `.harness/secrets/`，連不上不影響網站，見
+[在管理平台掛載](https://agent-harness-docs-ten.vercel.app/guide/mcp#管理平台掛載)）。
+
 從 Claude Code、Cursor 等工具複製過來的設定可以直接用，裡面的 `type`
 （`stdio`、`http`）會被接受；舊的 `sse` 傳輸不支援，請改用伺服器的
 Streamable HTTP 端點（通常是 `/mcp`）。

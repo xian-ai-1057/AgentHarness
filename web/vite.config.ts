@@ -80,6 +80,9 @@ export default defineConfig({
   build: {
     outDir: fileURLToPath(new URL("../dist/public", import.meta.url)),
     emptyOutDir: true,
+    // 打包進前端的第三方套件授權（MIT、BSD 等要求散布時附上授權條文），
+    // 輸出成 THIRD_PARTY_LICENSES.md，隨打包結果一起散布。
+    license: { fileName: "THIRD_PARTY_LICENSES.md" },
   },
   server: {
     proxy: {

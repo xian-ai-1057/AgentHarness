@@ -96,6 +96,7 @@ export default defineConfig({
           { text: "兩個版本的比較", link: "/reference/versions" },
           { text: "閱讀原始碼", link: "/reference/source" },
           { text: "目前的限制", link: "/reference/limits" },
+          { text: "授權", link: "/reference/license" },
         ],
       },
     ],
@@ -148,7 +149,7 @@ export default defineConfig({
 
     footer: {
       message: "完全開源 · 不綁定模型供應商",
-      copyright: `<a href="${repo}">GitHub</a>`,
+      copyright: `Apache License 2.0 · Copyright 2026 xian-ai-1057 · <a href="${repo}">GitHub</a>`,
     },
   },
 });

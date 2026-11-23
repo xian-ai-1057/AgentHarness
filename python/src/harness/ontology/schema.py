@@ -175,6 +175,8 @@ class Action:
           params:
             months: {type: integer, required: true, minimum: 1}
           run: actions.py:renew     處理函式（ontology/ 底下的檔案:函式）
+          check: actions.py:can_renew 核准前的檢查（可省略）：回傳錯誤說明
+                                    或 None，有錯時不會請使用者核准
           create: renewal_request   或：建立一個這種型別的物件
           effects: 產生續約申請單    副作用說明，會寫在工具說明裡
           groups: [procurement]     只有這些群組能執行
@@ -187,6 +189,7 @@ class Action:
         target: 要指定的物件型別；None 表示不針對單一物件。
         params: 參數，以識別碼為鍵。
         run: 處理函式（"檔名.py:函式"）；和 create 擇一。
+        check: 核准前的檢查函式（"檔名.py:函式"）；None 表示只檢查參數。
         create: 建立的物件型別；參數直接當成屬性。
         effects: 副作用說明。
         groups: 能執行的群組；None 表示看得到 target 型別的人都能執行。
@@ -202,6 +205,7 @@ class Action:
     create: str | None = None
     effects: str = ""
     groups: tuple[str, ...] | None = None
+    check: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -278,6 +282,8 @@ class Binding:
           docId: "^([A-Za-z0-9-]+)_" 從檔名取出文件代碼的規則（可省略）
           references: refers_to      條文裡提到「第 N 條」時連到同文件的
                                       那一條（可省略）
+          document: in_document      每一條連到文件代碼相同的物件（可省略；
+                                      關係的對象型別要有那份文件）
         - name: platform             Python：處理函式回傳整理好的紀錄
           run: loaders.py:load
           watch: [data/export.json]  這些檔案改了才重新載入
@@ -298,6 +304,7 @@ class Binding:
         base: 知識庫識別碼。
         doc_id: 從檔名取出文件代碼的規則。
         references: 條文互相引用的關係。
+        document: 條文連到所屬文件的關係（對方的識別碼就是文件代碼）。
         run: 處理函式。
         watch: 處理函式讀的檔案。
     """
@@ -319,6 +326,7 @@ class Binding:
     references: str | None = None
     run: str | None = None
     watch: tuple[str, ...] = ()
+    document: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -670,6 +678,7 @@ def _read_action(
         create=create,
         effects=str(spec.get("effects") or "").strip(),
         groups=_groups(spec.get("groups"), here, errors),
+        check=_optional_str(spec.get("check")),
     )
 
 
@@ -773,6 +782,7 @@ def _read_binding(
             references=_optional_str(item.get("references")),
             run=_optional_str(item.get("run")),
             watch=_strings(item.get("watch"), f"{here}.watch", errors),
+            document=_optional_str(item.get("document")),
         )
     )
 
@@ -846,8 +856,9 @@ def _check(schema: Schema, bases: set[str] | None, errors: list[str]) -> None:
                     f"動作 {action.name} 的參數 {extra} 不是 "
                     f"{action.create} 的屬性"
                 )
-        if action.run is not None:
-            _check_handler(schema, action.run, f"動作 {action.name}", errors)
+        for spec in (action.run, action.check):
+            if spec is not None:
+                _check_handler(schema, spec, f"動作 {action.name}", errors)
     for metric in schema.metrics.values():
         if metric.count is not None:
             type_ = schema.types.get(metric.count)
@@ -875,6 +886,15 @@ def _check(schema: Schema, bases: set[str] | None, errors: list[str]) -> None:
             binding.references not in schema.relations
         ):
             errors.append(f"{here} 引用不存在的關係 {binding.references}")
+        if binding.document is not None:
+            relation = schema.relations.get(binding.document)
+            if relation is None:
+                errors.append(f"{here} 引用不存在的關係 {binding.document}")
+            elif relation.source != binding.type:
+                errors.append(
+                    f"{here} 的 document 關係 {binding.document} "
+                    f"要從 {binding.type} 出發"
+                )
         if binding.source == "knowledge":
             if not binding.base:
                 errors.append(f"{here} 要有 base（知識庫識別碼）")

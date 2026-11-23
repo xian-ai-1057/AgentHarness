@@ -266,6 +266,20 @@ def load_chunks(
     links = []
     if binding.references:
         links = _references(binding, grouped)
+    if binding.document:
+        target = schema.relations[binding.document].target
+        for identifier, item in grouped.items():
+            if item["doc"]:
+                links.append(
+                    store_lib.Link(
+                        rel=binding.document,
+                        from_type=type_.name,
+                        from_id=identifier,
+                        to_type=target,
+                        to_id=item["doc"],
+                        source={"binding": binding.name, "rule": "文件代碼"},
+                    )
+                )
     return Loaded(records, links, warnings)
 
 

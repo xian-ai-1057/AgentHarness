@@ -719,10 +719,28 @@ class Ontology:
             None 表示沒問題，否則是給模型的錯誤說明。
         """
         try:
-            self._prepare(context, action, params, reason, target_id)
+            definition, values, target, scope, day = self._prepare(
+                context, action, params, reason, target_id
+            )
+            if definition.check is None:
+                return None
+            func = bindings_lib.resolve_handler(
+                definition.check, self.schema.directory
+            )
+            viewer = current_viewer()
+            ctx = ActionContext(
+                View(self, viewer, scope, day),
+                definition,
+                target,
+                reason.strip(),
+                context,
+                viewer,
+                self,
+            )
+            problem = func(ctx, **values)
         except tools_lib.ToolError as error:
             return str(error)
-        return None
+        return str(problem) if problem else None
 
     def describe_call(self, arguments: dict[str, Any]) -> dict[str, Any] | None:
         """run_action 的參數換成給人看的內容（核准卡片用）。"""
@@ -771,6 +789,24 @@ class Ontology:
             definition, values, target, scope, day = self._prepare(
                 context, action, params, reason, target_id
             )
+            if definition.check is not None:
+                func = bindings_lib.resolve_handler(
+                    definition.check, self.schema.directory
+                )
+                problem = func(
+                    ActionContext(
+                        View(self, viewer, scope, day),
+                        definition,
+                        target,
+                        reason.strip(),
+                        context,
+                        viewer,
+                        self,
+                    ),
+                    **values,
+                )
+                if problem:
+                    raise tools_lib.ToolError(str(problem))
         except tools_lib.ToolError as error:
             self._log(
                 viewer,

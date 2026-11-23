@@ -5,6 +5,16 @@ import pathlib
 import harness
 
 
+def can_renew(ctx, months: int, note: str = "") -> str | None:
+    """核准前的檢查：已到期的合約要重新簽約，不能續約。
+
+    回傳說明表示不能執行（不會請使用者核准）；None 表示可以。
+    """
+    if ctx.target.props.get("status") == "已到期":
+        return f"{ctx.target.label} 已到期，要重新簽約，不能申請續約"
+    return None
+
+
 def flag_vendor_risk(ctx, level: str, finding: str) -> str:
     """在工作資料夾產生一份風險標記單。
 

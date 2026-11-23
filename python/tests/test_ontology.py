@@ -78,6 +78,7 @@ metrics:
   n: {count: thing, groupBy: color}
 bindings:
   - {type: thing, file: x.csv, links: {flies: a}}
+  - {type: thing, from: knowledge, base: kb, document: nodoc}
 """,
         )
 
@@ -92,6 +93,7 @@ bindings:
             "run（處理函式）與 create",
             "color",
             "flies",
+            "nodoc",
         ):
             assert expected in message
 
@@ -160,7 +162,8 @@ class TestBindings:
 
         assert states["vendors"].objects == 2
         assert states["contracts"].links == 9
-        assert states["policy_articles"].links == 1
+        # 1 條「第 N 條」引用，加上 6 個物件各連到所屬規章
+        assert states["policy_articles"].links == 7
         assert all(not s.warnings for s in states.values())
         again = {s.name: s.loaded_at for s in await ontology.sync()}
         assert again == {name: s.loaded_at for name, s in states.items()}
@@ -214,6 +217,18 @@ class TestBindings:
             }
         ]
         assert [link.to_id for link in links] == ["OUT-01:第三條"]
+        [policy] = ontology.store.links_of(
+            "policy_article", [article.id], ["in_policy"], False, None
+        )
+        assert (policy.to_type, policy.to_id) == ("policy", "OUT-01")
+
+    async def test_article_document_link_reaches_policy(self, loaded, ctx):
+        text = await loaded.ontology.get_related(
+            ctx, "policy", "OUT-01", ["articles"]
+        )
+
+        assert "委外管理辦法 第五條" in text
+        assert "委外管理辦法 第一條" in text
 
     async def test_python_binding_with_canonical_records(self, loaded, demo):
         (demo / "ontology" / "loaders.py").write_text(
@@ -393,6 +408,16 @@ class TestActions:
         assert "請給 target_id" in check(target_id=None)
         assert "找不到合約 C-9" in check(target_id="C-9")
         assert "沒有 drop_all 這個動作" in check(action="drop_all")
+        assert "已到期，要重新簽約" in check(target_id="C-2023-002")
+
+    async def test_action_check_handler_also_blocks_run(self, loaded, ctx):
+        with pytest.raises(harness.ToolError, match="已到期"):
+            await loaded.ontology.run_action(
+                ctx, "request_renewal", {"months": 6}, "續約半年", "C-2023-002"
+            )
+
+        [entry] = loaded.ontology.store.actions()
+        assert entry.status == "rejected"
 
     async def test_create_action_records_object_link_and_log(self, loaded, ctx):
         ontology = loaded.ontology

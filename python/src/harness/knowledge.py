@@ -310,6 +310,7 @@ class Knowledge:
         query: str,
         top_k: int = 5,
         labels: list[str] | None = None,
+        where: Callable[[Chunk], bool] | None = None,
     ) -> list[Hit]:
         """搜尋知識庫。
 
@@ -318,6 +319,8 @@ class Knowledge:
             top_k: 最多回傳幾筆。
             labels: 允許的標籤；None 表示不限制。有標籤的文件只有在
                 標籤與這裡有交集時才會被找到。
+            where: 只搜尋讓這個函式回傳 True 的片段（例如 ontology 只搜
+                某個物件對應的條文）；None 表示不限制。
 
         Returns:
             依相關度排序的結果；有設定門檻時只包含達到門檻的片段，
@@ -328,9 +331,12 @@ class Knowledge:
         visible = [
             index
             for index, chunk in enumerate(self._chunks)
-            if allowed is None
-            or not chunk.labels
-            or allowed.intersection(chunk.labels)
+            if (
+                allowed is None
+                or not chunk.labels
+                or allowed.intersection(chunk.labels)
+            )
+            and (where is None or where(chunk))
         ]
         if not visible or not query.strip() or top_k < 1:
             return []
@@ -511,6 +517,14 @@ class Knowledge:
         return [
             path.relative_to(self.path).as_posix() for path in self._files()
         ]
+
+    async def chunks(self) -> list[Chunk]:
+        """建立索引（檔案有變動時）並回傳所有片段，依索引的順序。
+
+        ontology 的知識庫綁定用它把條文變成物件。
+        """
+        await self._ensure_index()
+        return list(self._chunks)
 
     async def documents(self) -> dict[str, dict[str, Any]]:
         """建立索引並回傳每份文件的片段數與標籤（以相對路徑為鍵）。"""
@@ -967,6 +981,7 @@ async def search_bases(
     top_k: int = 5,
     labels: list[str] | None = None,
     context: datatypes.RunContext | None = None,
+    where: Callable[[KnowledgeBase, Chunk], bool] | None = None,
 ) -> list[Hit]:
     """同時搜尋好幾個知識庫，合併成一份依相關度排序的結果。
 
@@ -982,6 +997,8 @@ async def search_bases(
         top_k: 最多回傳幾筆。
         labels: 允許的標籤；None 表示不限制。
         context: 執行環境，用來套用各知識庫的 label_filter。
+        where: 只搜尋讓這個函式回傳 True 的片段（參數是知識庫與片段）；
+            None 表示不限制。
 
     Returns:
         合併後的結果；好幾個知識庫時每筆標上知識庫名稱（Hit.base）。
@@ -995,7 +1012,10 @@ async def search_bases(
             allowed = _combine_labels(
                 labels, base.knowledge._dynamic_labels(context)
             )
-        return await base.knowledge.search(query, top_k=top_k, labels=allowed)
+        only = None if where is None else (lambda chunk: where(base, chunk))
+        return await base.knowledge.search(
+            query, top_k=top_k, labels=allowed, where=only
+        )
 
     results = await asyncio.gather(*(one(base) for base in bases))
     if len(bases) == 1:

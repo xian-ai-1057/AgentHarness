@@ -49,6 +49,26 @@ export function describeStep(step: {
     case "sandbox":
     case "run_python":
       return { verb: "執行 Python 程式" };
+    case "find_entity":
+      return withTarget(
+        "查詢",
+        [text(args.entity_type), text(args.query)].filter(Boolean).join(" "),
+        "plain",
+      );
+    case "get_related":
+      return withTarget(
+        "查關係",
+        [text(args.entity_type), text(args.entity_id)]
+          .filter(Boolean)
+          .join(" "),
+        "plain",
+      );
+    case "search_documents":
+      return withTarget("搜尋文件", args.query, "quote");
+    case "get_metric":
+      return withTarget("查指標", args.metric, "code");
+    case "run_action":
+      return withTarget("執行動作", args.action, "code");
   }
   if (
     name.startsWith(SUBAGENT_PREFIX) &&
@@ -79,6 +99,11 @@ const TOOL_LABELS: Record<string, string> = {
   update_plan: "更新計畫",
   sandbox: "執行 Python 程式",
   run_python: "執行 Python 程式",
+  find_entity: "查詢業務物件",
+  get_related: "查詢物件關係",
+  search_documents: "搜尋文件",
+  get_metric: "查詢指標",
+  run_action: "執行動作",
 };
 
 export function toolLabel(name: string): string | undefined {

@@ -50,6 +50,7 @@ from harness import hooks as hooks_lib
 from harness import knowledge as knowledge_lib
 from harness import mcp_servers
 from harness import memory as memory_lib
+from harness import ontology as ontology_lib
 from harness import permissions as permissions_lib
 from harness import sandbox as sandbox_lib
 from harness import skills as skills_lib
@@ -97,6 +98,8 @@ class Project:
         mcp_connections: 依 mcpServers 建立的 MCP 連線。
         toolsets: 每個 toolset（含內建的 files、shell、plan、web）包含哪些
             工具，以 toolset 名稱為鍵。
+        ontology: 語意層（ontology/ 資料夾，見 ontology 模組），沒有時為
+            None。
     """
 
     name: str
@@ -125,6 +128,7 @@ class Project:
     toolsets: dict[str, list[tools_lib.Tool]] = dataclasses.field(
         default_factory=dict
     )
+    ontology: ontology_lib.Ontology | None = None
 
     def __enter__(self) -> "Project":
         return self
@@ -192,6 +196,17 @@ def _assemble(
         if not builtin.is_builtin_toolset(set_name, items)
         for item in items
     }
+    bases = load_knowledge_bases(root, config)
+    # ontology 和內建的 files 一樣不算專案工具：agent 要設定 ontology 或在
+    # tools 明確列出才能使用。
+    ontology = ontology_lib.from_config(root, config, bases)
+    if ontology is not None:
+        if ontology_lib.TOOLSET in toolsets:
+            raise ValueError(
+                f"toolset 名稱 {ontology_lib.TOOLSET} 保留給 ontology，請改掉 "
+                f"tools/{ontology_lib.TOOLSET}.py 或 mcpServers 裡同名的伺服器"
+            )
+        toolsets[ontology_lib.TOOLSET] = ontology_lib.make_tools(ontology)
     # 沙盒和內建的 files 一樣不算專案工具：agent 要明確列出才能使用。
     sandbox = sandbox_lib.from_config(root, config.get("sandbox"))
     if sandbox is not None:
@@ -203,9 +218,13 @@ def _assemble(
         toolsets[sandbox_lib.TOOLSET] = sandbox.tools()
 
     project_skills = _load_skills(root / "skills", toolsets, project_tools)
-    bases = load_knowledge_bases(root, config)
     resources = _Resources(
-        toolsets, project_tools, project_skills, bases, builtin_skills()
+        toolsets,
+        project_tools,
+        project_skills,
+        bases,
+        builtin_skills(),
+        ontology,
     )
 
     shared = _read_optional(root / "AGENTS.md")
@@ -248,6 +267,7 @@ def _assemble(
         sandbox=sandbox,
         mcp_connections=connections,
         toolsets=toolsets,
+        ontology=ontology,
     )
 
 
@@ -260,6 +280,7 @@ class _Resources:
     skills: dict[str, skills_lib.Skill]
     knowledge_bases: dict[str, knowledge_lib.KnowledgeBase]
     builtin_skills: dict[str, skills_lib.Skill]
+    ontology: ontology_lib.Ontology | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -462,7 +483,23 @@ def _load_agent(
                 setting.top_k,
             )
         )
-    instructions = "\n\n".join(part for part in (body, shared) if part)
+    scope = ontology_lib.agent_scope(
+        name, meta.get("ontology"), resources.ontology
+    )
+    ontology_note = ""
+    if scope is not None:
+        assert resources.ontology is not None
+        resources.ontology.scopes[name] = scope
+        ontology_note = resources.ontology.describe(scope)
+        have = {id(item) for item in agent_tools}
+        agent_tools += [
+            item
+            for item in resources.toolsets[ontology_lib.TOOLSET]
+            if id(item) not in have
+        ]
+    instructions = "\n\n".join(
+        part for part in (body, ontology_note, shared) if part
+    )
     agent = agents.Agent(
         name=name,
         instructions=instructions,

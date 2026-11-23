@@ -1,0 +1,161 @@
+# 合約管理模組（虛構的範例）：供應商、系統、合約與委外規章。
+module: contracts
+label: 合約管理
+description: 供應商提供哪些系統、簽了哪些合約，以及規章怎麼規定。
+imports: [core]
+documents: [policies]
+
+types:
+  vendor:
+    label: 供應商
+    key: 統一編號
+    display: "{name}"
+    properties:
+      name: { label: 名稱, required: true }
+      rating: { label: 評等, enum: [A, B, C] }
+      critical: { label: 關鍵供應商, type: boolean }
+  system:
+    label: 系統
+    key: 系統代碼
+    display: "{name}"
+    properties:
+      name: { label: 系統名稱, required: true }
+      tier: { label: 重要性, enum: [高, 中, 低] }
+  contract:
+    label: 合約
+    key: 合約編號
+    display: "{title}"
+    properties:
+      title: { label: 合約名稱, required: true }
+      status: { label: 狀態, enum: [生效中, 已到期, 洽談中] }
+      end_date: { label: 到期日, type: date }
+      amount:
+        { label: 金額（萬元）, type: number, classification: confidential }
+  policy_article:
+    label: 規章條文
+    key: 文件代碼:條號
+    properties:
+      doc: { label: 文件代碼 }
+      file: { label: 檔案 }
+      article: { label: 條號 }
+      chapter: { label: 章節 }
+      text: { label: 條文內容 }
+  renewal_request:
+    label: 續約申請
+    key: 申請編號
+    display: "{months} 個月續約申請"
+    properties:
+      months: { label: 續約月數, type: integer }
+      note: { label: 說明 }
+
+relations:
+  supplies:
+    label: 提供
+    from: vendor
+    to: system
+    inverse: supplied_by
+    inverseLabel: 供應商
+  with_vendor:
+    label: 簽約對象
+    from: contract
+    to: vendor
+    inverse: contracts
+    inverseLabel: 合約
+  covers:
+    label: 涵蓋系統
+    from: contract
+    to: system
+  system_owner:
+    label: 業務負責人
+    from: system
+    to: person
+    inverse: owns_systems
+    inverseLabel: 負責的系統
+  governed_by:
+    label: 適用條文
+    from: contract
+    to: policy_article
+  refers_to:
+    label: 引用
+    from: policy_article
+    to: policy_article
+  renews:
+    label: 續約對象
+    from: renewal_request
+    to: contract
+
+actions:
+  request_renewal:
+    label: 申請續約
+    description: 為一份合約建立續約申請，交給採購部審查。
+    target: contract
+    create: renewal_request
+    params:
+      months:
+        {
+          type: integer,
+          required: true,
+          minimum: 1,
+          maximum: 36,
+          description: 續約月數,
+        }
+      note: { description: 說明 }
+    effects: 在 ontology 裡建立一筆續約申請
+  flag_vendor_risk:
+    label: 標記供應商風險
+    description: 在工作資料夾產生一份風險標記單（示範 Python 處理函式）。
+    target: vendor
+    run: actions.py:flag_vendor_risk
+    params:
+      level: { required: true, enum: [高, 中, 低], description: 風險等級 }
+      finding: { required: true, description: 發現的問題 }
+    effects: 在工作資料夾產生「風險標記/供應商.md」
+
+metrics:
+  contracts_by_status:
+    label: 各狀態合約數
+    description: 依合約狀態分組計算件數（同一份合約只算最新版本）。
+    count: contract
+    groupBy: status
+    unit: 件
+  expiring_contracts:
+    label: 即將到期的合約
+    description: 生效中、到期日在指定天數內的合約。
+    run: metrics.py:expiring_contracts
+    params:
+      days: { type: integer, description: 幾天內到期（預設 90） }
+
+glossary:
+  - term: 關鍵供應商
+    definition: 提供重要性為「高」的系統，或停止服務會影響營運的供應商。
+    aliases: [重要供應商]
+    owner: 採購部
+
+bindings:
+  - name: vendors
+    type: vendor
+    file: data/vendors.csv
+    id: 統一編號
+    properties: { name: 名稱, rating: 評等, critical: 關鍵 }
+    links: { supplies: 提供系統 }
+  - name: systems
+    type: system
+    file: data/systems.json
+    records: systems
+    id: code
+    properties: { name: name, tier: tier }
+    links: { system_owner: owner }
+  - name: contracts
+    type: contract
+    file: data/contracts.yaml
+    records: contracts
+    id: contract_no
+    properties: { title: title, status: status, end_date: end, amount: amount }
+    links: { with_vendor: vendor, covers: systems, governed_by: articles }
+    validFrom: start
+  - name: policy_articles
+    from: knowledge
+    base: policies
+    type: policy_article
+    docId: "^([A-Z]+-[0-9]+)_"
+    references: refers_to

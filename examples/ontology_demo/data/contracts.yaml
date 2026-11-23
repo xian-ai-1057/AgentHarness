@@ -1,0 +1,27 @@
+contracts:
+  - contract_no: C-2025-001
+    title: 客戶關係管理系統雲端服務
+    status: 生效中
+    start: 2025-01-01
+    end: 2027-02-28
+    amount: 360
+    vendor: "12345678"
+    systems: [SYS-CRM]
+    articles: [OUT-01:第三條, OUT-01:第五條]
+  - contract_no: C-2024-007
+    title: 人資系統維護
+    status: 生效中
+    start: 2024-07-01
+    end: 2026-12-31
+    amount: 85
+    vendor: "87654321"
+    systems: [SYS-HR]
+    articles: [OUT-01:第五條]
+  - contract_no: C-2023-002
+    title: 郵件服務（舊約）
+    status: 已到期
+    start: 2023-01-01
+    end: 2024-12-31
+    amount: 40
+    vendor: "12345678"
+    systems: [SYS-MAIL]

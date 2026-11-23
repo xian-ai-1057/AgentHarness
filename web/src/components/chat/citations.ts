@@ -13,6 +13,11 @@
 import type { Block } from "../../transcript.ts";
 
 export const SEARCH_TOOL = "search_knowledge";
+/** 結果格式和 search_knowledge 一樣的工具（ontology 的 search_documents）。 */
+export const SEARCH_TOOLS: ReadonlySet<string> = new Set([
+  SEARCH_TOOL,
+  "search_documents",
+]);
 
 /** 一筆搜尋結果的出處。 */
 export interface KnowledgeSource {
@@ -99,7 +104,7 @@ export function citationsByBlock(
   for (const block of blocks) {
     if (block.kind === "steps") {
       for (const step of block.steps) {
-        if (step.name !== SEARCH_TOOL || step.result === undefined) continue;
+        if (!SEARCH_TOOLS.has(step.name) || step.result === undefined) continue;
         const hits = parseSearchResult(step.result);
         current = new Map(current);
         for (const hit of hits) current.set(hit.number, hit);

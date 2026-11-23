@@ -6,7 +6,9 @@
     dontAsk: 不問使用者，需要同意的工具一律拒絕（適合無人值守）。
 
 「需要同意的工具」是指定義時標記 needs_approval 的工具，或名稱符合
-ask 規則的工具。規則是工具名稱的萬用字元樣式，例如 "send_*"。
+ask 規則的工具。規則是工具名稱的萬用字元樣式，例如 "send_*"。標記
+force_approval 的工具（ontology 的 run_action）每次都要問：只有 deny 規則
+與 dontAsk 模式（一律拒絕）會改變結果。
 
 模式名稱與 harness.yaml 的寫法一致，TypeScript 版也使用同一份設定。
 """
@@ -60,6 +62,8 @@ def check(permissions: Permissions, target: tools_lib.Tool) -> str:
     """
     if _matches(target.name, permissions.deny):
         return "deny"
+    if target.force_approval:
+        return "deny" if permissions.mode == "dontAsk" else "ask"
     if _matches(target.name, permissions.allow):
         return "allow"
     if permissions.mode == "bypass":

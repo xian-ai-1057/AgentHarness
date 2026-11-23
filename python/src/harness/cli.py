@@ -5,6 +5,7 @@ pyharness chat                在目前專案開始聊天
 pyharness run "<訊息>"        執行一次後結束
 pyharness memory              查看、刪除或清空長期記憶
 pyharness knowledge [查詢]    檢查知識庫的索引，或試著搜尋
+pyharness ontology            檢查 ontology 的定義與綁定，列出動作紀錄
 pyharness web                 開啟網頁版；資料夾是空的時，自動建立一個
                               可以直接使用的助手
 pyharness user                管理網頁版的帳號（新增、列出、重設密碼、
@@ -61,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = {
         "memory": _command_memory,
         "knowledge": _command_knowledge,
+        "ontology": _command_ontology,
         "web": _command_web,
         "sandbox": _command_sandbox,
     }
@@ -183,6 +185,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "-b",
         "--bases",
         help="只看這些知識庫（識別碼，逗號分隔）；預設是全部",
+    )
+    ontology = commands.add_parser(
+        "ontology", help="檢查 ontology 的定義與綁定，或列出動作紀錄"
+    )
+    ontology.add_argument("-p", "--project", default=".", help="專案資料夾")
+    ontology.add_argument(
+        "action",
+        nargs="?",
+        choices=["check", "log", "candidates"],
+        default="check",
+        help="check：載入並列出每個綁定（預設）；log：最近的動作紀錄；"
+        "candidates：回報的候選概念",
+    )
+    ontology.add_argument(
+        "--reload", action="store_true", help="不管有沒有變動，全部重新載入"
     )
     return parser
 
@@ -526,6 +543,49 @@ def _command_knowledge(
     return asyncio.run(
         _show_knowledge(list(bases.values()), args.query, labels)
     )
+
+
+def _command_ontology(
+    args: argparse.Namespace, loaded: project_lib.Project
+) -> int:
+    """檢查 ontology：定義檔、每個綁定載入的筆數與警告、動作紀錄。"""
+    ontology = loaded.ontology
+    if ontology is None:
+        print("這個專案沒有 ontology。建立 ontology/ 資料夾並放入定義檔即可。")
+        return 1
+    if args.action == "log":
+        for entry in ontology.store.actions():
+            when = datetime.datetime.fromtimestamp(entry.at)
+            print(
+                f"#{entry.seq} {when:%Y-%m-%d %H:%M} {entry.actor or '本機'} "
+                f"{entry.action} {entry.target} [{entry.status}]"
+                f"\n    理由：{entry.reason}\n    結果：{entry.result[:200]}"
+            )
+        return 0
+    if args.action == "candidates":
+        for item in ontology.store.candidates():
+            module = item["module"] or "未指定"
+            print(
+                f"#{item['seq']} {item['concept']}（{module}）"
+                f"：{item['description']}"
+            )
+        return 0
+    schema = ontology.schema
+    print(
+        f"模組 {len(schema.modules)} 個、型別 {len(schema.types)} 個、"
+        f"關係 {len(schema.relations)} 個、動作 {len(schema.actions)} 個、"
+        f"指標 {len(schema.metrics)} 個"
+    )
+    states = asyncio.run(ontology.sync(force=args.reload))
+    problems = 0
+    for state in states:
+        print(f"- {state.name}：物件 {state.objects} 筆、關係 {state.links} 條")
+        for warning in state.warnings:
+            problems += 1
+            print(f"    ⚠ {warning}")
+    if problems:
+        print(f"共 {problems} 個警告。")
+    return 0
 
 
 _SEARCH_LABELS = {

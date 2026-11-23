@@ -17,6 +17,13 @@ export const DECISION_LABELS: Record<string, string> = {
   deny: "拒絕",
 };
 
+/** ontology 動作的結果。 */
+const ONTOLOGY_STATUS: Record<string, string> = {
+  done: "完成",
+  failed: "失敗",
+  rejected: "參數不對，沒有執行",
+};
+
 const FAILURE_LABELS: Record<string, string> = {
   wrong_password_or_disabled: "密碼不對，或帳號已停用",
   unknown_username: "沒有這個帳號",
@@ -154,6 +161,16 @@ export function describeDetail(entry: AuditEntry): string {
         DECISION_LABELS[String(detail.decision)] ?? String(detail.decision);
       const args = typeof detail.arguments === "string" ? detail.arguments : "";
       return args ? `${decision} · ${args}` : decision;
+    }
+    case "ontology.action": {
+      const status = ONTOLOGY_STATUS[String(detail.status)] ?? "";
+      const parts = [
+        String(detail.label ?? ""),
+        detail.target ? `對象：${String(detail.target)}` : "",
+        detail.reason ? `理由：${String(detail.reason)}` : "",
+        status,
+      ];
+      return parts.filter(Boolean).join(" · ");
     }
     case "settings.permissions": {
       const mode = detail.mode as keyof typeof MODE_LABELS;

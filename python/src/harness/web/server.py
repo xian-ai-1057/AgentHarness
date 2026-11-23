@@ -121,6 +121,7 @@ import pathlib
 import re
 import secrets
 import urllib.parse
+from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Iterator
 from typing import Any
@@ -129,6 +130,7 @@ from aiohttp import BodyPartReader
 from aiohttp import web
 
 from harness import llm
+from harness import ontology as ontology_lib
 from harness import project as project_lib
 from harness.builtin import paths as paths_lib
 from harness.web import accounts as accounts_lib
@@ -385,6 +387,8 @@ def create_app(
     app[_PROXIES] = proxies
     app[_LOCAL_KEY] = local_key if mode == "local" else None
     app[_AUDIT] = audit_lib.AuditLog.for_project(project.root)
+    if project.ontology is not None:
+        project.ontology.on_action = _ontology_auditor(app[_AUDIT])
     # 本機模式（只有自己）可以用這台電腦的 LibreOffice；要登入時一律在
     # 沙盒裡轉換，別人上傳的檔案不在伺服器上解析。
     app[_OFFICE] = office_lib.OfficeConverter(
@@ -1446,6 +1450,33 @@ def _audit_routes(routes: web.RouteTableDef) -> None:
             await response.write("".join(lines[start : start + 500]).encode())
         await response.write_eof()
         return response
+
+
+def _ontology_auditor(
+    log: audit_lib.AuditLog,
+) -> Callable[[ontology_lib.ActionEvent], None]:
+    """ontology 執行動作後寫一筆稽核紀錄：動作、對象、理由與結果。"""
+
+    def record(event: ontology_lib.ActionEvent) -> None:
+        actor = event.viewer.actor
+        log.record(
+            "ontology.action",
+            actor=actor if isinstance(actor, accounts_lib.User) else None,
+            target=event.action,
+            detail={
+                "label": event.label,
+                "target": event.target,
+                "status": event.status,
+                "reason": event.reason,
+                "params": audit_lib.summarize_arguments(event.params),
+                "result": event.result[:300],
+                "agent": event.agent,
+                "sessionId": event.session,
+                "seq": event.seq,
+            },
+        )
+
+    return record
 
 
 def _audit(

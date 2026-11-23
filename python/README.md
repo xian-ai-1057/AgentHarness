@@ -19,6 +19,9 @@ Python 版的特點：
   （handoff）給另一個 agent。
 - **正式上線的 agent 常用的能力**：[知識庫（RAG）](#知識庫rag)、
   [Skills](#skills)、[長期記憶](#長期記憶)、[訊息防護](#訊息防護)。
+- **agent 可以查業務物件，不用從文件裡拼湊**：[Ontology](#ontology業務物件)
+  用 YAML 定義合約、案件這些物件與關係，資料不經過 LLM 綁進來；寫入只能
+  透過每次都要核准、有紀錄的動作。
 - **長時間的對話不會塞爆上下文**：[對話壓縮](#對話壓縮)。
 - **agent 可以自己寫程式解析文件、分析資料**，程式在隔離的 Docker 容器
   裡執行：[在沙盒裡執行程式](#在沙盒裡執行程式)。可以
@@ -166,6 +169,7 @@ my_bot/
 │   └── refund/
 │       └── SKILL.md
 ├── knowledge/        知識庫文件（可省略）
+├── ontology/         業務物件的定義檔與資料綁定（可省略）
 ├── workspace/        沙盒掛載的資料夾：要分析的檔案與產生的結果（可省略）
 └── .harness/         對話紀錄、記憶、索引快取（自動產生，不用進版控）
 ```
@@ -869,6 +873,38 @@ hits[0].similarity, hits[0].rerank_score  # 沒有使用時是 None
 用自己的 reranker（例如本機的 cross-encoder）時，傳入
 `rerank_fn=async (query, documents) -> list[float]`，分數越大越相關。
 
+## Ontology（業務物件）
+
+知識庫讓 agent 從文件裡找答案；ontology 讓 agent 查有識別碼、有屬性、
+彼此有關係的**業務物件**（合約、供應商、案件、關卡…）。定義檔放在
+`ontology/`（YAML：型別、屬性、關係、動作、指標、詞彙），資料從 JSON、
+YAML、CSV、知識庫的條文或 Python 函式綁進來，不經過 LLM，每一筆都記著
+出處與有效期間。
+
+```markdown
+---
+name: contracts
+ontology:
+  modules: [contracts]          # true 表示全部模組
+  maxClassification: internal   # 超過這個等級的屬性會遮起來
+---
+你是合約管理助手。
+```
+
+agent 會拿到五個工具，指示後面自動接上定義摘要：
+
+- `find_entity` 查物件、`get_related` 沿關係走（例如合約 → 供應商 →
+  提供的系統）、`search_documents` 只搜物件對應的條文、`get_metric` 查
+  定義好的指標。
+- `run_action` 執行定義好的動作，是唯一的寫入方式：每次都要使用者核准
+  並填理由（不受權限模式與 `allow` 規則影響，網頁版只能「允許這一次」），
+  可以設核准前的檢查，執行結果寫進只能新增的動作紀錄與稽核紀錄。
+
+型別與屬性可以設機密等級，型別與動作可以限定群組。`pyharness ontology`
+檢查定義與綁定（`log` 看動作紀錄）。完整範例在
+[`examples/ontology_demo`](../examples/ontology_demo)，寫法見
+[說明文件的 Ontology](https://agent-harness-docs-ten.vercel.app/advanced/ontology)。
+
 ## Skills
 
 把一段任務指示（加上專屬的工具與參考檔案）打包成 skill。agent 平常只
@@ -1343,7 +1379,8 @@ permissions:
 
 「需要同意的工具」是標記 `needs_approval=True` 的工具，以及名稱符合
 `ask` 規則的工具。判斷順序是 `deny` 規則、`allow` 規則、最後才看模式。
-規則是工具名稱的萬用字元樣式。
+規則是工具名稱的萬用字元樣式。Ontology 的 `run_action` 例外：每次都要
+同意（`dontAsk` 時一律拒絕），見 [Ontology](#ontology業務物件)。
 
 ## Hooks
 
@@ -1482,6 +1519,8 @@ pyharness web                開啟網頁版（--port、--host、--allowed-host�
 pyharness user               管理網頁版的帳號：add <名稱> [--name 顯示
                              名稱] [--admin]、list、passwd <名稱>、
                              disable <名稱>、enable <名稱>
+pyharness ontology           載入 ontology 並列出每個綁定（log 動作紀錄、
+                             candidates 回報的候選概念、--reload 全部重載）
 pyharness sandbox            檢查沙盒（Docker）能不能正常執行程式
 
 chat 與 run 共用的選項：
@@ -1869,10 +1908,11 @@ sudo systemctl enable --now harness
 - **`tools/` 裡有與 `mcpServers` 伺服器同名的 Python 檔時，不啟動那個
   伺服器**，改為直接載入該檔案（見[連接 MCP 伺服器](#連接-mcp-伺服器)）。
 - **不會載入 `tools/*.ts`。**
-- **Subagents、handoffs、知識庫、skills、長期記憶、訊息防護、對話壓縮與
-  沙盒只有 Python 版支援。** TypeScript 版會忽略 agent 檔案裡的
-  `subagents`、`handoffs`、`skills`、`knowledge` 欄位，以及 `harness.yaml`
-  的 `knowledge`、`memory`、`guardrails`、`compaction`、`sandbox` 區塊，
+- **Subagents、handoffs、知識庫、ontology、skills、長期記憶、訊息防護、
+  對話壓縮與沙盒只有 Python 版支援。** TypeScript 版會忽略 agent 檔案裡的
+  `subagents`、`handoffs`、`skills`、`knowledge`、`ontology` 欄位，以及
+  `harness.yaml` 的 `knowledge`、`ontology`、`memory`、`guardrails`、
+  `compaction`、`sandbox` 區塊，
   所以同一個專案仍然可以用 TypeScript 版執行（只是沒有這些功能；agent
   的 `tools` 列了 `sandbox` 的話，TypeScript 版會因為找不到它而無法載入）。
 - **網頁版的帳號與登入、工作資料夾、`--allowed-host`、在網頁上連接模型、

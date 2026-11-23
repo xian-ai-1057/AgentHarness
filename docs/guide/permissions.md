@@ -25,6 +25,8 @@ permissions:
   - TypeScript 版：`needsApproval: true`
   - MCP 伺服器：`destructiveHint=True`
 - 內建的 `write_file`、`edit_file`、`run_command`、`web_fetch`
+- Ontology 的 `run_action`：每次都要同意，不受模式、`allow` 規則與 hooks
+  影響，也不能選「以後都允許」（見 [Ontology 的動作](/advanced/ontology#動作)）
 
 ## 判斷順序
 

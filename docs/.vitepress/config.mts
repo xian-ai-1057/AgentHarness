@@ -82,6 +82,7 @@ export default defineConfig({
         items: [
           { text: "多個 agent 協作", link: "/advanced/multi-agent" },
           { text: "知識庫（RAG）", link: "/advanced/knowledge" },
+          { text: "Ontology（業務物件）", link: "/advanced/ontology" },
           { text: "Skills", link: "/advanced/skills" },
           { text: "長期記憶", link: "/advanced/memory" },
           { text: "訊息防護", link: "/advanced/guardrails" },

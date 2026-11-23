@@ -45,7 +45,7 @@ features:
     link: /guide/web
     linkText: 網頁版
   - title: 進階能力（Python 版）
-    details: 多 agent 協作、知識庫（RAG）、skills、長期記憶、訊息防護、對話壓縮。
+    details: 多 agent 協作、知識庫（RAG）、ontology（業務物件）、skills、長期記憶、訊息防護、對話壓縮。
     link: /advanced/multi-agent
     linkText: 進階功能
   - title: 部署後就能用（Python 版）

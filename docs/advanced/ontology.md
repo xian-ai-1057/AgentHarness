@@ -253,7 +253,8 @@ def flag_vendor_risk(ctx, level, finding):
 ## 命令列
 
 ```text
-pyharness ontology [check]     載入並列出每個綁定的物件數、關係數與警告
+pyharness ontology [check]     載入並列出每個綁定的物件數、關係數與警告，
+                               以及連到不存在物件的關係（例如代碼對不上）
 pyharness ontology log         最近的動作紀錄
 pyharness ontology candidates  回報的候選概念
   -p <資料夾>   專案位置

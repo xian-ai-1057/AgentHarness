@@ -1,0 +1,6 @@
+policies:
+  - code: OUT-01
+    title: 委外管理辦法
+    version: 第 3 版
+    effective: 2024-01-01
+    owner: D02

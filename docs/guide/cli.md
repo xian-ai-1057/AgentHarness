@@ -32,6 +32,8 @@ pyharness memory             查看長期記憶（forget <識別碼> / clear）
 pyharness knowledge ["查詢"]  檢查知識庫索引，或試著搜尋
                              （-l hr,sales 模擬受限的 agent，
                              -b hr,it 只搜尋這幾個知識庫）
+pyharness ontology           載入 ontology 並列出每個綁定（log 動作紀錄、
+                             candidates 回報的候選概念、--reload 全部重載）
 pyharness sandbox            檢查沙盒（Docker）能不能正常執行程式
 pyharness user add <名稱>     新增網頁版的帳號，印出產生的密碼
                              （--name 顯示名稱、--admin 設為管理者）
@@ -52,7 +54,7 @@ pyharness user disable <名稱> 停用帳號（enable 重新啟用）
 
 在空的資料夾執行 `pyharness web` 時，會自動建立可以直接使用的助手（見[網頁版](/guide/web#自動建立助手)）。
 
-相關說明：[對話壓縮](/advanced/compaction)、[長期記憶](/advanced/memory)、[知識庫](/advanced/knowledge)、[在沙盒裡執行程式](/advanced/sandbox)。
+相關說明：[對話壓縮](/advanced/compaction)、[長期記憶](/advanced/memory)、[知識庫](/advanced/knowledge)、[Ontology](/advanced/ontology)、[在沙盒裡執行程式](/advanced/sandbox)。
 
 ## 在排程裡使用
 

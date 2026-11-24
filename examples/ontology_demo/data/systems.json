@@ -1,0 +1,12 @@
+{
+  "systems": [
+    {
+      "code": "SYS-CRM",
+      "name": "客戶關係管理系統",
+      "tier": "高",
+      "owner": "E003"
+    },
+    { "code": "SYS-MAIL", "name": "郵件服務", "tier": "中", "owner": "E001" },
+    { "code": "SYS-HR", "name": "人資系統", "tier": "中", "owner": "E001" }
+  ]
+}

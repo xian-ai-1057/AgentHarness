@@ -1,0 +1,20 @@
+name: ontology_demo
+defaultAgent: contracts
+
+# 不寫 model 時使用環境變數 HARNESS_MODEL。
+# model: anthropic/claude-sonnet-5-5
+
+# 所有資料都是虛構的，只用來示範 ontology 的寫法。
+knowledge: false
+knowledgeBases:
+  policies:
+    name: 採購與委外規章
+    description: 委外管理辦法等內部規章（虛構）
+    chunking: regulation
+
+ontology:
+  # agent 沒有自己設定時，能讀到的最高機密等級（見 ontology/ 的 classification）。
+  maxClassification: internal
+
+permissions:
+  mode: ask

@@ -1316,6 +1316,32 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.approval-action {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.approval-action dt {
+  color: var(--muted);
+}
+
+.approval-action dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-action dd.mono {
+  font: 400 12px var(--mono);
+}
+
 .approval-options {
   display: flex;
   flex-direction: column;

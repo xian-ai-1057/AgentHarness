@@ -1,0 +1,49 @@
+# 核心模組：人員與單位。其他模組（contracts…）都可以引用。
+module: core
+label: 核心
+description: 人員與單位，所有領域共用。
+
+types:
+  department:
+    label: 單位
+    key: 單位代碼
+    display: "{name}"
+    classification: public
+    properties:
+      name: { label: 單位名稱, required: true }
+  person:
+    label: 人員
+    key: 員工編號
+    display: "{name}"
+    properties:
+      name: { label: 姓名, required: true }
+      title: { label: 職稱 }
+      phone: { label: 分機, classification: confidential }
+
+relations:
+  belongs_to:
+    label: 隸屬
+    from: person
+    to: department
+    inverse: members
+    inverseLabel: 成員
+
+glossary:
+  - term: 業務負責人
+    definition: 對系統的業務用途與成果負責的人員，通常是需求單位主管。
+    aliases: [AP Owner]
+    owner: 資訊處
+
+bindings:
+  - name: departments
+    type: department
+    file: data/departments.yaml
+    records: departments
+    id: code
+    properties: { name: name }
+  - name: people
+    type: person
+    file: data/people.csv
+    id: 員工編號
+    properties: { name: 姓名, title: 職稱, phone: 分機 }
+    links: { belongs_to: 單位代碼 }

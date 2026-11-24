@@ -104,6 +104,21 @@ export interface Approval {
   tool: string;
   arguments: Record<string, unknown>;
   preview?: FilePreview;
+  /** 每次都要核准（ontology 的 run_action）：只能允許這一次或拒絕。 */
+  onceOnly?: boolean;
+  /** run_action 要執行的動作，給人看的內容。 */
+  action?: ApprovalAction;
+}
+
+/** 核准卡片上的 ontology 動作。 */
+export interface ApprovalAction {
+  name: string;
+  label: string;
+  effects: string;
+  /** 對象，例如「合約 C-2024-007」；動作沒有對象時是 null。 */
+  target: string | null;
+  reason: string;
+  params: { name: string; label: string; value: unknown }[];
 }
 
 /**

@@ -67,6 +67,7 @@ ACTIONS = {
     "knowledge.personal_upload": "上傳個人知識庫文件",
     "knowledge.personal_document_delete": "刪除個人知識庫文件",
     "approval.decide": "工具核准",
+    "ontology.action": "執行 Ontology 動作",
     "audit.export": "匯出稽核紀錄",
 }
 CATEGORIES = {
@@ -78,6 +79,7 @@ CATEGORIES = {
     "knowledge": "知識庫",
     "agent": "自建 Agent",
     "approval": "工具核准",
+    "ontology": "Ontology 動作",
     "audit": "稽核紀錄",
 }
 PAGE_LIMIT = 200

@@ -1,11 +1,17 @@
 /**
  * 工具呼叫的權限確認：允許一次、（這段對話都允許、）這個專案以後都
  * 允許、拒絕，依序也可以按數字鍵。伺服器支援 sessionApproval 時才有
- * 「這段對話都允許」，按 1–4；否則按 1–3。
+ * 「這段對話都允許」，按 1–4；否則按 1–3。每次都要核准的工具
+ * （onceOnly，ontology 的動作）只有允許這一次與拒絕（1–2），並列出動作的
+ * 對象、理由與參數。
  */
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import type { Approval, ApprovalDecision } from "../../../src/web/protocol.ts";
+import type {
+  Approval,
+  ApprovalAction,
+  ApprovalDecision,
+} from "../../../src/web/protocol.ts";
 import { api } from "../api.ts";
 import { approvalPreview } from "../transcript.ts";
 import "./chat/chat.css";
@@ -59,9 +65,14 @@ export function ApprovalCard({
     }
   };
 
-  const keys: Record<string, ApprovalDecision> = sessionApproval
-    ? { "1": "once", "2": "session", "3": "always", "4": "deny" }
-    : { "1": "once", "2": "always", "3": "deny" };
+  // 每次都要核准的工具（ontology 的動作）只有「允許這一次」與「拒絕」。
+  const onceOnly = approval.onceOnly === true;
+  const keys: Record<string, ApprovalDecision> = onceOnly
+    ? { "1": "once", "2": "deny" }
+    : sessionApproval
+      ? { "1": "once", "2": "session", "3": "always", "4": "deny" }
+      : { "1": "once", "2": "always", "3": "deny" };
+  const actionInfo = approval.action;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -112,11 +123,13 @@ export function ApprovalCard({
           <div className="approval-head">
             <div style={{ minWidth: 0 }}>
               <div className="title">
-                {preview
-                  ? `${agent} 想要${approval.tool === "edit_file" ? "修改" : "寫入"}檔案`
-                  : command !== undefined
-                    ? `${agent} 想要執行指令`
-                    : `${agent} 想要${action}`}
+                {actionInfo
+                  ? `${agent} 想要執行動作「${actionInfo.label}」`
+                  : preview
+                    ? `${agent} 想要${approval.tool === "edit_file" ? "修改" : "寫入"}檔案`
+                    : command !== undefined
+                      ? `${agent} 想要執行指令`
+                      : `${agent} 想要${action}`}
               </div>
               <div className="meta">
                 {approval.tool}
@@ -151,7 +164,8 @@ export function ApprovalCard({
               </pre>
             </div>
           )}
-          {!preview && command === undefined && (
+          {actionInfo && <ActionDetail action={actionInfo} />}
+          {!preview && command === undefined && !actionInfo && (
             <pre className="approval-args">
               {JSON.stringify(approval.arguments, null, 2)}
             </pre>
@@ -165,7 +179,7 @@ export function ApprovalCard({
             >
               允許這一次
             </Option>
-            {sessionApproval && (
+            {sessionApproval && !onceOnly && (
               <Option
                 n="2"
                 disabled={sending}
@@ -175,16 +189,18 @@ export function ApprovalCard({
                 <ToolName tool={approval.tool} />
               </Option>
             )}
+            {!onceOnly && (
+              <Option
+                n={sessionApproval ? "3" : "2"}
+                disabled={sending}
+                onClick={() => decide("always")}
+              >
+                這個專案以後都允許
+                <ToolName tool={approval.tool} />
+              </Option>
+            )}
             <Option
-              n={sessionApproval ? "3" : "2"}
-              disabled={sending}
-              onClick={() => decide("always")}
-            >
-              這個專案以後都允許
-              <ToolName tool={approval.tool} />
-            </Option>
-            <Option
-              n={sessionApproval ? "4" : "3"}
+              n={onceOnly ? "2" : sessionApproval ? "4" : "3"}
               kind="outline"
               disabled={sending}
               onClick={() => decide("deny")}
@@ -200,6 +216,44 @@ export function ApprovalCard({
         </section>
       </div>
     </div>
+  );
+}
+
+/** ontology 動作的內容：對象、理由、參數與副作用。 */
+function ActionDetail({ action }: { action: ApprovalAction }) {
+  return (
+    <dl className="approval-action">
+      {action.target && (
+        <>
+          <dt>對象</dt>
+          <dd>{action.target}</dd>
+        </>
+      )}
+      <dt>理由</dt>
+      <dd>{action.reason || "（沒有填）"}</dd>
+      {action.params.map((param) => (
+        <ParamRow key={param.name} label={param.label} value={param.value} />
+      ))}
+      {action.effects && (
+        <>
+          <dt>會做什麼</dt>
+          <dd>{action.effects}</dd>
+        </>
+      )}
+    </dl>
+  );
+}
+
+function ParamRow({ label, value }: { label: string; value: unknown }) {
+  const shown =
+    typeof value === "string" ? value : JSON.stringify(value, null, 2);
+  return (
+    <>
+      <dt>{label}</dt>
+      <dd className={typeof value === "string" ? undefined : "mono"}>
+        {shown}
+      </dd>
+    </>
   );
 }
 

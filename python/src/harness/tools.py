@@ -50,6 +50,12 @@ class Tool:
         needs_approval: 執行前是否需要使用者同意。
         args_model: 用來驗證參數的 pydantic 模型。
         context_param: 要填入 RunContext 的參數名稱，沒有則為 None。
+        force_approval: 每一次都要使用者同意：不受 bypass 模式、allow
+            規則、hooks 的 allow() 與「這段對話都允許」影響（ontology 的
+            run_action 用）。
+        precheck: 詢問使用者之前先檢查參數的函式（同步或 async），收到
+            (參數, RunContext)，回傳錯誤說明或 None。有錯時不詢問，直接把
+            說明送回模型，使用者不會看到不合法的確認。
     """
 
     name: str
@@ -59,6 +65,8 @@ class Tool:
     needs_approval: bool = False
     args_model: type[pydantic.BaseModel] | None = None
     context_param: str | None = None
+    force_approval: bool = False
+    precheck: Callable[..., Any] | None = None
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         """直接呼叫原本的函式。"""

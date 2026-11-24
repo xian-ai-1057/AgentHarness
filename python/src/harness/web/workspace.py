@@ -60,6 +60,7 @@ from harness import llm
 from harness import loop
 from harness import memory as memory_lib
 from harness import model_catalog
+from harness import ontology as ontology_lib
 from harness import permissions as permissions_lib
 from harness import project as project_lib
 from harness import providers
@@ -1882,6 +1883,8 @@ class Workspace:
         if pending is None or pending.future.done():
             raise WebError(404, "這個確認已經處理過，或已經失效")
         approval = pending.approval
+        if approval.get("onceOnly") and decision in ("session", "always"):
+            raise WebError(400, "這個動作每次都要核准，只能允許這一次或拒絕")
         if decision == "always" and user.is_admin:
             self._allow_always(approval["tool"])
         elif decision == "always":
@@ -2082,6 +2085,8 @@ class Workspace:
             # 依使用者記帳、套用額度與限流。每一輪是自己的 asyncio task，
             # 設定只影響這一輪（與它開出的 subagent）。
             llm.set_caller(self._caller(user, session_id, agent.name))
+            # ontology 依這一輪是誰套用群組權限（型別、動作、知識庫）。
+            ontology_lib.set_viewer(self._ontology_viewer(user))
             events = loop.run_stream(
                 agent,
                 text,
@@ -2358,8 +2363,9 @@ class Workspace:
             call: datatypes.ToolCall, target: tools_lib.Tool
         ) -> bool:
             # 這段對話已經允許這個工具，或同意過一模一樣的呼叫：不再問。
+            # 每次都要同意的工具（ontology 的 run_action）例外。
             key = _call_key(target.name, call.arguments)
-            if (
+            if not target.force_approval and (
                 target.name in state.session_tools
                 or key in state.approved_calls
             ):
@@ -2372,6 +2378,13 @@ class Workspace:
                 "tool": target.name,
                 "arguments": call.arguments,
             }
+            if target.force_approval:
+                approval["onceOnly"] = True
+            ontology = self.project.ontology
+            if ontology is not None and target.name == "run_action":
+                action = ontology.describe_call(call.arguments)
+                if action is not None:
+                    approval["action"] = action
             preview = self._preview(state, call)
             if preview is not None:
                 approval["preview"] = preview
@@ -2650,6 +2663,30 @@ class Workspace:
         if not any(item["name"] in models for item in self._model_options()):
             return access
         return dataclasses.replace(access, models=models)
+
+    def _ontology_viewer(self, user: accounts_lib.User) -> ontology_lib.Viewer:
+        """ontology 的查詢者：所屬群組（識別碼與名稱）與可以搜尋的知識庫。
+
+        本機模式與管理者不受群組限制，和其他資源一樣。
+        """
+        access = self._access(user)
+        admin = self.auth_mode == "local" or self._live_admin(user)
+        groups = (
+            self._groups.groups_of(user.id) if self._groups is not None else []
+        )
+        names = {item.id for item in groups} | {item.name for item in groups}
+        return ontology_lib.Viewer(
+            user=user.username,
+            groups=frozenset(names),
+            admin=admin,
+            knowledge_bases=None
+            if access.knowledge_bases is None
+            else frozenset(access.knowledge_bases),
+            labels=None
+            if access.knowledge is None
+            else frozenset(access.knowledge),
+            actor=user,
+        )
 
     def _caller(
         self, user: accounts_lib.User, session_id: str, agent: str

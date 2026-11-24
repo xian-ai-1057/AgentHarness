@@ -1,0 +1,4 @@
+departments:
+  - { code: D01, name: 資訊處 }
+  - { code: D02, name: 採購部 }
+  - { code: D03, name: 客服中心 }

@@ -66,8 +66,8 @@ litellm 直接連各家供應商。換模型只要改設定，不用改程式。
 **多種使用方式。** 命令列聊天、單次執行（適合排程與腳本）、網頁介面，
 或當成函式庫嵌進自己的服務。
 
-**進階能力（Python 版）。** 多個 agent 協作、知識庫（RAG）、skills、
-長期記憶、訊息防護、對話壓縮。
+**進階能力（Python 版）。** 多個 agent 協作、知識庫（RAG）、ontology
+（業務物件與每次都要核准的動作）、skills、長期記憶、訊息防護、對話壓縮。
 
 **部署後就能用（Python 版）。** `docker compose up -d` 啟動後在網頁上
 填模型金鑰即可；agent 寫的 Python 程式在隔離的 Docker 沙盒裡執行，可以
@@ -729,6 +729,9 @@ Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
   同一個專案仍然可以執行（只是沒有這些功能）：
   - Subagents 與 handoffs（agent 之間互相呼叫或轉交）
   - 知識庫（RAG）
+  - Ontology：用 YAML 定義業務物件、關係與動作，agent 用五個語意工具
+    查詢，寫入只能透過每次都要核准的動作（見
+    [說明文件](https://agent-harness-docs-ten.vercel.app/advanced/ontology)）
   - Skills（需要時才載入的說明文件），包含內建的 skill-creator、
     code-review 等 skills，以及改寫自 Anthropic 官方、處理 Excel、Word、
     PowerPoint、PDF 的 xlsx、docx、pptx、pdf skills 與其他官方範例 skills

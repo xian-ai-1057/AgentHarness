@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import dataclasses
+import inspect
 import json
 import pathlib
 from collections.abc import AsyncIterator
@@ -809,10 +810,18 @@ async def _authorize(
         if decision.action == "deny":
             return _error(call, f"這次呼叫被拒絕：{decision.reason}")
     hook_allowed = any(item.action == "allow" for item in decisions)
+    if target.force_approval:
+        hook_allowed = False
 
     verdict = permissions_lib.check(permissions, target)
     if verdict == "deny":
         return _error(call, "權限設定不允許使用這個工具，請改用其他做法")
+    if target.precheck is not None:
+        problem = target.precheck(call.arguments, context)
+        if inspect.isawaitable(problem):
+            problem = await problem
+        if problem:
+            return _error(call, str(problem))
     if verdict == "ask" and not hook_allowed:
         if not await permissions_lib.ask(permissions, call, target):
             return _error(call, DENIED_RESULT)

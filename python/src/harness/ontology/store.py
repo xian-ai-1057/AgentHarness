@@ -323,6 +323,25 @@ class Store:
         with self._connect() as db:
             return [_link(row) for row in db.execute(sql, args)]
 
+    def dangling_links(self) -> list[tuple[str, str, str, list[str]]]:
+        """連到不存在物件的關係：[(綁定, 關係, 對象型別, [對象識別碼…])]。
+
+        只看物件存不存在，不看有效期間；動作建立的物件也算存在。
+        """
+        sql = (
+            "SELECT l.binding, l.rel, l.to_type, l.to_id FROM links l "
+            "WHERE NOT EXISTS (SELECT 1 FROM objects o "
+            "WHERE o.type = l.to_type AND o.id = l.to_id) "
+            "ORDER BY l.binding, l.rel, l.to_id"
+        )
+        grouped: dict[tuple[str, str, str], list[str]] = {}
+        with self._connect() as db:
+            for binding, rel, to_type, to_id in db.execute(sql):
+                ids = grouped.setdefault((binding, rel, to_type), [])
+                if to_id not in ids:
+                    ids.append(to_id)
+        return [(b, r, t, ids) for (b, r, t), ids in grouped.items()]
+
     def count(self, type_: str) -> int:
         with self._connect() as db:
             return db.execute(

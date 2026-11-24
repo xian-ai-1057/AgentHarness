@@ -185,6 +185,24 @@ class TestBindings:
             "評等 不在允許的值裡" in w for w in after["vendors"].warnings
         )
 
+    async def test_dangling_links_are_listed(self, loaded, demo):
+        ontology = loaded.ontology
+        await ontology.sync()
+        assert ontology.store.dangling_links() == []
+        systems = demo / "data" / "systems.json"
+        systems.write_text(
+            systems.read_text("utf-8").replace(
+                '"owner": "E001"', '"owner": "E999"'
+            ),
+            "utf-8",
+        )
+
+        await ontology.sync()
+
+        assert ontology.store.dangling_links() == [
+            ("systems", "system_owner", "person", ["E999"])
+        ]
+
     async def test_values_are_converted_to_property_types(self, loaded):
         ontology = loaded.ontology
         await ontology.sync()

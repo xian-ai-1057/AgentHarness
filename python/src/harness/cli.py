@@ -583,6 +583,15 @@ def _command_ontology(
         for warning in state.warnings:
             problems += 1
             print(f"    ⚠ {warning}")
+    for binding, rel, to_type, ids in ontology.store.dangling_links():
+        problems += 1
+        label = (
+            schema.types[to_type].label if to_type in schema.types else to_type
+        )
+        shown = "、".join(ids[:8]) + ("…" if len(ids) > 8 else "")
+        print(
+            f"⚠ {binding} 的關係 {rel} 有 {len(ids)} 個{label}不存在：{shown}"
+        )
     if problems:
         print(f"共 {problems} 個警告。")
     return 0

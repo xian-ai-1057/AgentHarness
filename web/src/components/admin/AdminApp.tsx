@@ -14,7 +14,9 @@ import { api } from "../../api.ts";
 import { adminSections, canAdmin } from "../../auth.ts";
 import { type AdminSection, navigate } from "../../router.ts";
 import { refreshProject, useStore } from "../../store.ts";
+import { SparkIcon } from "../chat/icons.tsx";
 import {
+  AgentIcon,
   ArrowLeftIcon,
   BookIcon,
   CheckIcon,
@@ -28,10 +30,12 @@ import {
 import { Members } from "../Members.tsx";
 import { Link } from "../Sidebar.tsx";
 import { UserMenu } from "../shell/UserMenu.tsx";
+import { Agents } from "./Agents.tsx";
 import { Audit } from "./Audit.tsx";
 import { Groups } from "./Groups.tsx";
 import { Knowledge } from "./Knowledge.tsx";
 import { McpServers } from "./McpServers.tsx";
+import { Skills } from "./Skills.tsx";
 import {
   type Draft,
   ModelSection,
@@ -42,6 +46,8 @@ import {
 export const ADMIN_LABELS: Record<AdminSection, string> = {
   model: "模型",
   permissions: "權限",
+  agents: "Agent",
+  skills: "Skills",
   mcp: "MCP 工具",
   knowledge: "知識庫",
   members: "成員",
@@ -52,6 +58,8 @@ export const ADMIN_LABELS: Record<AdminSection, string> = {
 const ADMIN_ICONS: Record<AdminSection, typeof ChipIcon> = {
   model: ChipIcon,
   permissions: ShieldIcon,
+  agents: AgentIcon,
+  skills: SparkIcon,
   mcp: PlugIcon,
   knowledge: BookIcon,
   members: UserIcon,
@@ -176,6 +184,8 @@ function AdminMain({ section }: { section: AdminSection }) {
           <span className="subtle mono">
             {section === "members" ||
             section === "groups" ||
+            section === "agents" ||
+            section === "skills" ||
             section === "mcp" ||
             section === "knowledge" ||
             section === "audit"
@@ -204,6 +214,8 @@ function AdminMain({ section }: { section: AdminSection }) {
             )}
             {section === "members" && <Members />}
             {section === "groups" && <Groups />}
+            {section === "agents" && <Agents />}
+            {section === "skills" && <Skills />}
             {section === "mcp" && <McpServers />}
             {section === "knowledge" && <Knowledge />}
             {section === "audit" && <Audit />}

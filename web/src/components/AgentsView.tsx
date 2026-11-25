@@ -346,7 +346,11 @@ export function AgentEditor({ id }: { id: string }) {
       skills: (project.skills ?? []).map((skill) => ({
         name: skill.name,
         label: skill.name,
-        hint: skill.description,
+        hint: skill.personal
+          ? ["我的 skill，只有你能用", skill.description]
+              .filter(Boolean)
+              .join(" · ")
+          : skill.description,
       })),
     };
   }, [project]);
@@ -805,7 +809,7 @@ function ModelField({
   );
 }
 
-function CheckList({
+export function CheckList({
   legend,
   help,
   empty,

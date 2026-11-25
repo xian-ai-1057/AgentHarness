@@ -22,6 +22,8 @@ export type Route =
   | { page: "agentEdit"; id: string }
   /** 知識庫頁：可以用的知識庫；id 是自己的一個個人知識庫。 */
   | { page: "knowledge"; id?: string }
+  /** Skills 頁：自己的個人 skill 與可以用的公司 skill。 */
+  | { page: "skills" }
   | { page: "settings"; section: SettingsSection }
   /**
    * 管理平台：和聊天介面分開的版面，只有管理者能用。section 沒有指定
@@ -73,6 +75,7 @@ function parse(path: string): Route {
   if (parts[0] === "agents") {
     return parts[1] ? { page: "agentEdit", id: parts[1] } : { page: "agents" };
   }
+  if (parts[0] === "skills") return { page: "skills" };
   if (parts[0] === "knowledge") {
     return parts[1]
       ? { page: "knowledge", id: decodeURIComponent(parts[1]) }
@@ -84,10 +87,11 @@ function parse(path: string): Route {
   if (parts[0] === "settings") {
     // 舊網址 /settings/model、/settings/permissions、/settings/members
     // 搬到管理平台了，管理平台會把網址換成 /admin/<分類>。
-    const moved = adminSection(parts[1]);
+    // /settings/agents 是設定頁自己的分類，不是管理平台的「Agent」。
+    const own = SETTINGS_SECTIONS.find((item) => item === parts[1]);
+    const moved = own ? undefined : adminSection(parts[1]);
     if (moved) return { page: "admin", section: moved };
-    const section = SETTINGS_SECTIONS.find((item) => item === parts[1]);
-    return { page: "settings", section: section ?? "tools" };
+    return { page: "settings", section: own ?? "tools" };
   }
   return { page: "new" };
 }

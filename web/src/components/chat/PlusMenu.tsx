@@ -79,7 +79,12 @@ export function PlusMenu({
       description: missing
         ? `要先在「工具」開啟 ${missing} 才能使用。`
         : skill.description,
-      tag: defaults.includes(skill.name) ? "預設" : undefined,
+      // 個人 skill 只有自己能用，也是預設開啟。
+      tag: skill.personal
+        ? "我的"
+        : defaults.includes(skill.name)
+          ? "預設"
+          : undefined,
       disabled: Boolean(missing),
       checked:
         !missing &&

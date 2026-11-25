@@ -143,6 +143,26 @@ describe("帳號模式與角色", () => {
     expect(adminSections(local)).toEqual(["model", "permissions", "audit"]);
   });
 
+  it("伺服器能管理公司的 Agent 與 Skills 時，排在權限後面", () => {
+    const admin = project(
+      { accounts: true, agentAdmin: true, skillAdmin: true, mcpServers: true },
+      { auth: { mode: "accounts", user: user("admin") } },
+    );
+    expect(adminSections(admin)).toEqual([
+      "model",
+      "permissions",
+      "agents",
+      "skills",
+      "mcp",
+      "members",
+    ]);
+    const member = project(
+      { accounts: true, agentAdmin: true, skillAdmin: true },
+      { auth: { mode: "accounts", user: user("member") } },
+    );
+    expect(adminSections(member)).toEqual([]);
+  });
+
   it("成員不能用管理平台", () => {
     const member = accounts("member");
     expect(isMember(member)).toBe(true);

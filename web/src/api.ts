@@ -2,6 +2,10 @@
 
 import type {
   AccessGroup,
+  AdminAgentInfo,
+  AdminAgentInput,
+  AdminAgentList,
+  AdminSkillList,
   ApprovalDecision,
   AuditFilters,
   AuditPage,
@@ -29,6 +33,7 @@ import type {
   ModelChoice,
   ModelTestResult,
   MyKnowledge,
+  MySkillList,
   PermissionMode,
   PermissionSettings,
   PersonalKnowledgeBase,
@@ -37,6 +42,7 @@ import type {
   SessionDetail,
   SessionOptions,
   SessionSummary,
+  SkillDetail,
   UploadedFile,
   UserAgentInfo,
   UserAgentInput,
@@ -316,6 +322,42 @@ export const api = {
       "DELETE",
       `/my/knowledge/${id}/documents?path=${encodeURIComponent(path)}`,
     ),
+  // 管理平台的 Skills（features.skillAdmin）。
+  adminSkills: () => request<AdminSkillList>("GET", "/admin/skills"),
+  adminSkill: (name: string) =>
+    request<SkillDetail>("GET", `/admin/skills/${name}`),
+  createAdminSkill: (skill: SkillInput) =>
+    request<SkillDetail>("POST", "/admin/skills", skill),
+  updateAdminSkill: (
+    name: string,
+    changes: Partial<SkillInput> & { enabled?: boolean; default?: boolean },
+  ) => request<SkillDetail>("PATCH", `/admin/skills/${name}`, changes),
+  deleteAdminSkill: (name: string) =>
+    request("DELETE", `/admin/skills/${name}`),
+  uploadAdminSkill: (file: File, replace = false) =>
+    sendZip<SkillDetail>(
+      `/admin/skills/upload${replace ? "?replace=1" : ""}`,
+      file,
+    ),
+  // 個人 skill（features.personalSkills）。
+  mySkills: () => request<MySkillList>("GET", "/my/skills"),
+  mySkill: (name: string) => request<SkillDetail>("GET", `/my/skills/${name}`),
+  createMySkill: (skill: SkillInput) =>
+    request<SkillDetail>("POST", "/my/skills", skill),
+  updateMySkill: (name: string, changes: Partial<SkillInput>) =>
+    request<SkillDetail>("PATCH", `/my/skills/${name}`, changes),
+  deleteMySkill: (name: string) => request("DELETE", `/my/skills/${name}`),
+  uploadMySkill: (file: File, replace = false) =>
+    sendZip<SkillDetail>(
+      `/my/skills/upload${replace ? "?replace=1" : ""}`,
+      file,
+    ),
+  // 管理平台的公司 Agent（features.agentAdmin）。
+  adminAgents: () => request<AdminAgentList>("GET", "/admin/agents"),
+  createAdminAgent: (agent: AdminAgentInput & { name: string }) =>
+    request<AdminAgentInfo>("POST", "/admin/agents", agent),
+  updateAdminAgent: (name: string, changes: AdminAgentInput) =>
+    request<AdminAgentInfo>("PATCH", `/admin/agents/${name}`, changes),
   // 稽核紀錄（features.audit）。
   audit: (filters: AuditFilters, before?: number) =>
     request<AuditPage>(
@@ -349,6 +391,31 @@ async function sendFile<T>(path: string, file: File): Promise<T[]> {
     throw new ApiError(response.status, message);
   }
   return (data as { files?: T[] }).files ?? [];
+}
+
+/** 上傳 skill 的 zip，回傳伺服器的回應（SkillDetail）。 */
+async function sendZip<T>(path: string, file: File): Promise<T> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const response = await fetch(`/api${path}`, {
+    method: "POST",
+    headers: { "X-Harness-Upload": "1" },
+    body: form,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    checkUnauthorized(response.status, path, data);
+    const message = (data as { error?: string }).error ?? response.statusText;
+    throw new ApiError(response.status, message);
+  }
+  return data as T;
+}
+
+/** 新增或修改 skill 時送出的欄位。 */
+export interface SkillInput {
+  name: string;
+  description: string;
+  instructions: string;
 }
 
 /** 新增或修改群組時送出的欄位。 */

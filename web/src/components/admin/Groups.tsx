@@ -280,6 +280,8 @@ function GroupEditor({
       knowledgeBases: draft.knowledgeBases,
       knowledge: draft.knowledge,
     };
+    // TypeScript 版的伺服器沒有 skills 這一類。
+    if (catalog.skills) changes.skills = draft.skills ?? null;
     if (!group.builtin) changes.members = draft.members;
     try {
       const saved = await api.updateGroup(group.id, changes);
@@ -312,6 +314,11 @@ function GroupEditor({
       hint: item.description || undefined,
     })),
     knowledge: catalog.knowledge.map((name) => ({ name, label: name })),
+    skills: (catalog.skills ?? []).map((item) => ({
+      name: item.name,
+      label: item.builtin ? `${item.name}（內建）` : item.name,
+      hint: item.description,
+    })),
   };
 
   return (
@@ -350,12 +357,14 @@ function GroupEditor({
       </div>
 
       {ACCESS_KINDS.filter(
-        (kind) => !isKnowledgeKind(kind) || catalog.hasKnowledge,
+        (kind) =>
+          (!isKnowledgeKind(kind) || catalog.hasKnowledge) &&
+          (kind !== "skills" || catalog.skills !== undefined),
       ).map((kind) => (
         <AccessField
           key={kind}
           kind={kind}
-          value={draft[kind]}
+          value={draft[kind] ?? null}
           options={options[kind]}
           empty={emptyText(kind, catalog)}
           onChange={(value) => edit({ [kind]: value })}

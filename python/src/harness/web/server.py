@@ -141,6 +141,7 @@ from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
 from harness.web import mcp_admin
 from harness.web import office as office_lib
+from harness.web import skill_admin
 from harness.web import uploads as uploads_lib
 from harness.web import user_agents as user_agents_lib
 from harness.web import workspace as workspace_lib
@@ -157,6 +158,8 @@ UPLOAD_PATH = "/api/uploads"
 UPLOAD_HEADER = "X-Harness-Upload"
 # 上傳文件到知識庫也是 multipart（和 UPLOAD_PATH 一樣的檢查）。
 _KNOWLEDGE_UPLOAD = re.compile(r"^/api/(my/)?knowledge/[\w-]+/documents$")
+# 上傳 skill 資料夾的 zip 也是。
+_SKILL_UPLOAD = re.compile(r"^/api/(admin|my)/skills/upload$")
 _UPLOAD_CHUNK = 256 * 1024
 _FILE_CHUNK = 256 * 1024
 COOKIE = "harness_session"
@@ -401,6 +404,8 @@ def create_app(
     _group_routes(routes)
     _mcp_routes(routes)
     _user_agent_routes(routes)
+    _skill_routes(routes)
+    _agent_admin_routes(routes)
     _knowledge_routes(routes)
     _personal_knowledge_routes(routes)
     _settings_routes(routes)
@@ -1037,6 +1042,194 @@ def _mcp_errors() -> Iterator[None]:
         yield
     except mcp_admin.McpAdminError as error:
         raise workspace_lib.WebError(error.status, str(error)) from error
+
+
+def _agent_admin_routes(routes: web.RouteTableDef) -> None:
+    """管理平台的公司 agent：只有管理者能看與修改。"""
+    one = "/api/admin/agents/{name:[A-Za-z][A-Za-z0-9_-]{0,39}}"
+
+    def detail(info: dict[str, Any], fields: list[str]) -> dict[str, Any]:
+        # 稽核紀錄不放指示全文，只記改了哪些欄位與用了哪些資源。
+        return {
+            "fields": fields,
+            **{key: info[key] for key in ("tools", "skills", "knowledge")},
+        }
+
+    @routes.get("/api/admin/agents")
+    async def list_agents(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(_ws(request).list_admin_agents())
+
+    @routes.post("/api/admin/agents")
+    async def create_agent(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        info = _ws(request).create_admin_agent(body)
+        _audit(
+            request,
+            "company_agent.create",
+            target=info["name"],
+            detail=detail(info, sorted(body)),
+        )
+        return _json(info, status=201)
+
+    @routes.get(one)
+    async def get_agent(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(_ws(request).admin_agent(request.match_info["name"]))
+
+    @routes.patch(one)
+    async def update_agent(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        info = _ws(request).update_admin_agent(request.match_info["name"], body)
+        _audit(
+            request,
+            "company_agent.update",
+            target=info["name"],
+            detail=detail(info, sorted(body) if isinstance(body, dict) else []),
+        )
+        return _json(info)
+
+
+def _skill_routes(routes: web.RouteTableDef) -> None:
+    """Skills：管理者管公司 skill，每個人管自己的個人 skill。"""
+    name = "{name:[a-z0-9][a-z0-9-]{0,63}}"
+    admin_one = f"/api/admin/skills/{name}"
+    my_one = f"/api/my/skills/{name}"
+
+    def detail(info: dict[str, Any]) -> dict[str, Any]:
+        # 稽核紀錄不放指示全文。
+        return {
+            key: info[key]
+            for key in ("name", "description", "enabled", "default")
+            if key in info
+        }
+
+    @routes.get("/api/admin/skills")
+    async def list_admin(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(_ws(request).list_admin_skills())
+
+    @routes.post("/api/admin/skills/upload")
+    async def upload_admin(request: web.Request) -> web.Response:
+        _require_admin(request)
+        filename, data = await _read_zip(
+            request, skill_admin.COMPANY_LIMITS.max_zip_bytes
+        )
+        info = _ws(request).upload_admin_skill(
+            data, filename, request.query.get("replace") == "1"
+        )
+        _audit(
+            request, "skill.upload", target=info["name"], detail=detail(info)
+        )
+        return _json(info, status=201)
+
+    @routes.post("/api/admin/skills")
+    async def create_admin(request: web.Request) -> web.Response:
+        _require_admin(request)
+        info = _ws(request).create_admin_skill(await _body(request))
+        _audit(
+            request, "skill.create", target=info["name"], detail=detail(info)
+        )
+        return _json(info, status=201)
+
+    @routes.get(admin_one)
+    async def get_admin(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(_ws(request).admin_skill(request.match_info["name"]))
+
+    @routes.patch(admin_one)
+    async def update_admin(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        info = _ws(request).update_admin_skill(request.match_info["name"], body)
+        changed = {**detail(info), "fields": sorted(body)}
+        _audit(request, "skill.update", target=info["name"], detail=changed)
+        return _json(info)
+
+    @routes.delete(admin_one)
+    async def delete_admin(request: web.Request) -> web.Response:
+        _require_admin(request)
+        info = _ws(request).delete_admin_skill(request.match_info["name"])
+        _audit(request, "skill.delete", target=info["name"], detail=info)
+        return _json({"ok": True})
+
+    @routes.get("/api/my/skills")
+    async def list_mine(request: web.Request) -> web.Response:
+        return _json(_ws(request).list_my_skills(_user(request)))
+
+    @routes.post("/api/my/skills/upload")
+    async def upload_mine(request: web.Request) -> web.Response:
+        filename, data = await _read_zip(
+            request, skill_admin.PERSONAL_LIMITS.max_zip_bytes
+        )
+        info = _ws(request).upload_my_skill(
+            _user(request), data, filename, request.query.get("replace") == "1"
+        )
+        _audit(
+            request,
+            "skill.personal_upload",
+            target=info["name"],
+            detail=detail(info),
+        )
+        return _json(info, status=201)
+
+    @routes.post("/api/my/skills")
+    async def create_mine(request: web.Request) -> web.Response:
+        info = _ws(request).create_my_skill(
+            _user(request), await _body(request)
+        )
+        _audit(
+            request,
+            "skill.personal_create",
+            target=info["name"],
+            detail=detail(info),
+        )
+        return _json(info, status=201)
+
+    @routes.get(my_one)
+    async def get_mine(request: web.Request) -> web.Response:
+        return _json(
+            _ws(request).my_skill(_user(request), request.match_info["name"])
+        )
+
+    @routes.patch(my_one)
+    async def update_mine(request: web.Request) -> web.Response:
+        info = _ws(request).update_my_skill(
+            _user(request), request.match_info["name"], await _body(request)
+        )
+        _audit(
+            request,
+            "skill.personal_update",
+            target=info["name"],
+            detail=detail(info),
+        )
+        return _json(info)
+
+    @routes.delete(my_one)
+    async def delete_mine(request: web.Request) -> web.Response:
+        info = _ws(request).delete_my_skill(
+            _user(request), request.match_info["name"]
+        )
+        _audit(
+            request, "skill.personal_delete", target=info["name"], detail=info
+        )
+        return _json({"ok": True})
+
+
+async def _read_zip(request: web.Request, limit: int) -> tuple[str, bytes]:
+    """讀出 multipart 表單裡的第一個檔案（skill 的 zip），超過 limit 時拒絕。"""
+    async for filename, chunks in _iter_files(request):
+        data = bytearray()
+        async for chunk in chunks:
+            data.extend(chunk)
+            if len(data) > limit:
+                raise workspace_lib.WebError(
+                    413, f"zip 檔最大 {limit // 1_000_000} MB"
+                )
+        return filename, bytes(data)
+    raise workspace_lib.WebError(400, "沒有收到檔案")
 
 
 def _user_agent_routes(routes: web.RouteTableDef) -> None:
@@ -1941,7 +2134,9 @@ def _guard_middleware(host: str, allowed_hosts: list[str], needs_login: bool):
         if not any_host and hostname.lower() not in accepted:
             raise workspace_lib.WebError(403, "不接受這個 Host 的請求")
         if request.method == "POST" and (
-            request.path == UPLOAD_PATH or _KNOWLEDGE_UPLOAD.match(request.path)
+            request.path == UPLOAD_PATH
+            or _KNOWLEDGE_UPLOAD.match(request.path)
+            or _SKILL_UPLOAD.match(request.path)
         ):
             _check_upload(request, raw_host)
             return await handler(request)

@@ -350,6 +350,9 @@ def resolve_tools(
             known = sorted({*toolsets, *project_tools})
             raise ValueError(f"找不到工具或 toolset：{name}，可用的有：{known}")
         for item in found:
+            # 內建的 web_search 和 MCP 的同名工具同時列出時，用 MCP 的。
+            if item.name in resolved and builtin.yields_to_mcp(item):
+                continue
             resolved[item.name] = item
     return list(resolved.values())
 
@@ -393,6 +396,8 @@ def _connect_servers(
             set_name in servers and builtin.is_builtin_toolset(set_name, items)
         )
         for item in items
+        # 內建的 web_search 讓給 MCP 的同名工具（見 resolve_tools）。
+        if not builtin.yields_to_mcp(item)
     }
     found: dict[str, list[tools_lib.Tool]] = {}
     for server_name, server_config in servers.items():

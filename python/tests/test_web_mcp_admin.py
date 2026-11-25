@@ -6,6 +6,7 @@ import socket
 
 import pytest
 
+from harness.builtin import websearch
 from harness.web import mcp_admin
 from harness.web import server as server_lib
 from tests import conftest
@@ -214,6 +215,40 @@ class TestMount:
 
         assert "web_search" in tools["writer"]
         assert "web_search" not in tools["main"]
+
+    async def test_builtin_web_search_gives_way_and_comes_back(
+        self, site, search_url
+    ):
+        agent = test_web_accounts.AGENT.replace("  - shell\n", "  - web\n")
+        s = await site(
+            agent=agent,
+            script=[
+                conftest.tool_response(("web_search", {"query": "台新"})),
+                conftest.text_response("好"),
+            ],
+        )
+        boss = await s.login("boss", password_of("boss"))
+        ws = workspace_of(s)
+
+        status, _ = await boss.api("POST", "/admin/mcp", webiq(search_url))
+        await ws.mcp.wait()
+        _, listed = await boss.api("GET", "/admin/mcp")
+        _, chat = await boss.api("POST", "/sessions", {"text": "查一下"})
+        await boss.wait_idle(chat["id"])
+        names = [t.name for t in ws.project.agents["main"].tools]
+
+        assert status == 201
+        assert listed["servers"][0]["status"] == "connected"
+        assert names.count("web_search") == 1
+        result = s.model.requests[1]["messages"][-1]["content"]
+        assert result == f"台新|Bearer {KEY}"
+
+        await boss.api("DELETE", "/admin/mcp/webiq")
+        tools = ws.project.agents["main"].tools
+
+        assert [t for t in tools if t.name == "web_search"] == [
+            websearch.web_search
+        ]
 
     async def test_disable_hides_the_tools(self, site, search_url):
         s = await site()

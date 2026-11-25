@@ -184,3 +184,63 @@ class TestNoFollow:
 
         assert reads > 0
         assert leaks == 0
+
+
+class TestReadDocuments:
+    """read_file 把 PDF、Word、PowerPoint、Excel 轉成文字（不需要沙盒）。"""
+
+    async def test_office_files(self, context):
+        from tests import test_knowledge_bases as samples
+
+        samples.docx(context.workdir / "規定.docx")
+        samples.pptx(context.workdir / "簡報.pptx")
+        samples.xlsx(context.workdir / "費率.xlsx")
+
+        word = await tools.invoke(
+            files.read_file, {"path": "規定.docx"}, context
+        )
+        slides = await tools.invoke(
+            files.read_file, {"path": "簡報.pptx"}, context
+        )
+        sheet = await tools.invoke(
+            files.read_file, {"path": "費率.xlsx"}, context
+        )
+
+        assert "# 請假規定" in word and "年資 | 天數" in word
+        assert slides.index("## 第 1 張投影片\n\n封面") < slides.index("第十張")
+        assert sheet == "## 費率\n\n方案 | 年費\n白金卡 | 1200"
+
+    async def test_pdf_pages_and_scanned(self, context):
+        import pypdf
+
+        writer = pypdf.PdfWriter()
+        writer.add_blank_page(width=200, height=200)
+        with open(context.workdir / "掃描.pdf", "wb") as handle:
+            writer.write(handle)
+
+        output = await tools.invoke(
+            files.read_file, {"path": "掃描.pdf"}, context
+        )
+
+        assert "沒有可以讀出的文字" in output and "OCR" in output
+
+    async def test_broken_and_binary_files(self, context):
+        (context.workdir / "壞掉.docx").write_bytes(b"not a zip")
+        (context.workdir / "舊.doc").write_bytes(b"\xd0\xcf\x11\xe0\xff\xfe")
+        (context.workdir / "圖.png").write_bytes(b"\x89PNG\r\n\x1a\n\xff")
+
+        with pytest.raises(tools.ToolError, match="無法解析 壞掉.docx"):
+            await tools.invoke(files.read_file, {"path": "壞掉.docx"}, context)
+        with pytest.raises(tools.ToolError, match="另存成 .docx"):
+            await tools.invoke(files.read_file, {"path": "舊.doc"}, context)
+        with pytest.raises(tools.ToolError, match="不是文字檔"):
+            await tools.invoke(files.read_file, {"path": "圖.png"}, context)
+
+    async def test_symlinked_document_is_refused(self, context, tmp_path):
+        from tests import test_knowledge_bases as samples
+
+        outside = samples.docx(tmp_path / "outside.docx")
+        os.symlink(outside, context.workdir / "link.docx")
+
+        with pytest.raises(paths.LinkError):
+            await tools.invoke(files.read_file, {"path": "link.docx"}, context)

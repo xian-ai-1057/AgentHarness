@@ -97,7 +97,7 @@ description: 專案的主要助手
 # tools 可以寫 toolset 名稱（tools/ 底下的檔名、mcpServers 的伺服器名稱）
 # 或單一工具名稱；整個欄位不寫的話，可以使用 tools/ 與 mcpServers 的所有
 # 工具。內建的 toolset 要明確列出才會啟用：files（讀取、搜尋、修改檔案）、
-# shell（執行指令）、plan（列出計畫）、web（讀取網頁）、sandbox（在
+# shell（執行指令）、plan（列出計畫）、web（搜尋與讀取網頁）、sandbox（在
 # Docker 容器裡執行 Python，需要 harness.yaml 的 sandbox 設定）。
 tools:
   - example
@@ -224,7 +224,8 @@ skills:
 - 使用者上傳的檔案在工作資料夾的 uploads/ 裡，訊息後面的附件說明會
   寫出完整的路徑。
 {file_hint}
-- 需要網路上的資料時用 web_fetch 讀取網頁，並附上來源網址。
+- 需要網路上的資料時先用 web_search 搜尋，再用 web_fetch 讀取網頁，
+  並附上來源網址。
 - 工作有好幾個步驟時，先用 update_plan 列出計畫，再一步一步完成。
 - 產生的檔案（報告、圖表、整理好的資料）存在工作資料夾裡（用
   run_python 時寫在 /workspace），並告訴使用者檔名。

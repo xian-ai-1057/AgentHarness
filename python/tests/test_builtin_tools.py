@@ -12,6 +12,7 @@ from harness.builtin import plan
 from harness.builtin import search
 from harness.builtin import shell
 from harness.builtin import web
+from harness.builtin import websearch
 
 
 def _write(context, files_by_path):
@@ -533,3 +534,146 @@ class TestGuardedWebFetch:
 
         assert checked
         assert len(resolved) == 1
+
+
+class TestWebSearch:
+    """web_search：搜尋服務的選擇、結果解析與錯誤。"""
+
+    @pytest.fixture(autouse=True)
+    def clean_env(self, monkeypatch):
+        for name in (
+            "HARNESS_WEB_SEARCH",
+            "SEARXNG_URL",
+            "BRAVE_API_KEY",
+            "TAVILY_API_KEY",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "http_proxy",
+            "https_proxy",
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_in_web_toolset_without_approval(self):
+        assert [item.name for item in web.TOOLS] == ["web_search", "web_fetch"]
+        assert not websearch.web_search.needs_approval
+
+    def test_provider_choice(self, monkeypatch):
+        assert websearch.provider() == "duckduckgo"
+        monkeypatch.setenv("SEARXNG_URL", "http://searx")
+        assert websearch.provider() == "searxng"
+        monkeypatch.setenv("BRAVE_API_KEY", "b")
+        assert websearch.provider() == "brave"
+        monkeypatch.setenv("TAVILY_API_KEY", "t")
+        assert websearch.provider() == "tavily"
+        monkeypatch.setenv("HARNESS_WEB_SEARCH", "searxng")
+        assert websearch.provider() == "searxng"
+        monkeypatch.setenv("HARNESS_WEB_SEARCH", "off")
+        assert websearch.provider() == "off"
+        monkeypatch.setenv("HARNESS_WEB_SEARCH", "google")
+        with pytest.raises(websearch.SearchError, match="不認得 google"):
+            websearch.provider()
+
+    def test_parse_duckduckgo(self):
+        source = (
+            '<div class="result results_links">'
+            '<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/'
+            '?uddg=https%3A%2F%2Fexample.com%2Fa&amp;rut=x">'
+            "Example <b>A</b></a>"
+            '<a class="result__snippet" href="x">第一筆 <b>摘要</b></a></div>'
+            '<div class="result result--ad">'
+            '<a class="result__a" href="https://duckduckgo.com/y.js?ad=1">廣告</a>'
+            "</div>"
+            '<div class="result"><a class="result__a" '
+            'href="https://example.org/b">B &amp; C</a></div>'
+        )
+
+        results = websearch.parse_duckduckgo(source)
+
+        assert results == [
+            {
+                "title": "Example A",
+                "url": "https://example.com/a",
+                "snippet": "第一筆 摘要",
+            },
+            {"title": "B & C", "url": "https://example.org/b", "snippet": ""},
+        ]
+
+    @pytest.fixture
+    async def searx_url(self):
+        async def search(request):
+            if request.query.get("format") != "json":
+                return aiohttp_web.Response(status=403)
+            query = request.query["q"]
+            return aiohttp_web.json_response(
+                {
+                    "results": [
+                        {
+                            "title": f"{query} {n}",
+                            "url": f"https://example.com/{n}",
+                            "content": "摘要" * 200,
+                        }
+                        for n in range(5)
+                    ]
+                }
+            )
+
+        app = aiohttp_web.Application()
+        app.router.add_get("/search", search)
+        runner = aiohttp_web.AppRunner(app)
+        await runner.setup()
+        site = aiohttp_web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}"
+        await runner.cleanup()
+
+    async def test_searxng(self, searx_url, context, monkeypatch):
+        monkeypatch.setenv("SEARXNG_URL", searx_url + "/")
+
+        output = await _call(
+            websearch.web_search, {"query": "台新", "max_results": 2}, context
+        )
+
+        lines = output.splitlines()
+        assert lines[0].startswith("搜尋「台新」的結果")
+        assert lines[2:4] == ["1. 台新 0", "   https://example.com/0"]
+        assert lines[4].endswith("…") and len(lines[4]) < 310
+        assert "3. " not in output
+
+    async def test_off_and_bad_arguments(self, context, monkeypatch):
+        monkeypatch.setenv("HARNESS_WEB_SEARCH", "off")
+        with pytest.raises(tools.ToolError, match="關閉了內建的網頁搜尋"):
+            await _call(websearch.web_search, {"query": "a"}, context)
+        with pytest.raises(tools.ToolError, match="不能是空的"):
+            await _call(websearch.web_search, {"query": "  "}, context)
+        with pytest.raises(tools.ToolError, match="max_results"):
+            await _call(
+                websearch.web_search, {"query": "a", "max_results": 50}, context
+            )
+
+    async def test_missing_key(self, context, monkeypatch):
+        monkeypatch.setenv("HARNESS_WEB_SEARCH", "brave")
+        with pytest.raises(tools.ToolError, match="BRAVE_API_KEY"):
+            await _call(websearch.web_search, {"query": "a"}, context)
+
+    def test_format_without_results(self):
+        assert "沒有找到結果" in websearch.format_results("x", [])
+
+
+def test_mcp_web_search_wins_over_builtin():
+    from harness import project as project_lib
+
+    @tools.tool
+    def web_search(query: str) -> str:
+        """MCP 的搜尋。
+
+        Args:
+            query: 關鍵字。
+        """
+        return query
+
+    toolsets = {"web": web.TOOLS, "webiq": [web_search]}
+
+    for order in (["web", "webiq"], ["webiq", "web"]):
+        found = project_lib.resolve_tools(order, toolsets, {})
+        assert [t for t in found if t.name == "web_search"] == [web_search]

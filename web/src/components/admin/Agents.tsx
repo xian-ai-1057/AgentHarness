@@ -381,8 +381,8 @@ function AgentDialog({
           <Limited
             legend="Skills"
             value={draft.skills}
-            allText="不限制：啟用的 skill 都能用（成員仍受群組限制）"
-            someText="只用勾選的 skill"
+            allText="不限制：專案的公司 skill 都列給它（不含內建的）"
+            someText="只列勾選的 skill"
             initial={catalog.skills.map((skill) => skill.name)}
             onChange={(skills) => edit({ skills })}
           >
@@ -395,6 +395,11 @@ function AgentDialog({
               onChange={(skills) => edit({ skills })}
             />
           </Limited>
+          <p className="help">
+            另外，Skills 頁設為「預設開啟」的 skill
+            每段對話都會加上，使用者也可以在輸入框的 ＋
+            選單自己挑；沒開放給他的群組、被關閉的 skill 一律不會給。
+          </p>
 
           <CheckList
             legend="預設搜尋的知識庫"

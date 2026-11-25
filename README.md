@@ -302,7 +302,7 @@ tools:
 
 | toolset | 工具 | 用途 | 需要同意 |
 |---|---|---|---|
-| `files` | `read_file` | 讀取文字檔；可用 `offset`、`limit` 只讀其中幾行 | |
+| `files` | `read_file` | 讀取文字檔；可用 `offset`、`limit` 只讀其中幾行。Python 版也直接讀 PDF、Word、PowerPoint、Excel 的文字 | |
 | | `list_dir` | 列出資料夾內容 | |
 | | `find_files` | 用 glob 樣式找檔案，例如 `*.py`、`src/**/*.ts` | |
 | | `search_files` | 用正規表示式搜尋檔案內容，回傳「路徑:行號: 內容」 | |
@@ -310,7 +310,8 @@ tools:
 | | `edit_file` | 把一段原文精準換成新文字，不必重寫整個檔案 | ✓ |
 | `shell` | `run_command` | 在專案資料夾執行指令（測試、建置、git…），回傳結束代碼與輸出 | ✓ |
 | `plan` | `update_plan` | 列出多步驟工作的計畫並更新每一步的狀態 | |
-| `web` | `web_fetch` | 讀取網址，HTML 轉成保留標題、清單與連結的純文字 | ✓ |
+| `web` | `web_search`（僅 Python 版） | 用關鍵字搜尋網路（預設 DuckDuckGo，不需要金鑰；可換 SearXNG、Brave、Tavily），見[網頁搜尋](python/README.md#網頁搜尋) | |
+| | `web_fetch` | 讀取網址，HTML 轉成保留標題、清單與連結的純文字 | ✓ |
 | `sandbox`（僅 Python 版） | `run_python` | 在拋棄式 Docker 容器裡執行 agent 寫的 Python 程式，預設沒有網路；`harness.yaml` 要有 `sandbox` 設定，見[在沙盒裡執行程式](python/README.md#在沙盒裡執行程式) | |
 
 ```markdown
@@ -628,8 +629,14 @@ harness web --port 8080     # 換埠號
   secrets、網頁上不再顯示，連不上也不影響網站。工具成為一個工具組，用
   存取群組決定誰能用；一般成員不能新增（見
   [說明文件](https://agent-harness-docs-ten.vercel.app/guide/mcp#管理平台掛載)）。
+- **公司 Agent 與 Skills**（Python 版）：管理者在「管理平台 → Agent」修改或
+  新增 `agents/*.md` 的說明、指示、工具、skills 與知識庫（存檔前先檢查，
+  有誤不儲存），在「管理平台 → Skills」新增、修改、刪除或上傳 zip 的公司
+  skill，關閉內建的、決定哪些預設開啟；要登入時每個人還能在「Skills」頁
+  建立只有自己能用的 skill（見
+  [說明文件的「在網頁上管理 skills」](https://agent-harness-docs-ten.vercel.app/advanced/skills#在網頁上管理)）。
 - **存取群組**（Python 版要登入時）：管理者在「管理平台 → 群組」決定每位
-  成員能用哪些 agent、工具組、知識庫與知識庫標籤。每位成員都屬於內建的
+  成員能用哪些 agent、工具組、知識庫、知識庫標籤與 skills。每位成員都屬於內建的
   「所有人」群組，加入其他群組後能用的是這些群組加起來的範圍；管理者不受
   限制。群組可以新增、刪除；成員可以從群組頁或成員頁加入、移出群組，
   成員頁也能刪除成員（連同他的資料一起清掉）。限制在伺服器上執行，成員直接呼叫 API 也繞不過（見

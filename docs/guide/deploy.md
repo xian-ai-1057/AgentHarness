@@ -29,6 +29,8 @@ docker compose logs harness      # 看網址與管理者 admin 自動產生的�
 
 要接上透過 LiteLLM Proxy 提供的 MCP 工具（例如網頁搜尋），見[連接 MCP 伺服器 → 用 Docker 部署時](/guide/mcp#litellm-docker)。
 
+內建的網頁搜尋 `web_search` 預設用 DuckDuckGo，不需要設定；要換成自架的 SearXNG 或 Brave、Tavily，或改用搜尋 MCP 而關掉內建的（`HARNESS_WEB_SEARCH=off`），在 `.env` 設定，見[網頁搜尋](/guide/builtin-tools#網頁搜尋)。
+
 ## 透過 proxy 連外
 
 公司網路要透過 proxy 才能連外時，在 `.env` 寫上：

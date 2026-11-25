@@ -291,7 +291,7 @@ TypeScript 版的名稱、參數與輸出都相同。內建工具**要在 agent 
 
 | toolset | 工具 | 用途 | 需要同意 |
 |---|---|---|---|
-| `files` | `read_file` | 讀取文字檔；可用 `offset`、`limit` 只讀其中幾行 | |
+| `files` | `read_file` | 讀取文字檔；可用 `offset`、`limit` 只讀其中幾行。PDF、Word（.docx）、PowerPoint（.pptx）、Excel（.xlsx）直接取出文字，不需要沙盒 | |
 | | `list_dir` | 列出資料夾內容 | |
 | | `find_files` | 用 glob 樣式找檔案，例如 `*.py`、`src/**/*.ts` | |
 | | `search_files` | 用正規表示式搜尋檔案內容，回傳「路徑:行號: 內容」 | |
@@ -299,7 +299,8 @@ TypeScript 版的名稱、參數與輸出都相同。內建工具**要在 agent 
 | | `edit_file` | 把一段原文精準換成新文字，不必重寫整個檔案 | ✓ |
 | `shell` | `run_command` | 在專案資料夾執行指令（測試、建置、git…），回傳結束代碼與輸出 | ✓ |
 | `plan` | `update_plan` | 列出多步驟工作的計畫並更新每一步的狀態 | |
-| `web` | `web_fetch` | 讀取網址，HTML 轉成保留標題、清單與連結的純文字 | ✓ |
+| `web` | `web_search` | 用關鍵字搜尋網路，回傳標題、網址與摘要（見[網頁搜尋](#網頁搜尋)） | |
+| | `web_fetch` | 讀取網址，HTML 轉成保留標題、清單與連結的純文字 | ✓ |
 
 ```markdown
 ---
@@ -322,6 +323,28 @@ skills: [code-review, debugging]
 - `update_plan` 不存任何狀態：最新一次呼叫的參數就是目前的計畫。
 - `web_fetch` 會把網址送到外部，所以預設需要同意；信任的話加上
   `permissions.allow: [web_fetch]`。它會使用 `HTTPS_PROXY` 等代理設定。
+- `read_file` 讀 PDF、.docx、.pptx、.xlsx 時用和知識庫相同的解析器，PDF
+  依頁、PowerPoint 依投影片、Excel 依工作表分段；掃描的 PDF 沒有文字層會
+  提醒要先 OCR，舊格式的 .doc、.xls、.ppt 請先另存成新格式，單檔最大
+  50 MB。要修改或產生這些檔案時改用內建的 xlsx、docx、pptx、pdf skills。
+
+### 網頁搜尋
+
+`web_search` 只送出搜尋字詞，不需要同意；agent 先搜尋，再用 `web_fetch`
+讀需要的網頁。搜尋服務用環境變數選：
+
+| 環境變數 | 說明 |
+|---|---|
+| `HARNESS_WEB_SEARCH` | `duckduckgo`（預設，不需要金鑰）、`searxng`、`brave`、`tavily`，或 `off` 關閉 |
+| `SEARXNG_URL` | 自架 SearXNG 的網址（要開啟 JSON 格式） |
+| `BRAVE_API_KEY` | Brave Search API 的金鑰 |
+| `TAVILY_API_KEY` | Tavily 的金鑰 |
+| `HARNESS_WEB_SEARCH_REGION` | DuckDuckGo 的地區，預設 `wt-wt`，例如 `tw-tzh` |
+
+沒有設定 `HARNESS_WEB_SEARCH` 時，有 `TAVILY_API_KEY`、`BRAVE_API_KEY`、
+`SEARXNG_URL` 就依序用它們，否則用 DuckDuckGo。MCP 伺服器（例如 LiteLLM
+的 webiq）提供同名的 `web_search` 時，內建的會讓位；不能直接連外的環境請
+用 MCP 搜尋並設定 `HARNESS_WEB_SEARCH=off`。
 
 在程式裡使用：
 
@@ -958,6 +981,16 @@ refund = harness.Skill(
 )
 agent = harness.Agent(name="cs", instructions="...", skills=[refund])
 ```
+
+### 在網頁上管理 skills
+
+網頁版的管理者可以在「管理平台 → Skills」新增、修改、刪除 skill，或上傳
+整個 skill 資料夾的 zip（存成專案的 `skills/<名稱>/`，馬上生效）；內建的
+skill 不能刪，但可以關閉、設成預設開啟，修改時會複製成公司版本取代它。
+存取群組可以限制每個群組能用哪些 skill。要登入時，每個人還能在側欄的
+「Skills」頁建立只有自己能用的個人 skill（存在
+`.harness/personal-skills/`，不能分享）。詳見
+[說明文件](https://agent-harness-docs-ten.vercel.app/advanced/skills#在網頁上管理)。
 
 ### 內建 skills
 

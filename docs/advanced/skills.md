@@ -39,6 +39,36 @@ requires: [run_python]                 # 選用，agent 要有這些工具才用
   使用者挑了也不會套用。
 - 載入狀態是從對話紀錄推算的，接續對話時已載入的 skill 仍然有效。
 
+## 在網頁上管理 skills {#在網頁上管理}
+
+網頁版不用碰檔案也能新增、修改與刪除 skill：
+
+- **管理平台 → Skills**（只有管理者）：列出內建與公司的 skill。
+  - **新增**：填名稱（小寫英文、數字與連字號）、說明與指示，存成專案的
+    `skills/<名稱>/SKILL.md`，馬上生效，不必重新啟動。
+  - **上傳 zip**：整個 skill 資料夾（含參考檔案與腳本）壓成 zip 上傳，
+    例如從 [Anthropic skills](https://github.com/anthropics/skills) 下載的
+    資料夾。同名時會先問要不要取代。上限 30 MB、1,000 個檔案；不接受
+    符號連結與跳出資料夾的路徑。
+  - **啟用／預設開啟**：關掉的 skill 誰都不能用（agent 設定有寫也一樣）；
+    預設開啟的每段對話都會列給 agent，其他的使用者可以在輸入框的
+    ＋ → Skills 自己勾選。設定存在 `harness.yaml` 的 `web.disabledSkills`、
+    `web.defaultSkills`。
+  - **內建的 skill 不能刪除**：修改內容時會複製一份成公司版本（連同參考
+    檔案）取代內建的；刪掉公司版本就還原成內建的。
+  - 有公司 agent 在 `skills` 欄位列出的公司 skill 不能刪，要先在
+    [管理平台 → Agent](/guide/web#公司-agent) 拿掉。
+- **群組**：[存取群組](/guide/web#存取群組) 多了「Skills」一項，可以只開放
+  某些 skill 給某個群組。
+- **Skills 頁（`/skills`，每個人都有）**：列出可以用的公司與內建 skill；
+  要登入的網頁版還可以建立**個人 skill**。個人 skill 只有建立的人看得到、
+  用得到，在自己的對話預設開啟，自建 Agent 也能勾選；不能分享，要給別人
+  用的請管理者建成公司 skill。個人 skill 不能有專屬工具，名稱不能和公司或
+  內建的 skill 相同，每人最多 50 個，zip 上限 5 MB。存在
+  `.harness/personal-skills/<帳號 id>/`，刪除成員時一併刪除。
+
+新增、修改、刪除與上傳都會記在[稽核紀錄](/guide/web#稽核紀錄)。
+
 ## 在程式裡使用
 
 ```python

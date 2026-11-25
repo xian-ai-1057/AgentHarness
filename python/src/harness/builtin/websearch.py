@@ -45,6 +45,8 @@ _BROWSER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 )
 DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
+# HTML 版擋下請求（回 202）時改用的精簡版。
+DUCKDUCKGO_LITE_URL = "https://lite.duckduckgo.com/lite/"
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
 TAVILY_URL = "https://api.tavily.com/search"
 
@@ -56,6 +58,14 @@ _DDG_RESULT = re.compile(
 _DDG_SNIPPET = re.compile(
     r'class="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)</(?:a|div|td)>'
 )
+_DDG_LITE_RESULT = re.compile(
+    r"<a[^>]*\bclass=['\"][^'\"]*\bresult-link\b[^'\"]*['\"][^>]*>"
+    r"[\s\S]*?</a>",
+)
+_DDG_LITE_SNIPPET = re.compile(
+    r"class=['\"][^'\"]*\bresult-snippet\b[^'\"]*['\"][^>]*>([\s\S]*?)</td>"
+)
+_HREF = re.compile(r"\bhref=(['\"])(.*?)\1")
 _TAG = re.compile(r"<[^>]*>")
 
 
@@ -145,22 +155,73 @@ def parse_duckduckgo(source: str) -> list[dict[str, str]]:
     return results
 
 
+def parse_duckduckgo_lite(source: str) -> list[dict[str, str]]:
+    """從 DuckDuckGo 精簡版（lite.duckduckgo.com）的頁面取出搜尋結果。
+
+    精簡版是表格：每筆結果一列連結（class="result-link"），下一列是
+    摘要（class="result-snippet"）。
+    """
+    links = list(_DDG_LITE_RESULT.finditer(source))
+    results = []
+    seen = set()
+    for index, match in enumerate(links):
+        href = _HREF.search(match.group(0))
+        url = _ddg_target(href.group(2)) if href else None
+        if url is None or url in seen:
+            continue
+        if urllib.parse.urlsplit(url).hostname in ("duckduckgo.com",):
+            continue
+        seen.add(url)
+        end = links[index + 1].start() if index + 1 < len(links) else None
+        snippet = _DDG_LITE_SNIPPET.search(source[match.end() : end])
+        results.append(
+            {
+                "title": _clean(match.group(0)) or url,
+                "url": url,
+                "snippet": _clean(snippet.group(1)) if snippet else "",
+            }
+        )
+    return results
+
+
 async def _duckduckgo(
     session: aiohttp.ClientSession, query: str, count: int
 ) -> list[dict[str, str]]:
+    """先用 HTML 版；被擋下（202 或其他錯誤）時改用精簡版再試一次。
+
+    DuckDuckGo 沒有正式的 API，會限制看起來像程式的請求，所以這是
+    盡力而為；正式部署建議用 SearXNG、Brave 或 Tavily。
+    """
     region = os.environ.get("HARNESS_WEB_SEARCH_REGION", "").strip() or "wt-wt"
-    async with session.post(
-        DUCKDUCKGO_URL,
-        data={"q": query, "kl": region},
-        headers={"User-Agent": _BROWSER_AGENT},
-    ) as response:
-        if response.status >= 400 or response.status == 202:
-            raise SearchError(
-                f"DuckDuckGo 回應 {response.status}（可能暫時限制了搜尋次數），"
-                "請稍後再試，或請管理者改用其他搜尋服務"
-            )
-        source = await response.text(errors="replace")
-    return parse_duckduckgo(source)[:count]
+    headers = {
+        "User-Agent": _BROWSER_AGENT,
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    }
+    statuses = []
+    for url, parse in (
+        (DUCKDUCKGO_URL, parse_duckduckgo),
+        (DUCKDUCKGO_LITE_URL, parse_duckduckgo_lite),
+    ):
+        async with session.post(
+            url,
+            data={"q": query, "kl": region},
+            headers={**headers, "Referer": url},
+        ) as response:
+            status = response.status
+            source = await response.text(errors="replace")
+        if status == 200:
+            results = parse(source)
+            # 頁面正常但一筆都沒有，可能真的沒有結果，也可能是驗證頁；
+            # 換精簡版再確認一次。
+            if results or url == DUCKDUCKGO_LITE_URL:
+                return results[:count]
+        statuses.append(str(status))
+    raise SearchError(
+        f"DuckDuckGo 擋下了搜尋（回應 {'、'.join(statuses)}），可能限制了"
+        "這台伺服器的搜尋次數。請改用 web_fetch 直接讀取可能的網站，或請"
+        "管理者設定 SearXNG、Brave 或 Tavily（環境變數 HARNESS_WEB_SEARCH）"
+    )
 
 
 async def _searxng(

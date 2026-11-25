@@ -598,6 +598,77 @@ class TestWebSearch:
             {"title": "B & C", "url": "https://example.org/b", "snippet": ""},
         ]
 
+    def test_parse_duckduckgo_lite(self):
+        source = (
+            '<table><tr><td>1.</td><td><a rel="nofollow" '
+            'href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fa'
+            "&amp;rut=1\" class='result-link'>Example <b>A</b></a></td></tr>"
+            "<tr><td></td><td class='result-snippet'>第一筆 <b>摘要</b>"
+            "</td></tr>"
+            '<tr><td>2.</td><td><a href="https://example.org/b" '
+            "class='result-link'>B</a></td></tr></table>"
+        )
+
+        assert websearch.parse_duckduckgo_lite(source) == [
+            {
+                "title": "Example A",
+                "url": "https://example.com/a",
+                "snippet": "第一筆 摘要",
+            },
+            {"title": "B", "url": "https://example.org/b", "snippet": ""},
+        ]
+
+    @pytest.fixture
+    async def ddg(self, monkeypatch):
+        """假的 DuckDuckGo：HTML 版照 state 回應，精簡版回一筆結果。"""
+        state = {"html": 202, "lite": 200, "calls": []}
+
+        async def html_page(request):
+            state["calls"].append("html")
+            return aiohttp_web.Response(status=state["html"], text="")
+
+        async def lite_page(request):
+            state["calls"].append("lite")
+            form = await request.post()
+            return aiohttp_web.Response(
+                status=state["lite"],
+                text=(
+                    f'<a href="https://example.com/{form["q"]}" '
+                    "class='result-link'>結果</a>"
+                ),
+                content_type="text/html",
+            )
+
+        app = aiohttp_web.Application()
+        app.router.add_post("/html/", html_page)
+        app.router.add_post("/lite/", lite_page)
+        runner = aiohttp_web.AppRunner(app)
+        await runner.setup()
+        site = aiohttp_web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        base = f"http://127.0.0.1:{port}"
+        monkeypatch.setattr(websearch, "DUCKDUCKGO_URL", f"{base}/html/")
+        monkeypatch.setattr(websearch, "DUCKDUCKGO_LITE_URL", f"{base}/lite/")
+        yield state
+        await runner.cleanup()
+
+    async def test_duckduckgo_falls_back_to_lite(self, ddg, context):
+        output = await _call(websearch.web_search, {"query": "abc"}, context)
+
+        assert ddg["calls"] == ["html", "lite"]
+        assert "https://example.com/abc" in output
+
+    async def test_duckduckgo_blocked_explains(self, ddg, context):
+        ddg["lite"] = 403
+
+        with pytest.raises(tools.ToolError) as raised:
+            await _call(websearch.web_search, {"query": "abc"}, context)
+
+        message = str(raised.value)
+        assert "202、403" in message
+        assert "web_fetch" in message and "SearXNG" in message
+
     @pytest.fixture
     async def searx_url(self):
         async def search(request):

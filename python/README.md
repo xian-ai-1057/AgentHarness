@@ -342,7 +342,9 @@ skills: [code-review, debugging]
 | `HARNESS_WEB_SEARCH_REGION` | DuckDuckGo 的地區，預設 `wt-wt`，例如 `tw-tzh` |
 
 沒有設定 `HARNESS_WEB_SEARCH` 時，有 `TAVILY_API_KEY`、`BRAVE_API_KEY`、
-`SEARXNG_URL` 就依序用它們，否則用 DuckDuckGo。MCP 伺服器（例如 LiteLLM
+`SEARXNG_URL` 就依序用它們，否則用 DuckDuckGo。DuckDuckGo 沒有正式 API、
+常會擋下伺服器的請求（被擋時先改用精簡版再試），只適合試用；正式部署
+請設定 SearXNG、Brave 或 Tavily。MCP 伺服器（例如 LiteLLM
 的 webiq）提供同名的 `web_search` 時，內建的會讓位；不能直接連外的環境請
 用 MCP 搜尋並設定 `HARNESS_WEB_SEARCH=off`。
 

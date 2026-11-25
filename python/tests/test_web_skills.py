@@ -164,6 +164,26 @@ class TestCompanySkills:
 
         assert "planning" in skill_names(project)
 
+    async def test_deleting_forgets_its_settings(self, site):
+        s = await site()
+        boss = await s.login("boss", password_of("boss"))
+        await boss.api("POST", "/admin/skills", NOTES)
+        await boss.api(
+            "PATCH",
+            "/admin/skills/meeting-notes",
+            {"default": True, "enabled": False},
+        )
+
+        status, _ = await boss.api("DELETE", "/admin/skills/meeting-notes")
+        await boss.api("POST", "/admin/skills", NOTES)
+        _, listed = await boss.api("GET", "/admin/skills")
+        state = {item["name"]: item for item in listed["skills"]}
+
+        assert status == 200
+        assert state["meeting-notes"]["enabled"]
+        assert not state["meeting-notes"]["default"]
+        assert state["docx"]["default"]
+
     async def test_groups_limit_skills(self, site):
         s = await site()
         boss = await s.login("boss", password_of("boss"))

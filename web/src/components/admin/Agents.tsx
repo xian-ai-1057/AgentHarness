@@ -127,12 +127,15 @@ export function Agents() {
                   {[
                     agent.tools === null
                       ? "工具不限制"
-                      : `工具：${agent.tools.join("、") || "無"}`,
+                      : agent.tools.length > 0
+                        ? `工具：${agent.tools.join("、")}`
+                        : "沒有勾選工具組",
+                    agent.knowledge.length > 0 &&
+                      `知識庫：${agent.knowledge.length} 個（含 search_knowledge）`,
+                    agent.otherSettings.includes("ontology") && "Ontology 工具",
                     agent.skills === null
                       ? "skills 不限制"
                       : `skills：${agent.skills.length} 個`,
-                    agent.knowledge.length > 0 &&
-                      `知識庫：${agent.knowledge.length} 個`,
                   ]
                     .filter(Boolean)
                     .join(" · ")}

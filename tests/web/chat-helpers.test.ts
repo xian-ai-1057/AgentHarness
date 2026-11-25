@@ -33,6 +33,13 @@ describe("describeStep", () => {
     expect(step("edit_file", { path: "b.py" })).toBe("修改 b.py");
   });
 
+  it("載入 skill 與讀參考檔寫成中文", () => {
+    expect(step("load_skill", { name: "docx" })).toBe("載入 skill docx");
+    expect(step("read_skill_file", { name: "docx", path: "ooxml.md" })).toBe(
+      "讀取 skill 參考檔 docx/ooxml.md",
+    );
+  });
+
   it("list_dir 沒給路徑時是目前的資料夾", () => {
     expect(step("list_dir")).toBe("列出 .");
   });

@@ -52,6 +52,10 @@ tools: [files, shell, plan]
 
 沒有設定 `HARNESS_WEB_SEARCH` 時依序看有沒有 `TAVILY_API_KEY`、`BRAVE_API_KEY`、`SEARXNG_URL`，都沒有就用 DuckDuckGo。搜尋會使用 `HTTPS_PROXY` 等代理設定。
 
+::: warning DuckDuckGo 只適合試用
+DuckDuckGo 沒有正式的 API，常會擋下伺服器發出的搜尋（回應 202）。被擋時會先改用它的精簡版再試一次，還是不行就回報錯誤，agent 會改用 `web_fetch` 直接讀可能的網站。正式部署請設定 SearXNG、Brave 或 Tavily。
+:::
+
 **已經有搜尋 MCP 的話**（例如透過 [模型中台](/guide/web#模型中台) 的 webiq）：MCP 伺服器提供同名的 `web_search` 時，內建的會讓位給 MCP 的；不想要內建搜尋就設定 `HARNESS_WEB_SEARCH=off`，或不給 agent `web` 工具組。不能直接連外的環境（例如公司網路會攔截 SSL）請用 MCP 搜尋，並關掉內建的。
 
 ## 在程式裡使用 <span class="badge-py">Python 版</span> {#在程式裡使用}

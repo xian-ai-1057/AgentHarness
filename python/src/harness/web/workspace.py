@@ -905,7 +905,34 @@ class Workspace:
         with _skill_errors(), folder.change(name):
             folder.delete(name)
             self._reload_definitions()
+        if name not in self._builtin_skills:
+            self._forget_skill_settings(name)
         return info
+
+    def _forget_skill_settings(self, name: str) -> None:
+        """刪掉的 skill 從 web.defaultSkills、disabledSkills 拿掉。
+
+        不拿掉的話，之後建立同名的 skill 會沿用舊的「預設開啟」或
+        「已關閉」。還原成內建的不算刪除，設定照舊。
+        """
+        web = dict(config_lib.read_config(self.project.root).get("web") or {})
+        changed = False
+        for key in ("defaultSkills", "disabledSkills"):
+            names = web.get(key)
+            if isinstance(names, list) and name in names:
+                web[key] = [item for item in names if item != name]
+                changed = True
+        if not changed:
+            return
+        if not web.get("disabledSkills"):
+            web.pop("disabledSkills", None)
+        try:
+            config_lib.save_block(self.project.root, "web", web)
+        except ValueError:
+            # harness.yaml 用了無法安全修改的寫法；skill 已經刪了，舊名稱
+            # 留在設定裡也不會出錯（找不到的名稱會略過）。
+            return
+        self.refresh_project()
 
     def upload_admin_skill(
         self, data: bytes, filename: str, replace: bool

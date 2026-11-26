@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resultPreview } from "../web/src/transcript.ts";
+import type { SessionDetail } from "../src/web/protocol.ts";
+import { buildTurns, resultPreview } from "../web/src/transcript.ts";
 
 describe("resultPreview", () => {
   it("把排版過的 JSON 物件壓成一行", () => {
@@ -32,5 +33,56 @@ describe("resultPreview", () => {
   it("沒有結果時回傳空字串", () => {
     expect(resultPreview(undefined)).toBe("");
     expect(resultPreview("   ")).toBe("");
+  });
+});
+
+describe("壓縮標記", () => {
+  const detail = (messages: unknown[]) =>
+    ({
+      summary: { status: "idle" },
+      approvals: [],
+      messages,
+      partial: "",
+    }) as unknown as SessionDetail;
+  const kinds = (messages: unknown[]) =>
+    buildTurns(detail(messages), {}).map((turn) => [
+      turn.user ?? "",
+      ...turn.blocks.map((block) => block.kind),
+    ]);
+  const record = (keepFrom: number) => ({
+    role: "harness",
+    type: "compaction",
+    keep_from: keepFrom,
+    summary: "摘要",
+    reason: "threshold",
+  });
+
+  it("顯示在保留的第一則訊息前面，而不是紀錄寫入的位置", () => {
+    const messages = [
+      { role: "user", content: "一" },
+      { role: "assistant", content: "答一" },
+      { role: "user", content: "二" },
+      { role: "assistant", content: "答二" },
+      record(3),
+      { role: "harness", type: "usage", tokens: 100, estimate: 90 },
+    ];
+    expect(kinds(messages)).toEqual([
+      ["一", "text"],
+      ["二", "compaction", "text"],
+    ]);
+  });
+
+  it("全部摘要時顯示在最後", () => {
+    const messages = [
+      { role: "user", content: "一" },
+      { role: "assistant", content: "答一" },
+      record(2),
+      { role: "user", content: "二" },
+      { role: "assistant", content: "答二" },
+    ];
+    expect(kinds(messages)).toEqual([
+      ["一", "text", "compaction"],
+      ["二", "text"],
+    ]);
   });
 });

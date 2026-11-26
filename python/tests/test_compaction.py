@@ -584,6 +584,17 @@ class TestContextWindow:
             196_608
         )
 
+    def test_window_follows_the_model_actually_used(self):
+        settings = harness.Compaction(
+            context_windows={"cloud": 1_000_000, "local": 196_608},
+            resolve_model=lambda model: "local",
+        )
+
+        assert compaction.context_window(settings, "cloud") == 196_608
+        assert settings == harness.Compaction(
+            context_windows={"cloud": 1_000_000, "local": 196_608}
+        )
+
     def test_unknown_model_has_no_window(self):
         settings = harness.Compaction()
 

@@ -31,7 +31,7 @@ tools: [files, shell, plan]
 
 - **所有路徑都限制在專案資料夾裡**，`../` 或絕對路徑會被拒絕；搜尋會略過 `.git`、`node_modules`、`.harness`、`.venv` 等資料夾，也不跟著符號連結走。`.harness/secrets/`（網頁上設定的金鑰）一律不能存取。
 - **`edit_file` 要求原文只出現一次**（或設定 `replace_all`），避免改錯地方；找不到或出現多次時，錯誤訊息會告訴模型怎麼修正。檔案原本的換行字元會保留。
-- **`run_command` 沒有標準輸入、有逾時**（預設 120 秒，最多 600 秒），輸出過長時保留頭尾，逾時或使用者中斷時會連同子行程一起終止。指令在專案資料夾裡執行，但指令本身能做的事不受限制，所以預設需要同意；要隔離執行 agent 寫的程式，改用 [`sandbox`](/advanced/sandbox)。
+- **`run_command` 沒有標準輸入、有逾時**（預設 120 秒，最多 600 秒），輸出過長時保留頭尾，逾時或使用者中斷時會連同子行程一起終止。指令在專案資料夾裡執行，但指令本身能做的事不受限制，所以預設需要同意；要隔離執行 agent 寫的程式，改用 [`sandbox`](/advanced/sandbox)（要登入的網頁版一律改在沙盒執行）。指令拿不到 harness 的金鑰：環境變數裡名稱含 `KEY`、`SECRET`、`TOKEN`、`PASSWORD`、`PASSWD`、`CREDENTIAL`、`PRIVATE`、`AUTH` 的都會拿掉（參考 Codex 的做法），確實需要的寫在 `HARNESS_SHELL_KEEP_ENV`（逗號分隔，例如 `GH_TOKEN,NPM_TOKEN`）。
 - **`update_plan` 不存任何狀態**：每次傳入完整的步驟清單，最新一次呼叫就是目前的計畫，對話紀錄裡看得到、接續對話時也還在（同 Codex 的做法）。
 - **`web_fetch` 會把網址送到外部**，所以預設需要同意。信任的話在 `harness.yaml` 加上 `permissions.allow: [web_fetch]`。它會使用 `HTTPS_PROXY` 等代理設定。
 - **`read_file` 讀文件不需要沙盒** <span class="badge-py">Python 版</span>：PDF、.docx、.pptx、.xlsx 用和知識庫相同的解析器取出文字，PDF 依頁、PowerPoint 依投影片、Excel 依工作表分段，`offset`、`limit` 一樣可用。掃描的 PDF 沒有文字層，會提醒要先 OCR；舊格式的 .doc、.xls、.ppt 請先另存成新格式。單一文件最大 50 MB。要修改或產生 Office 檔與 PDF 時，改用[內建的 xlsx、docx、pptx、pdf skills](/advanced/skills#office-文件與-pdf-的-skills)（需要沙盒）。

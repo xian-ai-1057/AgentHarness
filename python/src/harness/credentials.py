@@ -13,12 +13,19 @@
 存起來的值在命令列啟動時套用到 os.environ，所以優先於啟動時的環境
 變數：使用者在網頁上改過金鑰，重新啟動後仍然有效。空字串表示「不要
 使用這個環境變數」，用來蓋掉啟動時設定的 HARNESS_BASE_URL。
+
+金鑰只給 harness 自己用：harness 啟動的程式（run_command 的指令、stdio
+MCP 伺服器）拿到的是 child_environment()，名稱像金鑰的環境變數與
+env.json 存的值都會拿掉（參考 Codex 的 shell_environment_policy）。
+MCP 伺服器需要某把金鑰時，在 harness.yaml 的 env 明確寫 ${變數}。
 """
 
 import json
 import os
 import pathlib
+import re
 import secrets
+import sys
 
 from harness import project as project_lib
 
@@ -26,6 +33,13 @@ SECRETS_DIR = project_lib.DATA_DIR / "secrets"
 ENV_FILE = "env.json"
 PASSWORD_FILE = "web-password"
 _PASSWORD_BYTES = 18
+# 名稱含這些字的環境變數視為金鑰，不交給 harness 啟動的程式。
+_SECRET_NAME = re.compile(
+    r"KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIAL|PRIVATE|AUTH",
+    re.IGNORECASE,
+)
+# 要讓 run_command 的指令照樣拿到的變數（逗號分隔），例如 GH_TOKEN。
+KEEP_ENV = "HARNESS_SHELL_KEEP_ENV"
 
 
 def secrets_dir(root: str | pathlib.Path) -> pathlib.Path:
@@ -126,6 +140,66 @@ def web_password(root: str | pathlib.Path) -> tuple[str, bool]:
     password = secrets.token_urlsafe(_PASSWORD_BYTES)
     write_private(path, password + "\n")
     return password, True
+
+
+def is_secret_name(name: str) -> bool:
+    """這個環境變數的名稱看起來是不是金鑰、通行碼或密碼。"""
+    return bool(_SECRET_NAME.search(name))
+
+
+def child_environment(
+    root: str | pathlib.Path | None = None,
+    keep: tuple[str, ...] = (),
+) -> dict[str, str]:
+    """交給 harness 啟動的程式的環境變數：拿掉金鑰。
+
+    拿掉名稱像金鑰的變數（含 KEY、SECRET、TOKEN、PASSWORD 等字），以及
+    專案 env.json 存的所有值（網頁上填的金鑰與端點）。
+
+    Args:
+        root: 專案根目錄；None 表示不看 env.json。
+        keep: 照樣保留的變數名稱。環境變數 HARNESS_SHELL_KEEP_ENV（逗號
+            分隔）列的也會保留。
+
+    Returns:
+        新的 dict，不影響 os.environ。
+    """
+    saved = set(load(root)) if root is not None else set()
+    kept = {
+        *keep,
+        *(
+            item.strip()
+            for item in os.environ.get(KEEP_ENV, "").split(",")
+            if item.strip()
+        ),
+    }
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in kept or not (is_secret_name(name) or name in saved)
+    }
+
+
+def protect_process() -> bool:
+    """讓同一個使用者的其他程式讀不到這個行程的記憶體與環境變數。
+
+    Linux 上同一個使用者的程式可以讀 /proc/<pid>/environ（啟動時的環境
+    變數，例如 .env 裡的金鑰）或用 ptrace 讀記憶體。設成不可 dump 之後
+    只有 root 能讀。帳號模式的網頁版啟動時呼叫。
+
+    Returns:
+        是否設定成功；不是 Linux 或呼叫失敗時為 False。
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        pr_set_dumpable = 4
+        return libc.prctl(pr_set_dumpable, 0, 0, 0, 0) == 0
+    except (OSError, AttributeError):
+        return False
 
 
 def _set_environment(values: dict[str, str]) -> None:

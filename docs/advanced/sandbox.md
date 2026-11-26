@@ -18,6 +18,7 @@ sandbox:
   cpus: 1                       # 可用的 CPU 數，預設 1
   network: false                # 是否允許連網，預設 false
   command: docker               # 或 podman
+  runtime: runsc                # 選用：容器的 runtime，例如 gVisor 的 runsc（主機要先安裝）
   notes: 已安裝 pandas、numpy、openpyxl、pdfplumber、python-docx、python-pptx、matplotlib。
 ```
 
@@ -134,6 +135,11 @@ docker build -t harness-sandbox -f docker/sandbox.Dockerfile .
 | `HARNESS_SANDBOX_IMAGE` | 沒寫 `sandbox.image` 時使用的映像檔 |
 | `HARNESS_SANDBOX_NOTES` | 沒寫 `sandbox.notes` 時附在工具說明後面的文字 |
 | `HARNESS_SANDBOX_VOLUME` | pyharness 自己也跑在容器裡時，專案所在的 Docker volume 名稱。沙盒改成只掛載這個 volume 裡的工作目錄（需要 Docker 26 以上） |
+| `HARNESS_SANDBOX_RUNNER` | 沙盒服務的網址（例如 `http://sandbox-runner:4322`）。設定時 pyharness 自己不執行 docker，改請沙盒服務啟動容器，平台就不必掛 Docker socket（見[快速部署 → 沙盒服務](/guide/deploy#沙盒服務)）；映像檔與 runtime 由服務決定 |
+| `HARNESS_SANDBOX_TOKEN_FILE` | 沙盒服務的通行碼檔案；服務每次啟動寫入一組新的 |
+| `HARNESS_SANDBOX_RUNTIME` | 沒寫 `sandbox.runtime` 時使用的容器 runtime，例如 gVisor 的 `runsc` |
+
+沙盒服務用 `pyharness sandbox-runner` 啟動（`docker-compose.yml` 的 `sandbox-runner`），只接受 `python -` 與 `bash -lc <指令>` 兩種執行方式，只掛載 `HARNESS_SANDBOX_VOLUME` 裡的一個子資料夾（不能是根目錄、不能含 `..`、不能是 `.harness/` 或專案的設定與程式），網路一律關閉（除非服務設定 `HARNESS_SANDBOX_ALLOW_NETWORK=1`），記憶體與 CPU 不超過服務的 `HARNESS_SANDBOX_MAX_MEMORY`、`HARNESS_SANDBOX_MAX_CPUS`。
 
 ## 在程式裡使用
 

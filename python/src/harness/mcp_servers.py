@@ -276,10 +276,11 @@ def connect(
                     mcp.StdioServerParameters(
                         command=command,
                         args=[str(item) for item in args or []],
-                        # 伺服器是專案自己的程式，需要完整的環境變數（虛擬
-                        # 環境、資料庫連線設定…），所以不用 SDK 預設的精簡
-                        # 環境。
-                        env={**os.environ, **(env or {})},
+                        # 伺服器是專案自己的程式，需要一般的環境變數（虛擬
+                        # 環境、proxy…），所以不用 SDK 預設的精簡環境；但
+                        # 拿掉 harness 的金鑰，要用的金鑰請在設定的 env
+                        # 明確寫 ${變數}（見 credentials.child_environment）。
+                        env={**_child_environment(), **(env or {})},
                         cwd=cwd,
                     ),
                     errlog=stderr.writer,
@@ -388,6 +389,13 @@ def _same_origin(url: str, other: str) -> bool:
         (second.hostname or "").lower(),
         second.port,
     )
+
+
+def _child_environment() -> dict[str, str]:
+    # 延後載入：credentials 會載入 project，而 project 會載入這個模組。
+    from harness import credentials
+
+    return credentials.child_environment()
 
 
 def expand_env(text: str, where: str = "設定") -> str:

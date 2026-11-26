@@ -163,6 +163,8 @@ export function describeDetail(entry: AuditEntry): string {
     case "knowledge.document_delete":
     case "knowledge.personal_document_delete":
       return String(detail.path ?? "");
+    case "knowledge.delete":
+      return detail.filesDeleted ? "一併刪除了文件與索引" : "";
     case "knowledge.document_info": {
       const parts = [
         String(detail.path ?? ""),

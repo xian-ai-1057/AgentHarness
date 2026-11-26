@@ -52,11 +52,13 @@ from typing import Any
 
 from harness import agents as agents_lib
 from harness import builtin
+from harness import classification as classification_lib
 from harness import compaction as compaction_lib
 from harness import credentials
 from harness import datatypes
 from harness import delegation
 from harness import knowledge as knowledge_lib
+from harness import knowledge_eval as knowledge_eval_lib
 from harness import llm
 from harness import loop
 from harness import memory as memory_lib
@@ -76,11 +78,13 @@ from harness.builtin import web as web_tools
 from harness.web import accounts as accounts_lib
 from harness.web import agent_admin
 from harness.web import categories as categories_lib
+from harness.web import classification_admin
 from harness.web import config as config_lib
 from harness.web import files as files_lib
 from harness.web import folders as folders_lib
 from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
+from harness.web import knowledge_eval as eval_web
 from harness.web import mcp_admin
 from harness.web import migration
 from harness.web import personal_knowledge as personal_lib
@@ -268,6 +272,13 @@ class _State:
     # 這一輪是手動壓縮（/compact）時，摘要要特別保留的重點；None 表示一般
     # 的一輪。
     compact_request: str | None = None
+    # 資料分級：這段對話碰過的最高等級、來源，與因此改用的模型（存在
+    # .meta.json，之後每一輪都繼續用可以處理的模型）。
+    classification: str | None = None
+    classification_sources: list[str] = dataclasses.field(default_factory=list)
+    routed_model: str | None = None
+    # 這一輪的資料分級紀錄（沒有啟用時為 None）。
+    tracker: classification_lib.Tracker | None = None
 
 
 class Workspace:
@@ -358,6 +369,17 @@ class Workspace:
         # 管理者在管理平台掛載的 MCP 伺服器；網站啟動後由 server 呼叫
         # mcp.start() 在背景連線，工具連上後才加進專案。
         self.mcp = mcp_admin.McpAdmin(project, self.refresh_project)
+        # 知識庫的題庫回歸評測（見 harness.web.knowledge_eval）。
+        self.evals = eval_web.EvalRunner(
+            eval_web.EvalStore.for_project(project.root),
+            get_base=lambda base_id: self.project.knowledge_bases.get(base_id),
+            model_fn_for=self._eval_model_fn,
+            on_finish=self._eval_finished,
+        )
+        # 評測結束時寫稽核紀錄（server 設定）。
+        self.on_eval_finished: Callable[[str, dict[str, Any]], None] | None = (
+            None
+        )
 
     def subscribe(
         self, user: accounts_lib.User, listener: Listener
@@ -520,6 +542,8 @@ class Workspace:
                 "skillAdmin": True,
                 "agentAdmin": True,
                 "personalSkills": self.auth_mode == "accounts",
+                "knowledgeGovernance": True,
+                "classification": True,
             },
             "auth": {
                 "mode": self.auth_mode,
@@ -1285,6 +1309,11 @@ class Workspace:
             }
             if admin:
                 item["maintainers"] = maintainers.get(base.id, [])
+            item["classification"] = base.classification
+            policy = self.project.classification
+            if base.classification and policy is not None:
+                item["classificationName"] = policy.name(base.classification)
+            item["evaluation"] = self._eval_brief(base.id)
             items.append(item)
         return {
             "bases": items,
@@ -1398,6 +1427,8 @@ class Workspace:
                     raise WebError(400, "要登入的帳號模式才能指定維護者")
                 self._maintainers.replace(base_id, body["maintainers"])
         self._reload_knowledge()
+        if changes:
+            self.evals.schedule(base_id, "檢索設定變更")
         return {"id": base_id}
 
     def delete_knowledge(self, base_id: str) -> None:
@@ -1426,6 +1457,7 @@ class Workspace:
             knowledge_admin.write_config(self.project.root, None, specs)
             if self._maintainers is not None:
                 self._maintainers.remove(base_id)
+        self.evals.store.forget_base(base_id)
         self._reload_knowledge()
 
     async def knowledge_documents(
@@ -1461,10 +1493,16 @@ class Workspace:
         warned = {
             warning.split("：", 1)[0] for warning in index.get("warnings", [])
         }
+        knowledge = base.knowledge
+        infos = knowledge.document_infos()
         for item in documents:
             found = details.get(item["path"])
             item["chunks"] = found["chunks"] if found else 0
             item["labels"] = found["labels"] if found else []
+            info = infos.get(item["path"])
+            item["version"] = info.to_dict() if info else {}
+            item["status"] = knowledge.document_status(item["path"])
+            item["supersededBy"] = knowledge.superseded_by(item["path"])
             if (
                 "error" not in index
                 and item["supported"]
@@ -1566,7 +1604,7 @@ class Workspace:
         """
         base = self._require_manager(user, base_id)
         with _knowledge_errors():
-            return await knowledge_admin.save_document(
+            saved = await knowledge_admin.save_document(
                 base,
                 filename,
                 chunks,
@@ -1574,6 +1612,8 @@ class Workspace:
                 directory=directory,
                 replace=replace,
             )
+        self.evals.schedule(base_id, "文件更新" if replace else "上傳文件")
+        return saved
 
     def delete_knowledge_document(
         self, user: accounts_lib.User, base_id: str, path: str
@@ -1582,6 +1622,7 @@ class Workspace:
         base = self._require_manager(user, base_id)
         with _knowledge_errors():
             knowledge_admin.delete_document(base, path)
+        self.evals.schedule(base_id, "刪除文件")
 
     async def try_knowledge(
         self, user: accounts_lib.User, base_id: str, body: dict[str, Any]
@@ -1601,12 +1642,23 @@ class Workspace:
         labels = body.get("labels")
         if labels is not None:
             labels = _string_list(labels, "labels")
+        as_of = None
+        if body.get("asOf"):
+            try:
+                as_of = datetime.date.fromisoformat(str(body["asOf"]))
+            except ValueError as error:
+                raise WebError(400, "查詢日期必須是 YYYY-MM-DD") from error
         try:
             hits = await base.knowledge.search(
-                query.strip(), top_k=max(1, min(top_k, 20)), labels=labels
+                query.strip(),
+                top_k=max(1, min(top_k, 20)),
+                labels=labels,
+                as_of=as_of,
+                all_versions=body.get("allVersions") is True,
             )
         except Exception as error:
             raise WebError(502, f"搜尋失敗：{_describe(error)}") from error
+        day = as_of or knowledge_lib.today()
         return {
             "hits": [
                 {
@@ -1616,10 +1668,288 @@ class Workspace:
                     "labels": list(hit.chunk.labels),
                     "similarity": hit.similarity,
                     "rerankScore": hit.rerank_score,
+                    "version": hit.document.describe() if hit.document else "",
+                    "status": base.knowledge.document_status(
+                        hit.chunk.source, day
+                    ),
                 }
                 for hit in hits
             ]
         }
+
+    # --- 文件版本、題庫評測與資料分級 ----------------------------------------
+
+    def set_document_info(
+        self, user: accounts_lib.User, base_id: str, path: Any, body: Any
+    ) -> dict[str, Any]:
+        """設定一份文件的版本、生效日、失效日與取代的舊版（documents.yaml）。
+
+        Raises:
+            WebError: 不能管理這個知識庫、找不到文件，或欄位不對。
+        """
+        base = self._require_manager(user, base_id)
+        knowledge = base.knowledge
+        files = knowledge.files()
+        if not isinstance(path, str) or path not in files:
+            raise WebError(404, f"知識庫裡沒有這份文件：{path}")
+        if not isinstance(body, dict):
+            raise WebError(400, "版本資訊必須是物件")
+        fields = ("version", "effective", "expires", "supersedes", "note")
+        try:
+            info = knowledge_lib.parse_document_info(
+                {key: body.get(key) for key in fields}
+            )
+        except ValueError as error:
+            raise WebError(400, str(error)) from error
+        for other in info.supersedes:
+            if other == path:
+                raise WebError(400, "文件不能取代自己")
+            if other not in files:
+                raise WebError(400, f"知識庫裡沒有要取代的文件：{other}")
+        if len(info.version) > 40 or len(info.note) > 300:
+            raise WebError(400, "版本最多 40 字、備註最多 300 字")
+        try:
+            knowledge.save_document_info(path, info)
+        except (OSError, ValueError) as error:
+            raise WebError(400, f"存不了版本資訊：{error}") from error
+        self.evals.schedule(base_id, "版本資訊變更")
+        return {
+            "path": path,
+            "version": info.to_dict(),
+            "status": knowledge.document_status(path),
+        }
+
+    def _eval_brief(self, base_id: str) -> dict[str, Any]:
+        """知識庫清單上的評測概況：題數、最近一次結果與是否執行中。"""
+        store = self.evals.store
+        runs = store.runs(base_id)
+        latest = next((run for run in runs if run["status"] == "done"), None)
+        return {
+            "questions": store.count(base_id),
+            "running": self.evals.running(base_id) is not None,
+            "latest": None
+            if latest is None
+            else {
+                "id": latest["id"],
+                "mode": latest["mode"],
+                "startedAt": latest["startedAt"],
+                "summary": latest["summary"],
+                "regressions": len(latest["regressions"]),
+            },
+        }
+
+    def eval_overview(
+        self, user: accounts_lib.User, base_id: str
+    ) -> dict[str, Any]:
+        """知識庫的題庫與評測紀錄（管理者或維護者）。"""
+        self._require_manager(user, base_id)
+        store = self.evals.store
+        access = self._access(user)
+        return {
+            "questions": [item.to_dict() for item in store.questions(base_id)],
+            "runs": store.runs(base_id),
+            "running": self.evals.running(base_id),
+            "models": [item["name"] for item in self._model_options(access)],
+            "limit": eval_web.QUESTION_LIMIT,
+        }
+
+    def add_eval_question(
+        self, user: accounts_lib.User, base_id: str, body: Any
+    ) -> dict[str, Any]:
+        self._require_manager(user, base_id)
+        with _eval_errors():
+            item = knowledge_eval_lib.checked_question(body)
+            [question_id] = self.evals.store.add(base_id, [item])
+        return {"id": question_id, **item}
+
+    def update_eval_question(
+        self, user: accounts_lib.User, base_id: str, question_id: str, body: Any
+    ) -> dict[str, Any]:
+        self._require_manager(user, base_id)
+        with _eval_errors():
+            item = knowledge_eval_lib.checked_question(body)
+            self.evals.store.update(base_id, question_id, item)
+        return {"id": question_id, **item}
+
+    def delete_eval_question(
+        self, user: accounts_lib.User, base_id: str, question_id: str
+    ) -> None:
+        self._require_manager(user, base_id)
+        with _eval_errors():
+            self.evals.store.delete(base_id, question_id)
+
+    def import_eval_questions(
+        self,
+        user: accounts_lib.User,
+        base_id: str,
+        filename: str,
+        data: bytes,
+        replace: bool = False,
+    ) -> dict[str, Any]:
+        """從 CSV 或 Excel 匯入題庫；replace 時先清掉原本的題目。"""
+        self._require_manager(user, base_id)
+        with _eval_errors():
+            items = eval_web.parse_import(filename, data)
+            if replace:
+                self.evals.store.clear(base_id)
+            ids = self.evals.store.add(base_id, items)
+        return {"added": len(ids)}
+
+    def export_eval_questions(
+        self, user: accounts_lib.User, base_id: str
+    ) -> str:
+        self._require_manager(user, base_id)
+        return eval_web.export_csv(self.evals.store.questions(base_id))
+
+    def start_eval(
+        self, user: accounts_lib.User, base_id: str, body: Any
+    ) -> dict[str, Any]:
+        """手動開始評測；body 可以有 answerModel（用模型評測回答）與 topK。"""
+        self._require_manager(user, base_id)
+        body = body if isinstance(body, dict) else {}
+        model = body.get("answerModel") or None
+        if model is not None:
+            names = [
+                item["name"] for item in self._model_options(self._access(user))
+            ]
+            if model not in names:
+                raise WebError(400, f"不能使用這個模型：{model}")
+        with _eval_errors():
+            run_id = self.evals.start(
+                base_id,
+                "手動",
+                user.display_name or user.username,
+                answer_model=model,
+                top_k=body.get("topK") or 5,
+                caller=self._caller(user, f"eval-{base_id}", "knowledge-eval"),
+            )
+        return {"id": run_id}
+
+    def eval_run(
+        self, user: accounts_lib.User, base_id: str, run_id: str
+    ) -> dict[str, Any]:
+        self._require_manager(user, base_id)
+        with _eval_errors():
+            return self.evals.store.run(base_id, run_id)
+
+    def _eval_model_fn(self, base: knowledge_lib.KnowledgeBase) -> llm.ModelFn:
+        """評測回答用的模型函式：知識庫有分級時，套用資料分級的規則。"""
+        policy = self.project.classification
+        if policy is None or not base.classification:
+            return self._model_fn
+        tracker = classification_lib.Tracker(policy)
+        tracker.note(base.classification, f"知識庫「{base.name}」")
+        return classification_lib.routed_model_fn(
+            self._model_fn,
+            tracker,
+            lambda: [item["name"] for item in self._model_options()],
+        )
+
+    def _eval_finished(self, base_id: str, run: dict[str, Any]) -> None:
+        if self.on_eval_finished is not None:
+            self.on_eval_finished(base_id, run)
+
+    def classification_settings(self) -> dict[str, Any]:
+        """管理平台的資料分級頁。"""
+        info = classification_admin.describe(self.project)
+        info["modelNames"] = [item["name"] for item in self._model_options()]
+        info["toolsetNames"] = sorted(self.project.toolsets)
+        info["bases"] = [
+            {"id": base.id, "name": base.name}
+            for base in self.project.knowledge_bases.values()
+        ]
+        info["personalEnabled"] = self.personal.limits().enabled
+        return info
+
+    def update_classification(self, body: Any) -> dict[str, Any]:
+        """儲存資料分級設定（寫進 harness.yaml）。"""
+        try:
+            classification_admin.save(self.project, body)
+        except classification_admin.ClassificationAdminError as error:
+            raise WebError(400, str(error)) from error
+        self._reload_knowledge()
+        return self.classification_settings()
+
+    def _classified_model_fn(
+        self, state: _State, user: accounts_lib.User
+    ) -> llm.ModelFn:
+        """這一輪的模型函式：有資料分級時，碰到超過模型等級的資料就改用
+        可以處理的模型（見 classification.routed_model_fn）。"""
+        policy = self.project.classification
+        if policy is None:
+            state.tracker = None
+            classification_lib.set_tracker(None)
+            return self._model_fn
+        known = policy.rank(state.classification) >= 0
+        tracker = classification_lib.Tracker(
+            policy,
+            level=state.classification if known else None,
+            sources=list(state.classification_sources) if known else [],
+        )
+        state.tracker = tracker
+        classification_lib.set_tracker(tracker)
+        allowed = [
+            item["name"] for item in self._model_options(self._access(user))
+        ]
+
+        def on_route(_original: str, chosen: str) -> None:
+            if state.routed_model == chosen and (
+                state.classification == tracker.level
+            ):
+                return
+            self._keep_classification(state)
+            self._touch(state)
+
+        return classification_lib.routed_model_fn(
+            self._model_fn, tracker, lambda: allowed, on_route
+        )
+
+    def _keep_classification(self, state: _State) -> None:
+        """把這一輪碰到的資料等級與改用的模型記在對話狀態（會存檔）。"""
+        tracker = state.tracker
+        if tracker is None or tracker.level is None:
+            return
+        state.classification = tracker.level
+        state.classification_sources = list(tracker.sources)
+        if tracker.routed and tracker.model:
+            state.routed_model = tracker.model
+
+    def _classification_info(self, state: _State) -> dict[str, Any] | None:
+        """對話摘要裡的資料分級：等級、名稱、來源與改用的模型。"""
+        if state.classification is None:
+            return None
+        policy = self.project.classification
+        return {
+            "level": state.classification,
+            "name": policy.name(state.classification)
+            if policy is not None
+            else state.classification,
+            "sources": state.classification_sources,
+            "model": state.routed_model,
+        }
+
+    def _classified_agent(self, agent: agents_lib.Agent) -> agents_lib.Agent:
+        """分級的工具組裡的工具，執行後記下資料等級。"""
+        policy = self.project.classification
+        if policy is None or not policy.toolsets:
+            return agent
+        levels: dict[str, tuple[str, str]] = {}
+        for set_name, level in policy.toolsets.items():
+            for item in self.project.toolsets.get(set_name, []):
+                levels[item.name] = (level, set_name)
+        if not levels:
+            return agent
+
+        def convert(item: tools_lib.Tool) -> tools_lib.Tool:
+            found = levels.get(item.name)
+            if found is None:
+                return item
+            level, set_name = found
+            return classification_lib.classified_tool(
+                item, level, f"工具組「{set_name}」"
+            )
+
+        return _map_tools(agent, convert, {})
 
     # --- 一般使用者的知識庫頁 ----------------------------------------------
 
@@ -1824,9 +2154,16 @@ class Workspace:
         """這個人自己的個人知識庫（功能關閉或帳號停用時沒有）。"""
         if not self.personal.limits().enabled or not self._live_active(user):
             return []
-        return [
+        policy = self.project.classification
+        level = policy.personal_knowledge if policy is not None else None
+        bases = [
             self.personal.knowledge_base(item)
             for item in self.personal.owned_by(user.id)
+        ]
+        if level is None:
+            return bases
+        return [
+            dataclasses.replace(base, classification=level) for base in bases
         ]
 
     def _chat_bases(
@@ -2081,15 +2418,20 @@ class Workspace:
         user: accounts_lib.User,
         settings: compaction_lib.Compaction | None,
         instructions: str,
+        model_fn: llm.ModelFn,
     ) -> None:
-        """手動壓縮的本體（在 _execute 裡執行）。"""
+        """手動壓縮的本體（在 _execute 裡執行）。
+
+        model_fn 是這一輪的模型函式（有資料分級時已改用可以處理的模型），
+        摘要也要交給它，分級的資料才不會送到不該送的模型。
+        """
         settings = settings or compaction_lib.Compaction()
         try:
             result = await loop.compact(
                 agent,
                 state.session,
                 settings=settings,
-                model_fn=self._model_fn,
+                model_fn=model_fn,
                 memory=self._memory_for(user),
                 instructions=instructions,
             )
@@ -2660,6 +3002,7 @@ class Workspace:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        await self.evals.close()
         await self.mcp.close()
 
     def _start(
@@ -2711,12 +3054,13 @@ class Workspace:
             llm.set_caller(self._caller(user, session_id, agent.name))
             # ontology 依這一輪是誰套用群組權限（型別、動作、知識庫）。
             ontology_lib.set_viewer(self._ontology_viewer(user))
+            model_fn = self._classified_model_fn(state, user)
             compaction = await self._run_compaction()
             if state.compact_request is not None:
                 instructions = state.compact_request
                 state.compact_request = None
                 await self._compact_now(
-                    state, agent, user, compaction, instructions
+                    state, agent, user, compaction, instructions, model_fn
                 )
                 return
             events = loop.run_stream(
@@ -2728,7 +3072,7 @@ class Workspace:
                 hooks=project.hooks,
                 memory=self._memory_for(user),
                 compaction=compaction,
-                model_fn=self._model_fn,
+                model_fn=model_fn,
                 hidden=folder.hidden,
                 hide_dotfiles=folder.hide_dotfiles,
             )
@@ -2759,6 +3103,7 @@ class Workspace:
                 }
             )
         finally:
+            self._keep_classification(state)
             state.task = None
             for pending in list(state.approvals.values()):
                 if not pending.future.done():
@@ -2858,6 +3203,10 @@ class Workspace:
         """記下這則 assistant 訊息是哪個模型寫的，並存進 .meta.json。"""
         messages = state.session.messages
         model = state.run_models.get(state.replying or "")
+        tracker = state.tracker
+        if tracker is not None and tracker.routed and tracker.model:
+            # 資料分級改用了別的模型：記下實際回覆的模型。
+            model = tracker.model
         if message.get("role") != "assistant" or model is None:
             return
         # 主迴圈先把訊息存進紀錄才產生事件，所以最後一則就是它。
@@ -4185,11 +4534,12 @@ class Workspace:
         )
         user = state.run_user or accounts_lib.LOCAL_USER
         agent = _map_tools(agent, self._knowledge_converter(user), {})
-        if self.auth_mode == "local":
-            # 和加入帳號之前一樣：專案根目錄、專案自己的沙盒設定。
-            return agent
-        assert state.run_folder is not None
-        return self._scoped_agent(agent, user, state.run_folder)
+        if self.auth_mode != "local":
+            assert state.run_folder is not None
+            agent = self._scoped_agent(agent, user, state.run_folder)
+        # 本機模式和加入帳號之前一樣：專案根目錄、專案自己的沙盒設定。
+        # 資料分級最後才套用：前面的轉換靠工具物件本身辨認工具。
+        return self._classified_agent(agent)
 
     def _knowledge_converter(
         self, user: accounts_lib.User
@@ -4611,6 +4961,12 @@ class Workspace:
             meta["approvedCalls"] = sorted(state.approved_calls)
         if state.context is not None:
             meta["context"] = state.context
+        if state.classification is not None:
+            meta["classification"] = {
+                "level": state.classification,
+                "sources": state.classification_sources,
+                "model": state.routed_model,
+            }
         if (
             state.status in ("running", "waiting")
             or state.stop_reason == INTERRUPTED_STOP_REASON
@@ -4704,6 +5060,7 @@ class Workspace:
             "category": state.category,
             "agentLabel": label,
             "context": state.context,
+            "classification": self._classification_info(state),
         }
         summary.update({k: v for k, v in optional.items() if v is not None})
         return summary
@@ -4957,6 +5314,17 @@ def _user_agent_errors():
 
 
 @contextlib.contextmanager
+def _eval_errors():
+    """把評測的錯誤換成 WebError。"""
+    try:
+        yield
+    except eval_web.EvalError as error:
+        raise WebError(error.status, str(error)) from error
+    except ValueError as error:
+        raise WebError(400, str(error)) from error
+
+
+@contextlib.contextmanager
 def _knowledge_errors():
     """把 KnowledgeAdminError 轉成 WebError 的 with 區塊。"""
     try:
@@ -5080,6 +5448,17 @@ def _restore_meta(state: _State, meta: dict[str, Any]) -> None:
         value = meta.get(key)
         if _is_string_list(value):
             setattr(state, field, set(value))
+    classified = meta.get("classification")
+    if isinstance(classified, dict) and isinstance(
+        classified.get("level"), str
+    ):
+        state.classification = classified["level"]
+        sources = classified.get("sources")
+        state.classification_sources = (
+            list(sources) if _is_string_list(sources) else []
+        )
+        model = classified.get("model")
+        state.routed_model = model if isinstance(model, str) else None
 
 
 def _limit_tools(

@@ -36,6 +36,8 @@ services:
     environment:
       # 執行時（呼叫模型、讀取網頁）使用的 proxy，大小寫兩種寫法都設定。
       <<: *proxy-args
+      # 時區：知識庫依它判斷文件「今天」是否已經生效或失效（在 .env 改 TZ）。
+      TZ: ${TZ:-Asia/Taipei}
       # 沙盒：agent 寫的程式（與成員執行的指令）在另一個容器裡執行，只看得到
       # harness-data 裡這段對話的工作資料夾（private/<識別碼>/ 或共用的 shared/）。
       HARNESS_SANDBOX_IMAGE: harness-sandbox

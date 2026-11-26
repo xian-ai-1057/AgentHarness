@@ -93,6 +93,7 @@ export function adminSections(
   if (project?.features?.skillAdmin) sections.push("skills");
   if (project?.features?.mcpServers) sections.push("mcp");
   if (knowledge) sections.push("knowledge");
+  if (project?.features?.classification) sections.push("classification");
   if (accountsMode(project)) sections.push("members");
   if (accountsMode(project) && project?.features?.groups) {
     sections.push("groups");

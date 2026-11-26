@@ -142,6 +142,11 @@ export function SourcePanel({
                   {[source.base, source.location].filter(Boolean).join(" · ") ||
                     source.path}
                 </span>
+                {source.version && (
+                  <span className="subtle ch-source-version">
+                    版本：{source.version}
+                  </span>
+                )}
               </div>
               <a
                 className="btn btn-outline ch-btn-small"

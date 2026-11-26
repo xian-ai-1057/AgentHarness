@@ -105,6 +105,53 @@ describe("describeDetail", () => {
     ).toBe("a.md");
   });
 
+  it("知識庫治理：文件版本、題庫評測與資料分級", () => {
+    expect(
+      describeDetail(
+        entry("knowledge.document_info", {
+          path: "leave.md",
+          version: "2026 年版",
+          effective: "2026-01-01",
+          supersedes: ["leave-old.md"],
+        }),
+      ),
+    ).toBe(
+      "leave.md · 版本：2026 年版 · 2026-01-01 起生效 · 取代 leave-old.md",
+    );
+    expect(
+      describeDetail(
+        entry("knowledge.eval_done", {
+          trigger: "上傳文件",
+          status: "done",
+          passed: 9,
+          total: 10,
+          regressions: 1,
+        }),
+      ),
+    ).toBe("上傳文件 · 通過 9/10 · 退步 1 題");
+    expect(
+      describeDetail(
+        entry("knowledge.eval_import", {
+          file: "題庫.csv",
+          added: 3,
+          replace: true,
+        }),
+      ),
+    ).toBe("題庫.csv · 加入 3 題（換掉原本的題庫）");
+    expect(
+      describeDetail(
+        entry("settings.classification", {
+          enabled: true,
+          routeTo: "gemma",
+          knowledgeBases: { hr: "confidential" },
+        }),
+      ),
+    ).toBe("自動改用：gemma · 1 個知識庫有分級");
+    expect(
+      describeDetail(entry("settings.classification", { enabled: false })),
+    ).toBe("停用資料分級");
+  });
+
   it("登入失敗顯示原因", () => {
     expect(
       describeDetail(entry("auth.login_failed", { reason: "throttled" })),

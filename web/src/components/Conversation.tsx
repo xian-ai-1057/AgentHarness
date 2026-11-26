@@ -10,6 +10,7 @@ import {
   type Feedback,
   INTERRUPTED_STOP_REASON,
   type PermissionMode,
+  type SessionClassification,
   type SessionDetail,
   type SessionOptions,
 } from "../../../src/web/protocol.ts";
@@ -499,6 +500,9 @@ export function Conversation({ id }: { id: string }) {
         <div className="composer-wrap ch-composer-wrap">
           <div className="composer-inner">
             {plan && <PlanChecklist items={plan} />}
+            {summary.classification && (
+              <ClassificationNotice info={summary.classification} />
+            )}
             {approval && (
               <ApprovalCard
                 key={approval.id}
@@ -735,5 +739,23 @@ function ErrorCard({
         )}
       </div>
     </section>
+  );
+}
+
+/** 對話用到分級資料時的提示：等級、來源，以及因此改用的模型。 */
+function ClassificationNotice({ info }: { info: SessionClassification }) {
+  const from = info.sources.length > 0 ? `（${info.sources.join("、")}）` : "";
+  return (
+    <div className="notice ch-classified" role="status">
+      <span className="ch-classified-icon" aria-hidden="true">
+        <ShieldIcon />
+      </span>
+      <span>
+        這段對話用到「{info.name}」等級的資料{from}
+        {info.model
+          ? `，已改由可以處理的模型 ${info.model} 回覆，之後也會繼續用它。`
+          : "。"}
+      </span>
+    </div>
   );
 }

@@ -53,6 +53,18 @@ describe("知識庫出處", () => {
     expect(parseSearchResult("知識庫裡沒有找到相關的內容。")).toEqual([]);
   });
 
+  it("讀出文件版本；查詢日期的說明不算一筆出處", () => {
+    const hits = parseSearchResult(
+      [
+        "[1] 來源：人資規章 / leave.md › 特休\n版本：2026 年版，2026-01-01 起生效\n特休依年資計算。",
+        "（查詢 2025-06-01 當時有效的文件）",
+      ].join("\n\n---\n\n"),
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.version).toBe("2026 年版，2026-01-01 起生效");
+    expect(hits[0]?.excerpt).toBe("特休依年資計算。");
+  });
+
   it("每段文字對照同一輪之前最近一次搜尋；還沒搜尋過的文字不處理", () => {
     const blocks: Block[] = [
       { kind: "text", key: "t0", text: "先查一下", streaming: false },

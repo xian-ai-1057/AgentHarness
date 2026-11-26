@@ -1828,6 +1828,7 @@ class Workspace:
             self._model_fn,
             tracker,
             lambda: [item["name"] for item in self._model_options()],
+            subject="這次評測",
         )
 
     def _eval_finished(self, base_id: str, run: dict[str, Any]) -> None:

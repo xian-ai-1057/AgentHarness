@@ -374,6 +374,9 @@ def explain_error(error: BaseException) -> str | None:
     text = str(error).lower()
     status = getattr(error, "status_code", None)
     names = {item.__name__ for item in type(error).__mro__}
+    # 資料分級擋下的呼叫（harness.classification），訊息本來就是給人看的。
+    if "ClassificationError" in names:
+        return str(error)
     if any(pattern in text for pattern in _BUDGET_PATTERNS) or (
         "BudgetExceededError" in names
     ):

@@ -29,6 +29,7 @@ import time
 from collections.abc import Sequence
 from typing import Any
 
+from harness import classification as classification_lib
 from harness import datatypes
 from harness import knowledge as knowledge_lib
 from harness import llm
@@ -159,20 +160,59 @@ def source_matches(expected: str, hit: knowledge_lib.Hit) -> bool:
     路徑可以是完整的相對路徑、只有檔名，或 fnmatch 樣式（hr/*.pdf）；
     有寫位置時，結果的位置要包含這段文字。
     """
-    path, _, location = expected.partition("›")
-    path = path.strip()
-    location = location.strip()
-    source = hit.chunk.source
+    location = expected.partition("›")[2].strip()
+    if not path_matches(expected, hit.chunk.source):
+        return False
+    return not location or location in hit.chunk.location
+
+
+def path_matches(expected: str, source: str) -> bool:
+    """應該找到的文件（不含「› 位置」）和文件路徑對不對得上。"""
+    path = expected.partition("›")[0].strip()
     name = source.rsplit("/", 1)[-1]
-    matched = (
+    return (
         source == path
         or name == path
         or fnmatch.fnmatchcase(source, path)
         or fnmatch.fnmatchcase(name, path)
     )
-    if not matched:
-        return False
-    return not location or location in hit.chunk.location
+
+
+_STATUS_NAMES = {
+    "pending": "尚未生效",
+    "expired": "已失效",
+    "superseded": "已被新版取代",
+}
+
+
+def _explain_missing(
+    bases: Sequence[knowledge_lib.KnowledgeBase], expected: Sequence[str]
+) -> list[str]:
+    """應該找到的文件沒出現時，說明是不是根本沒有這份文件，或它今天
+    不在搜尋範圍（還沒生效、已失效、被取代）。"""
+    reasons = []
+    day = knowledge_lib.today()
+    for item in expected:
+        found = [
+            (base, source)
+            for base in bases
+            for source in base.knowledge.files()
+            if path_matches(item, source)
+        ]
+        label = item.partition("›")[0].strip()
+        if not found:
+            reasons.append(f"知識庫裡沒有符合「{label}」的文件")
+            continue
+        statuses = [
+            (source, base.knowledge.document_status(source, day))
+            for base, source in found
+        ]
+        if all(status != "active" for _, status in statuses):
+            reasons.extend(
+                f"「{source}」{_STATUS_NAMES.get(status, status)}，今天搜尋不到"
+                for source, status in statuses
+            )
+    return reasons
 
 
 def _normalize(text: str) -> str:
@@ -223,6 +263,7 @@ async def check_question(
                 break
         if result.rank is None:
             result.reasons.append(f"前 {top_k} 筆沒有應該找到的文件")
+            result.reasons.extend(_explain_missing(bases, question.sources))
     retrieved = "\n".join(hit.chunk.text for hit in hits)
     if question.keywords and answer_model is None:
         result.missing_keywords = missing_keywords(question.keywords, retrieved)
@@ -254,6 +295,9 @@ async def _check_answer(
             _ANSWER_SYSTEM,
             f"搜尋結果：\n\n{context}\n\n問題：{question.question}",
         )
+    except classification_lib.ClassificationError:
+        # 資料分級擋下：整次評測都會被擋，停下來，不要算成每題退步。
+        raise
     except Exception as error:  # noqa: BLE001 - 模型出錯記在這一題
         result.error = f"模型回答失敗：{llm.explain_error(error) or error}"
         result.reasons.append(result.error)
@@ -277,6 +321,8 @@ async def _check_answer(
             f"問題：{question.question}\n\n參考答案：{question.answer}\n\n"
             f"回答：{answer}",
         )
+    except classification_lib.ClassificationError:
+        raise
     except Exception as error:  # noqa: BLE001
         result.error = f"模型評分失敗：{llm.explain_error(error) or error}"
         result.reasons.append(result.error)

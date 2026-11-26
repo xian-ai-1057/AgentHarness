@@ -157,7 +157,8 @@ npm install github:xian-ai-1057/AgentHarness
 ```
 
 開發這個框架本身：`npm test` 執行測試，`npm run lint` 檢查格式，
-`npm run typecheck` 檢查型別。
+`npm run typecheck` 檢查型別。想送 PR 的話，請先看
+[參與開發](CONTRIBUTING.md)（開發環境、要跑的檢查、程式風格與文件規則）。
 
 ## 設定模型
 
@@ -770,3 +771,5 @@ Agent Harness 以 [Apache License 2.0](LICENSE) 授權，Copyright 2026
 - 第三方元件（改寫自 Anthropic 官方的 skills、字型、PDF.js、網頁版打包的
   JavaScript 套件）各自的授權列在 `NOTICE`，詳見說明文件的
   [授權](https://agent-harness-docs-ten.vercel.app/reference/license)。
+
+想參與開發（回報問題、送 PR）請見 [CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -131,6 +131,8 @@ pip install -e ".[dev]"
 pytest
 ```
 
+要送 PR 的話，請先看根目錄的 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+
 指令名稱是 `pyharness`（TypeScript 版是 `harness`，兩者可以同時安裝）。
 也可以用 `python -m harness` 執行。
 

@@ -98,6 +98,7 @@ export default defineConfig({
           { text: "閱讀原始碼", link: "/reference/source" },
           { text: "目前的限制", link: "/reference/limits" },
           { text: "授權", link: "/reference/license" },
+          { text: "參與開發", link: "/reference/contributing" },
         ],
       },
     ],

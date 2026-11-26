@@ -150,10 +150,10 @@ private/<識別碼>/                        「我的檔案」
 | 資源 | 來源 | 沒有開放時 |
 |---|---|---|
 | Agent | `agents/` 底下的 agent | 新對話看不到，也不能繼續用它的舊對話 |
-| 工具組 | 內建的 `files`、`shell` 等、`tools/` 底下的檔案、`harness.yaml` 的 `mcpServers`、[管理平台掛載的 MCP 伺服器](/guide/mcp#管理平台掛載) | 工具從 ＋ 選單與設定頁消失，執行時也不會交給模型 |
+| 工具組 | 內建的 `files`、`shell` 等、`tools/` 底下的檔案、`harness.yaml` 的 `mcpServers`、[管理平台掛載的 MCP 伺服器](/guide/mcp#管理平台掛載) | 工具從自建 Agent 的設定頁消失，執行時也不會交給模型 |
 | 知識庫 | [知識庫](#知識庫)（`knowledge/` 與 `harness.yaml` 的 `knowledgeBases`） | 對話的知識庫選單看不到，`search_knowledge` 也搜尋不到；agent 設定的知識庫全部沒有開放時，這個 agent 沒有 `search_knowledge` |
 | 知識庫標籤 | 知識庫裡文件的[標籤](/advanced/knowledge#依部門限制可以搜尋的文件) | `search_knowledge` 搜尋不到這些標籤的文件（沒有標籤的文件所有人都搜尋得到） |
-| Skills | 內建與公司的 [skills](/advanced/skills#在網頁上管理) | ＋ 選單與 Skills 頁看不到，agent 設定有寫也不會給（個人 skill 不受群組限制，只有建立的人能用） |
+| Skills | 內建與公司的 [skills](/advanced/skills#在網頁上管理) | 不會自動開啟，＋ 選單與 Skills 頁也看不到，agent 設定有寫也不會給（個人 skill 不受群組限制，只有建立的人能用） |
 
 規則：
 
@@ -177,7 +177,7 @@ private/<識別碼>/                        「我的檔案」
 | 說明 | 一句話，顯示在新對話頁與 Agent 頁 |
 | 指示 | 檔案的內文 |
 | 工具 | 「不限制」（檔案裡不寫 `tools`，專案的工具都能用）或只勾某些工具組。檔案裡寫的單一工具名稱或這裡沒列出的工具組（例如 `ontology`）會保留 |
-| Skills | 「不限制」（不寫 `skills`，專案的公司 skill 都列給它，不含內建的）或只勾某些。Skills 頁設為預設開啟的 skill 每段對話都會再加上，使用者也能在 ＋ 選單自己挑 |
+| Skills | 「不限制」（不寫 `skills`，專案的公司 skill 都列給它，不含內建的）或只勾某些。Skills 頁設為預設開啟的 skill 每段對話都會自動加上，其他的使用者能在 ＋ 選單自己挑 |
 | 預設搜尋的知識庫 | 回答前先搜尋勾選的知識庫；檔案裡設定的標籤過濾與 `topK` 會保留 |
 
 - **存檔前先檢查**：伺服器把新的檔案重新載入一次，設定有誤（例如勾了不存在的工具組）時不儲存、原本的檔案不變，並顯示原因。存好後馬上生效，不必重新啟動；已經在執行的那一輪不受影響。
@@ -394,14 +394,14 @@ web:
   allowPrivateNetworks: true
 ```
 
-## 選擇模型、工具與 skills <span class="badge-py">Python 版</span> {#選擇模型工具與-skills}
+## 選擇模型與 skills <span class="badge-py">Python 版</span> {#選擇模型工具與-skills}
 
-每段對話可以各自決定用哪個模型、哪些工具和 skills，從下一則訊息開始生效：
+每段對話可以各自決定用哪個模型、另外挑哪些 skills 與知識庫，從下一則訊息開始生效：
 
 - **模型**：輸入框右下角的模型名稱，點開可以搜尋，並標出「看得懂圖片」與「預設」。對話進行到一半也可以換。
-- **＋ 選單**：輸入框左下角的 ＋ 可以上傳檔案，或在「Skills」、「工具」、「知識庫」裡勾選這段對話要用的項目。選好的 skill、關掉的工具與改過的知識庫會以標籤顯示在輸入框裡，按 × 取消。
-- **預設開啟的 skills**：改寫自 Anthropic 官方的 skills（`xlsx`、`docx`、`pptx`、`pdf` 與其他 11 個）每段對話都開著（「＋ → Skills」裡標「預設」），agent 需要時自己載入；取消勾選就不用，輸入框顯示「已關閉 N 個預設 skill」。需要執行程式的只在有沙盒、agent 能執行程式時才開：群組沒有開放沙盒時不列出，在「＋ → 工具」取消 `run_python` 時變成灰色、不能勾選。清單可以在「管理平台 → Skills」調整（存在 `harness.yaml` 的 `web.defaultSkills`），見[在網頁上管理 skills](/advanced/skills#在網頁上管理)。自己建立的個人 skill 也預設開啟，標「我的」。
-  - 工具只能在 agent 原本就有的範圍內關閉，不能多加。
+- **＋ 選單**：輸入框左下角的 ＋ 可以上傳檔案，或在「Skills」、「知識庫」裡勾選這段對話要用的項目。選好的 skill 與改過的知識庫會以標籤顯示在輸入框裡，按 × 取消。
+- **常用的能力自動開啟、不列出來**：和 Claude 一樣，網頁搜尋、讀檔等工具與預設開啟的 skills 每段對話都能用，agent 需要時自己使用，使用者端不逐一列出，也不用勾選：＋ 選單沒有「工具」，「＋ → Skills」、Skills 頁與自建 Agent 的技能清單也不列出預設開啟的公司與內建 skill（例如 `xlsx`、`docx`、`pptx`、`pdf`），只列可以自己挑的與自己的 skill。要調整由管理者在「管理平台 → Skills」（啟用、預設開啟）與「群組」設定，管理者在 Skills 頁也看得到這些 skill（標「自動開啟」）。之前的版本在對話裡關掉的工具或預設 skill，輸入框仍會顯示「已停用 N 個工具」「已關閉 N 個預設 skill」，按 × 恢復。
+- **預設開啟的 skills**：改寫自 Anthropic 官方的 skills（`xlsx`、`docx`、`pptx`、`pdf` 與其他 11 個）每段對話都開著，agent 需要時自己載入。需要執行程式的只在有沙盒、agent 能執行程式時才開。清單可以在「管理平台 → Skills」調整（存在 `harness.yaml` 的 `web.defaultSkills`），見[在網頁上管理 skills](/advanced/skills#在網頁上管理)。自己建立的個人 skill 也預設開啟，在「＋ → Skills」標「我的」，可以取消勾選。
   - 勾選的 skill 會在送給模型的系統提示裡註明「先讀取這些 skill」。
 
 清單裡的模型來自：專案的預設模型、各個 agent 檔案寫的模型，以及 `harness.yaml` 的 `models`。要多開放幾個模型給使用者選，在 `harness.yaml` 加上：

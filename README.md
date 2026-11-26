@@ -632,8 +632,9 @@ harness web --port 8080     # 換埠號
 - **公司 Agent 與 Skills**（Python 版）：管理者在「管理平台 → Agent」修改或
   新增 `agents/*.md` 的說明、指示、工具、skills 與知識庫（存檔前先檢查，
   有誤不儲存），在「管理平台 → Skills」新增、修改、刪除或上傳 zip 的公司
-  skill，關閉內建的、決定哪些預設開啟；要登入時每個人還能在「Skills」頁
-  建立只有自己能用的 skill（見
+  skill，關閉內建的、決定哪些預設開啟。和 Claude 一樣，網頁搜尋等工具與
+  預設開啟的 skill（例如 docx、xlsx）自動可用，使用者端不列出，只有管理者
+  看得到；要登入時每個人還能在「Skills」頁建立只有自己能用的 skill（見
   [說明文件的「在網頁上管理 skills」](https://agent-harness-docs-ten.vercel.app/advanced/skills#在網頁上管理)）。
 - **存取群組**（Python 版要登入時）：管理者在「管理平台 → 群組」決定每位
   成員能用哪些 agent、工具組、知識庫、知識庫標籤與 skills。每位成員都屬於內建的

@@ -1,8 +1,11 @@
 /**
- * 輸入框左下角的 ＋ 選單：上傳檔案、選 skills、勾選這段對話要搜尋的知識庫
- * 與可以用的工具。
+ * 輸入框左下角的 ＋ 選單：上傳檔案、選 skills、勾選這段對話要搜尋的知識庫。
  *
- * Skills 與工具在同一個彈出框裡換頁顯示，手機上也好點。可以複選，所以
+ * 和 Claude 一樣，常用的能力（網頁搜尋、讀檔等工具，以及管理者設成預設
+ * 開啟的 docx、xlsx 等 skill）自動可用，這裡不逐一列出；要調整請管理者
+ * 到管理平台。這裡只列使用者自己挑的 skill（含自己的 skill）與知識庫。
+ *
+ * Skills 與知識庫在同一個彈出框裡換頁顯示，手機上也好點。可以複選，所以
  * 勾選後選單不關；送出訊息時（closeSignal 改變）才關。
  */
 
@@ -13,7 +16,6 @@ import {
   PlusIcon,
   SearchIcon,
   SparkIcon,
-  ToolIcon,
   UploadIcon,
 } from "./icons.tsx";
 import {
@@ -26,7 +28,7 @@ import {
 } from "./options.ts";
 import { focusTrigger, Popover } from "./Popover.tsx";
 
-type View = "main" | "skills" | "knowledge" | "tools";
+type View = "main" | "skills" | "knowledge";
 
 export function PlusMenu({
   options,
@@ -62,13 +64,12 @@ export function PlusMenu({
     returnTo.current = undefined;
   }, [view]);
 
-  const { skills, tools, value, knowledgeBases, defaultKnowledge } = options;
-  const enabledTools = value.tools ?? tools.map((tool) => tool.name);
+  const { skills, value, knowledgeBases, defaultKnowledge } = options;
   const searched = chosenKnowledge(value, defaultKnowledge);
   const defaults = options.defaultSkills ?? [];
   const activeDefaults = activeDefaultSkills(options);
-  // 預設開啟的排在前面，勾選狀態看有沒有被關掉。需要的工具在這段對話
-  // 被取消時不能勾選，說明要先開啟哪個工具。
+  // 預設開啟的（自己的 skill）排在前面，勾選狀態看有沒有被關掉。需要的
+  // 工具在這段對話被取消時（舊對話才會有）不能勾選。
   const skillItems = [
     ...skills.filter((skill) => defaults.includes(skill.name)),
     ...skills.filter((skill) => !defaults.includes(skill.name)),
@@ -77,7 +78,7 @@ export function PlusMenu({
     return {
       name: skill.name,
       description: missing
-        ? `要先在「工具」開啟 ${missing} 才能使用。`
+        ? `這段對話停用了 ${missing}，移除「已停用工具」標籤後才能使用。`
         : skill.description,
       // 個人 skill 只有自己能用，也是預設開啟。
       tag: skill.personal
@@ -94,15 +95,6 @@ export function PlusMenu({
   });
   const skillCount = skillItems.filter((item) => item.checked).length;
 
-  const toggleTool = (name: string) => {
-    const next = enabledTools.includes(name)
-      ? enabledTools.filter((item) => item !== name)
-      : [...enabledTools, name];
-    // 全部勾選時存成 null，表示跟著 agent 的設定。
-    const all = tools.every((tool) => next.includes(tool.name));
-    options.onChange({ tools: all ? null : next });
-  };
-
   return (
     <div className="ch-anchor" ref={anchor}>
       <button
@@ -110,7 +102,7 @@ export function PlusMenu({
         className="icon-btn ch-plus-btn"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="更多選項：上傳檔案、skills、知識庫、工具"
+        aria-label="更多選項：上傳檔案、skills、知識庫"
         onClick={() => (open ? close() : setOpen(true))}
       >
         <PlusIcon />
@@ -177,24 +169,6 @@ export function PlusMenu({
                 <ChevronIcon size={14} />
               </button>
             )}
-            {tools.length > 0 && (
-              <button
-                type="button"
-                role="menuitem"
-                className="ch-pop-item"
-                data-view="tools"
-                onClick={() => setView("tools")}
-              >
-                <ToolIcon />
-                <span className="ch-pop-main">
-                  <span className="ch-pop-title">工具</span>
-                </span>
-                <span className="ch-count">
-                  {enabledTools.length}/{tools.length}
-                </span>
-                <ChevronIcon size={14} />
-              </button>
-            )}
           </div>
         )}
         {view === "skills" && (
@@ -202,8 +176,8 @@ export function PlusMenu({
             title="Skills"
             hint={
               defaults.length > 0
-                ? "標「預設」的 skill 每段對話都開著，需要時 agent 會自己使用，取消勾選就不用；其他勾選的 skill 會請 agent 先讀過再回答。"
-                : "勾選的 skill 會請 agent 先讀過再回答。"
+                ? "標「我的」的 skill 每段對話都開著，需要時 agent 會自己使用，取消勾選就不用；其他勾選的 skill 會請 agent 先讀過再回答。常用的 skill（例如 Word、Excel）已自動開啟，不必勾選。"
+                : "勾選的 skill 會請 agent 先讀過再回答。常用的 skill（例如 Word、Excel）已自動開啟，不必勾選。"
             }
             items={skillItems}
             onToggle={(name) => options.onChange(toggleSkill(options, name))}
@@ -233,19 +207,6 @@ export function PlusMenu({
               })
             }
             onBack={() => back("knowledge")}
-          />
-        )}
-        {view === "tools" && (
-          <Checklist
-            title="工具"
-            hint="取消勾選的工具，這段對話就不會使用。"
-            items={tools.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-              checked: enabledTools.includes(tool.name),
-            }))}
-            onToggle={toggleTool}
-            onBack={() => back("tools")}
           />
         )}
         {view !== "main" && options.nextTurn && (

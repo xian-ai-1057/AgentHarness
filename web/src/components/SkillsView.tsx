@@ -5,7 +5,9 @@
  *   能用的 skill，在自己的對話預設開啟，自建 Agent 也能勾選。可以新增、
  *   修改、刪除，或上傳 skill 資料夾的 zip。不能分享；要給別人用的請管理
  *   者在管理平台建成公司 skill。
- * - 公司與內建的 skill：依所屬群組開放，這裡只列出名稱與說明。
+ * - 公司與內建的 skill：依所屬群組開放，這裡只列出名稱與說明。管理者設成
+ *   預設開啟的（例如 docx、xlsx）自動可用，和 Claude 一樣不列給一般成員，
+ *   只有管理者看得到（標「自動開啟」）。
  *
  * 參考 Claude 的 Skills 設定頁：每個 skill 是 SKILL.md（名稱、說明、指示）
  * 加上參考檔案，agent 判斷用得上時才載入。
@@ -22,6 +24,7 @@ import { api } from "../api.ts";
 import { isAdmin } from "../auth.ts";
 import { refreshProject, useStore } from "../store.ts";
 import { SparkIcon, UploadIcon } from "./chat/icons.tsx";
+import { automaticSkills } from "./chat/options.ts";
 import { AddIcon, ShieldIcon } from "./Icons.tsx";
 import { Link } from "./Sidebar.tsx";
 import { SkillDialog, useSkillUpload } from "./SkillDialog.tsx";
@@ -68,6 +71,11 @@ export function SkillsView() {
   };
 
   const admin = isAdmin(project);
+  const automatic = project ? automaticSkills(project) : new Set<string>();
+  const shared = (data?.shared ?? []).filter(
+    (item) => admin || !automatic.has(item.name),
+  );
+  const hidden = (data?.shared.length ?? 0) - shared.length;
   const full =
     data?.limits.maxSkills != null &&
     data.skills.length >= data.limits.maxSkills;
@@ -235,13 +243,21 @@ export function SkillsView() {
                     </Link>
                   )}
                 </div>
-                {data.shared.length === 0 ? (
-                  <p className="subtle kb-none">
-                    目前沒有開放給你的公司 skill。
+                {hidden > 0 && (
+                  <p className="help">
+                    常用的 skill（例如製作 Word、Excel 檔）已自動開啟，對話時
+                    agent 用得上就會使用，不用另外設定。
                   </p>
+                )}
+                {shared.length === 0 ? (
+                  hidden === 0 && (
+                    <p className="subtle kb-none">
+                      目前沒有開放給你的公司 skill。
+                    </p>
+                  )
                 ) : (
                   <ul className="kb-grid">
-                    {data.shared.map((item) => (
+                    {shared.map((item) => (
                       <li key={item.name}>
                         <div className="kb-card kb-card-static">
                           <span className="kb-card-title">
@@ -259,6 +275,14 @@ export function SkillsView() {
                             <span className="badge badge-muted">
                               {item.builtin ? "內建" : "公司"}
                             </span>
+                            {automatic.has(item.name) && (
+                              <span
+                                className="badge badge-muted"
+                                title="每段對話自動開啟，一般成員看不到這個 skill"
+                              >
+                                自動開啟
+                              </span>
+                            )}
                           </span>
                         </div>
                       </li>

@@ -10,7 +10,9 @@ import {
   activeDefaultSkills,
   agentDefaultSkills,
   agentSkills,
+  automaticSkills,
   type ComposerOptions,
+  choosableSkills,
   missingTool,
   toggleSkill,
 } from "../../web/src/components/chat/options.ts";
@@ -102,5 +104,34 @@ describe("預設開啟的 skills", () => {
     expect(toggleSkill(composer({ skills: ["planning"] }), "planning")).toEqual(
       { skills: [] },
     );
+  });
+});
+
+describe("自動開啟的 skills 不列給使用者", () => {
+  const withMine = {
+    ...project,
+    skills: [
+      ...(project.skills ?? []),
+      { ...skill("my-report"), builtin: false, personal: true },
+    ],
+    defaultSkills: [...(project.defaultSkills ?? []), "my-report"],
+  } as unknown as ProjectInfo;
+
+  it("自動開啟的是公司與內建的預設 skill，不含自己的", () => {
+    expect([...automaticSkills(withMine)]).toEqual([
+      "xlsx",
+      "docx",
+      "pptx",
+      "pdf",
+      "internal-comms",
+    ]);
+    expect(automaticSkills({} as ProjectInfo).size).toBe(0);
+  });
+
+  it("＋ 選單只列可以自己挑的與自己的 skill", () => {
+    const names = choosableSkills(withMine, agent(["run_python"])).map(
+      (item) => item.name,
+    );
+    expect(names).toEqual(["planning", "my-report"]);
   });
 });

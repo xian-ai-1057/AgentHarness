@@ -1647,6 +1647,11 @@ class TestProjectChoices:
             # 自建 Agent（本機模式也有，擁有者是本機使用者）。
             "userAgents": True,
             "mcpServers": True,
+            # 管理平台的 Skills 與 Agent 頁。
+            "skillAdmin": True,
+            "agentAdmin": True,
+            # 個人 skill 只在帳號模式（本機模式用公司 skill）。
+            "personalSkills": False,
         }
         assert info["auth"] == {
             "mode": "local",

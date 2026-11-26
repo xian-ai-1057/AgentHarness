@@ -4,7 +4,7 @@ toolsets 可在 agent 設定的 tools 欄位用名稱引用：
     files  讀取、搜尋、寫入、修改專案資料夾裡的檔案
     shell  執行命令列指令（需要使用者同意）
     plan   列出並更新多步驟工作的計畫
-    web    讀取網頁（需要使用者同意）
+    web    搜尋網路（web_search）與讀取網頁（web_fetch，需要使用者同意）
 
 內建工具不會自動給 agent：agent 沒寫 tools 欄位時只會拿到專案自己的
 工具，要用內建工具得明確列出 toolset 名稱。專案裡有同名的 toolset 時，
@@ -21,6 +21,7 @@ from harness.builtin import files
 from harness.builtin import plan
 from harness.builtin import shell
 from harness.builtin import web
+from harness.builtin import websearch
 
 TOOLSETS: dict[str, list[tools.Tool]] = {
     "files": files.TOOLS,
@@ -43,3 +44,18 @@ def is_builtin_toolset(name: str, items: list[tools.Tool]) -> bool:
         是內建 toolset 時為 True。
     """
     return TOOLSETS.get(name) is items
+
+
+def yields_to_mcp(item: tools.Tool) -> bool:
+    """這個內建工具遇到 MCP 伺服器的同名工具時，要不要讓給對方。
+
+    內建的 web_search 和很多搜尋 MCP 的工具同名（例如掛上模型中台的
+    搜尋服務）；這時用 MCP 的版本，而不是讓專案載入失敗或掛載失敗。
+
+    Args:
+        item: 工具。
+
+    Returns:
+        是會讓位的內建工具時為 True。
+    """
+    return item is websearch.web_search

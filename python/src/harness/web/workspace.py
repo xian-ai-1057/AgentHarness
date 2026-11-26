@@ -47,6 +47,7 @@ import sys
 import time
 import uuid
 from collections.abc import Callable
+from collections.abc import Iterator
 from typing import Any
 
 from harness import agents as agents_lib
@@ -73,6 +74,7 @@ from harness.builtin import paths
 from harness.builtin import shell
 from harness.builtin import web as web_tools
 from harness.web import accounts as accounts_lib
+from harness.web import agent_admin
 from harness.web import categories as categories_lib
 from harness.web import config as config_lib
 from harness.web import files as files_lib
@@ -82,6 +84,7 @@ from harness.web import knowledge_admin
 from harness.web import mcp_admin
 from harness.web import migration
 from harness.web import personal_knowledge as personal_lib
+from harness.web import skill_admin
 from harness.web import uploads as uploads_lib
 from harness.web import user_agents as user_agents_lib
 
@@ -116,6 +119,11 @@ WEB_INSTRUCTIONS = "\n".join(
 # （SKILL.md 寫了 requires: [run_python]）只在 agent 這一輪能在沙盒裡執行
 # 程式時才開。harness.yaml 的 web.defaultSkills 可以換成別的清單，[] 表示
 # 都不開。
+# skill 的來源（ProjectInfo.skills 與管理平台用）。
+SKILL_BUILTIN = "builtin"
+SKILL_COMPANY = "company"
+SKILL_PERSONAL = "personal"
+
 DEFAULT_SKILLS = (
     "xlsx",
     "docx",
@@ -328,6 +336,8 @@ class Workspace:
         # harness.yaml 的 models：管理者另外開放給使用者選的模型。
         self._model_choices = config_lib.read_model_choices(project.root)
         self._builtin_skills = project_lib.builtin_skills()
+        # 個人 skill 的快取：使用者識別碼 → skills（網頁上改過時清掉）。
+        self._personal_skill_cache: dict[str, dict[str, skills_lib.Skill]] = {}
         # 模型中台回覆的「這個人能用的模型」：使用者識別 → (到期時間, 名稱)。
         self._model_access: dict[str, tuple[float, frozenset[str] | None]] = {}
         # 管理者在管理平台掛載的 MCP 伺服器；網站啟動後由 server 呼叫
@@ -492,6 +502,9 @@ class Workspace:
                 "audit": True,
                 "userAgents": self._user_agents is not None,
                 "mcpServers": True,
+                "skillAdmin": True,
+                "agentAdmin": True,
+                "personalSkills": self.auth_mode == "accounts",
             },
             "auth": {
                 "mode": self.auth_mode,
@@ -503,13 +516,14 @@ class Workspace:
                 {
                     "name": item.name,
                     "description": item.description,
-                    "builtin": builtin_skill,
+                    "builtin": source == SKILL_BUILTIN,
                     "requires": list(item.requires),
+                    "personal": source == SKILL_PERSONAL,
                 }
-                for item, builtin_skill in self._available_skills().values()
+                for item, source in self._available_skills(user).values()
             ],
             # 每段對話預設開啟的 skills；requires 的工具 agent 沒有時不開。
-            "defaultSkills": self._default_skill_names(),
+            "defaultSkills": self._default_skill_names(user),
             "model": {
                 "config": dict(self._settings),
                 "env": {
@@ -564,6 +578,15 @@ class Workspace:
                 ],
                 "knowledge": sorted(labels),
                 "hasKnowledge": bool(project.knowledge_bases),
+                # 內建與公司的 skills（管理者關掉的也列出，群組可以先設好）。
+                "skills": [
+                    {
+                        "name": name,
+                        "description": item.description,
+                        "builtin": source == SKILL_BUILTIN,
+                    }
+                    for name, (item, source) in self._all_skills().items()
+                ],
             },
         }
 
@@ -680,6 +703,14 @@ class Workspace:
                 self._user_agents.delete(agent.id)
         for base in self.personal.owned_by(user.id):
             self.personal.delete(base.id)
+        with contextlib.suppress(skill_admin.SkillError):
+            shutil.rmtree(
+                skill_admin.personal_folder(
+                    self.project.root, user.id
+                ).directory,
+                ignore_errors=True,
+            )
+        self._personal_skill_cache.pop(user.id, None)
         self._model_access.pop(user.username, None)
         if self.auth_mode != "local":
             for directory in (
@@ -688,6 +719,508 @@ class Workspace:
             ):
                 shutil.rmtree(directory, ignore_errors=True)
         self.refresh_project()
+
+    # ---- skills：管理平台的公司 skill 與成員的個人 skill ---------------
+
+    def _company_folder(self) -> skill_admin.SkillFolder:
+        return skill_admin.SkillFolder(
+            self.project.root / "skills", skill_admin.COMPANY_LIMITS
+        )
+
+    def _skill_users(self) -> dict[str, list[str]]:
+        """專案的 agent 設定（agents/*.md）明確列出的 skill：名稱 → agent。"""
+        used: dict[str, list[str]] = {}
+        for path in sorted((self.project.root / "agents").glob("*.md")):
+            try:
+                meta, _ = project_lib.parse_frontmatter(
+                    path.read_text(encoding="utf-8")
+                )
+            except (OSError, ValueError):
+                continue
+            names = meta.get("skills") if isinstance(meta, dict) else None
+            for name in names or []:
+                agent = str(meta.get("name") or path.stem)
+                used.setdefault(str(name), []).append(agent)
+        return used
+
+    def list_admin_skills(self) -> dict[str, Any]:
+        """管理平台的 Skills 頁：內建與公司的 skill 和全站設定。"""
+        disabled = self._disabled_skills()
+        defaults = set(self._site_default_skills())
+        used = self._skill_users()
+        skills = []
+        for name, (item, source) in self._all_skills().items():
+            skills.append(
+                {
+                    "name": name,
+                    "description": item.description,
+                    "source": source,
+                    "overridesBuiltin": source == SKILL_COMPANY
+                    and name in self._builtin_skills,
+                    "enabled": name not in disabled,
+                    "default": name in defaults,
+                    "requires": list(item.requires),
+                    "tools": [tool.name for tool in item.tools],
+                    "files": len(item.resource_files()),
+                    "usedBy": used.get(name, []),
+                }
+            )
+        return {
+            "skills": skills,
+            "limits": skill_admin.COMPANY_LIMITS.info(),
+        }
+
+    def admin_skill(self, name: str) -> dict[str, Any]:
+        """一個 skill 的完整內容（編輯頁用）。
+
+        Raises:
+            WebError: 找不到（404）。
+        """
+        found = self._all_skills().get(name)
+        if found is None:
+            raise WebError(404, "找不到這個 skill")
+        item, source = found
+        if item.root is None:
+            raise WebError(404, "找不到這個 skill")
+        with _skill_errors():
+            meta, body = skill_admin.read_source(item.root)
+        info = skill_admin.source_detail(name, meta, body, item.root)
+        summary = next(
+            entry
+            for entry in self.list_admin_skills()["skills"]
+            if entry["name"] == name
+        )
+        return {**summary, **info, "source": source}
+
+    def create_admin_skill(self, body: Any) -> dict[str, Any]:
+        """新增公司 skill。
+
+        Raises:
+            WebError: 內容不對，或已經有同名的 skill（409）。
+        """
+        if not isinstance(body, dict):
+            raise WebError(400, "內容必須是物件")
+        folder = self._company_folder()
+        with _skill_errors():
+            name = skill_admin.check_name(body.get("name"))
+            description = skill_admin.check_description(body.get("description"))
+            instructions = skill_admin.check_instructions(
+                body.get("instructions")
+            )
+        if name in self._all_skills():
+            raise WebError(
+                409,
+                f"已經有 {name} 這個 skill"
+                + (
+                    "（內建）；要修改請打開它編輯"
+                    if name in self._builtin_skills
+                    else ""
+                ),
+            )
+        with _skill_errors(), folder.change(name):
+            folder.write(name, description, instructions)
+            self._reload_definitions()
+        return self.admin_skill(name)
+
+    def update_admin_skill(self, name: str, body: Any) -> dict[str, Any]:
+        """修改 skill：內容（description、instructions）、啟用與預設開啟。
+
+        改內建 skill 的內容時，先複製一份成公司版本（取代內建的）。
+
+        Raises:
+            WebError: 找不到（404）或內容不對。
+        """
+        if not isinstance(body, dict):
+            raise WebError(400, "內容必須是物件")
+        found = self._all_skills().get(name)
+        if found is None:
+            raise WebError(404, "找不到這個 skill")
+        item, source = found
+        if "description" in body or "instructions" in body:
+            assert item.root is not None
+            with _skill_errors():
+                meta, current = skill_admin.read_source(item.root)
+                description = skill_admin.check_description(
+                    body.get("description", meta.get("description"))
+                )
+                instructions = skill_admin.check_instructions(
+                    body.get("instructions", current)
+                )
+            folder = self._company_folder()
+            with _skill_errors(), folder.change(name):
+                if source == SKILL_BUILTIN:
+                    folder.copy_from(name, item.root)
+                folder.write(name, description, instructions, meta)
+                self._reload_definitions()
+        web = dict(config_lib.read_config(self.project.root).get("web") or {})
+        changed = False
+        if "enabled" in body:
+            if not isinstance(body["enabled"], bool):
+                raise WebError(400, "enabled 必須是 true 或 false")
+            off = [n for n in self._disabled_skills() if n != name]
+            if not body["enabled"]:
+                off.append(name)
+            web["disabledSkills"] = sorted(off)
+            changed = True
+        if "default" in body:
+            if not isinstance(body["default"], bool):
+                raise WebError(400, "default 必須是 true 或 false")
+            names = [n for n in self._site_default_skills() if n != name]
+            if body["default"]:
+                names.append(name)
+            web["defaultSkills"] = names
+            changed = True
+        if changed:
+            if not web.get("disabledSkills"):
+                web.pop("disabledSkills", None)
+            try:
+                config_lib.save_block(self.project.root, "web", web)
+            except ValueError as error:
+                raise WebError(400, str(error)) from error
+            self.refresh_project()
+        return self.admin_skill(name)
+
+    def delete_admin_skill(self, name: str) -> dict[str, Any]:
+        """刪除公司 skill；取代內建的公司版本刪掉後還原成內建的。
+
+        Raises:
+            WebError: 不是公司 skill（內建的只能關閉），或還有 agent 列出
+                它（409）。
+        """
+        found = self._all_skills().get(name)
+        if found is None:
+            raise WebError(404, "找不到這個 skill")
+        item, source = found
+        if source != SKILL_COMPANY:
+            raise WebError(400, "內建的 skill 不能刪除，可以關閉")
+        users = self._skill_users().get(name, [])
+        if users and name not in self._builtin_skills:
+            raise WebError(
+                409,
+                f"這些 agent 還在使用 {name}：{'、'.join(users)}；"
+                "請先到「Agent」把它拿掉",
+            )
+        info = {"name": name, "description": item.description}
+        folder = self._company_folder()
+        with _skill_errors(), folder.change(name):
+            folder.delete(name)
+            self._reload_definitions()
+        if name not in self._builtin_skills:
+            self._forget_skill_settings(name)
+        return info
+
+    def _forget_skill_settings(self, name: str) -> None:
+        """刪掉的 skill 從 web.defaultSkills、disabledSkills 拿掉。
+
+        不拿掉的話，之後建立同名的 skill 會沿用舊的「預設開啟」或
+        「已關閉」。還原成內建的不算刪除，設定照舊。
+        """
+        web = dict(config_lib.read_config(self.project.root).get("web") or {})
+        changed = False
+        for key in ("defaultSkills", "disabledSkills"):
+            names = web.get(key)
+            if isinstance(names, list) and name in names:
+                web[key] = [item for item in names if item != name]
+                changed = True
+        if not changed:
+            return
+        if not web.get("disabledSkills"):
+            web.pop("disabledSkills", None)
+        try:
+            config_lib.save_block(self.project.root, "web", web)
+        except ValueError:
+            # harness.yaml 用了無法安全修改的寫法；skill 已經刪了，舊名稱
+            # 留在設定裡也不會出錯（找不到的名稱會略過）。
+            return
+        self.refresh_project()
+
+    def upload_admin_skill(
+        self, data: bytes, filename: str, replace: bool
+    ) -> dict[str, Any]:
+        """上傳 skill 資料夾的 zip，成為公司 skill。
+
+        Raises:
+            WebError: zip 不對，或已經有同名的 skill 而沒有 replace（409）。
+        """
+        folder = self._company_folder()
+        fallback = pathlib.PurePath(filename or "").stem
+        with _skill_errors():
+            name = folder.unpack(data, fallback)
+        if name in self._all_skills() and not replace:
+            raise WebError(409, f"已經有 {name} 這個 skill，要取代它嗎？")
+        with _skill_errors(), folder.change(name):
+            folder.extract(data, fallback)
+            self._reload_definitions()
+        return self.admin_skill(name)
+
+    def _reload_definitions(self) -> None:
+        """skills/ 或 agents/ 改過之後重新讀取，再把管理者掛載的 MCP 工具
+        加回去（見 project.reload_definitions）。
+
+        Raises:
+            ValueError: 設定有誤；呼叫端還原檔案。
+        """
+        project_lib.reload_definitions(
+            self.project, skip_toolsets=set(self.mcp.names())
+        )
+        self.mcp.apply_to_agents()
+        self.refresh_project()
+
+    # ---- 管理平台的公司 agent（agents/*.md） -------------------------
+
+    def list_admin_agents(self) -> dict[str, Any]:
+        """管理平台的 Agent 頁：公司的 agent 與可以勾選的資源。"""
+        project = self.project
+        bases = list(project.knowledge_bases)
+        files = agent_admin.agent_files(project.root)
+        agents = []
+        for name, path in files.items():
+            with _agent_errors():
+                agents.append(
+                    {
+                        **agent_admin.detail(name, path, bases),
+                        "default": name == project.default_agent,
+                    }
+                )
+        mounted = set(self.mcp.names())
+        return {
+            "agents": agents,
+            "catalog": {
+                # 管理者掛載的 MCP 伺服器在「MCP 工具」頁指定 agent，寫進
+                # agent 檔的話，啟動時還沒連上會讓專案載入失敗。
+                "toolsets": [
+                    {
+                        "name": name,
+                        "builtin": builtin.is_builtin_toolset(name, items)
+                        or name == sandbox_lib.TOOLSET,
+                        "tools": [item.name for item in items],
+                    }
+                    for name, items in project.toolsets.items()
+                    if name not in mounted and name != "ontology"
+                ],
+                "skills": [
+                    {
+                        "name": name,
+                        "description": item.description,
+                        "builtin": source == SKILL_BUILTIN,
+                    }
+                    for name, (item, source) in self._all_skills().items()
+                ],
+                "knowledgeBases": [
+                    {
+                        "id": base.id,
+                        "name": base.name,
+                        "description": base.description,
+                    }
+                    for base in project.knowledge_bases.values()
+                ],
+                "mcpServers": sorted(mounted),
+            },
+        }
+
+    def admin_agent(self, name: str) -> dict[str, Any]:
+        """一個公司 agent 的內容。"""
+        path = agent_admin.agent_files(self.project.root).get(name)
+        if path is None:
+            raise WebError(404, "找不到這個 agent")
+        with _agent_errors():
+            info = agent_admin.detail(
+                name, path, list(self.project.knowledge_bases)
+            )
+        return {**info, "default": name == self.project.default_agent}
+
+    def update_admin_agent(self, name: str, body: Any) -> dict[str, Any]:
+        """修改公司 agent 的說明、指示、工具、skills 與知識庫。
+
+        先寫檔、重新載入，載入失敗（例如引用不存在的工具）時還原。
+
+        Raises:
+            WebError: 找不到（404）或內容不對。
+        """
+        path = agent_admin.agent_files(self.project.root).get(name)
+        if path is None:
+            raise WebError(404, "找不到這個 agent")
+        original = path.read_text(encoding="utf-8")
+        with _agent_errors():
+            meta, current = agent_admin.read(path)
+            meta, instructions = agent_admin.apply_changes(meta, current, body)
+        self._write_agent(
+            path, agent_admin.render(meta, instructions), original
+        )
+        return self.admin_agent(name)
+
+    def create_admin_agent(self, body: Any) -> dict[str, Any]:
+        """新增公司 agent（agents/<名稱>.md）。
+
+        Raises:
+            WebError: 內容不對，或已經有同名的 agent（409）。
+        """
+        if not isinstance(body, dict):
+            raise WebError(400, "內容必須是物件")
+        with _agent_errors():
+            name = agent_admin.check_name(body.get("name"))
+            meta, instructions = agent_admin.apply_changes(
+                {"name": name}, "", {"instructions": "", **body}
+            )
+        path = self.project.root / "agents" / f"{name}.md"
+        known = agent_admin.agent_files(self.project.root)
+        if name in self.project.agents or name in known or path.exists():
+            raise WebError(409, f"已經有 {name} 這個 agent")
+        meta.pop("name", None)
+        self._write_agent(
+            path, agent_admin.render({"name": name, **meta}, instructions), None
+        )
+        return self.admin_agent(name)
+
+    def _write_agent(
+        self, path: pathlib.Path, text: str, original: str | None
+    ) -> None:
+        """寫入 agent 檔並重新載入；失敗時還原（original 為 None 時刪掉）。"""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        try:
+            self._reload_definitions()
+        except ValueError as error:
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(original, encoding="utf-8")
+            raise WebError(400, f"設定有誤，沒有儲存：{error}") from error
+
+    def _my_folder(self, user: accounts_lib.User) -> skill_admin.SkillFolder:
+        """這個人的個人 skill 資料夾。
+
+        Raises:
+            WebError: 不是帳號模式（本機模式只有管理者，用公司 skill）。
+        """
+        if self.auth_mode != "accounts":
+            raise WebError(
+                400, "個人 skill 只在帳號模式提供；請到管理平台新增 skill"
+            )
+        with _skill_errors():
+            return skill_admin.personal_folder(self.project.root, user.id)
+
+    def list_my_skills(self, user: accounts_lib.User) -> dict[str, Any]:
+        """Skills 頁：自己的個人 skill，以及可以用的公司與內建 skill。"""
+        own = []
+        company = self._available_skills(user)
+        if self.auth_mode == "accounts":
+            folder = self._my_folder(user)
+            for name, item in skill_admin.load_personal(folder).items():
+                shadowed = company.get(name, (None, ""))[1] != SKILL_PERSONAL
+                own.append(
+                    {
+                        "name": name,
+                        "description": item.description,
+                        "requires": list(item.requires),
+                        "files": len(item.resource_files()),
+                        # 管理者後來新增了同名的公司 skill：用公司的。
+                        "shadowed": shadowed,
+                    }
+                )
+        return {
+            "enabled": self.auth_mode == "accounts",
+            "skills": own,
+            "shared": [
+                {
+                    "name": name,
+                    "description": item.description,
+                    "builtin": source == SKILL_BUILTIN,
+                }
+                for name, (item, source) in company.items()
+                if source != SKILL_PERSONAL
+            ],
+            "limits": skill_admin.PERSONAL_LIMITS.info(),
+        }
+
+    def my_skill(self, user: accounts_lib.User, name: str) -> dict[str, Any]:
+        folder = self._my_folder(user)
+        with _skill_errors():
+            return folder.detail(name)
+
+    def create_my_skill(
+        self, user: accounts_lib.User, body: Any
+    ) -> dict[str, Any]:
+        """建立個人 skill（只有自己看得到）。
+
+        Raises:
+            WebError: 內容不對、超過數量，或和自己或公司的 skill 同名（409）。
+        """
+        if not isinstance(body, dict):
+            raise WebError(400, "內容必須是物件")
+        folder = self._my_folder(user)
+        with _skill_errors():
+            name = skill_admin.check_name(body.get("name"))
+            description = skill_admin.check_description(body.get("description"))
+            instructions = skill_admin.check_instructions(
+                body.get("instructions")
+            )
+            folder.check_room(name)
+        self._check_personal_name(folder, name)
+        with _skill_errors():
+            folder.write(name, description, instructions)
+        self._personal_skill_cache.pop(user.id, None)
+        self.refresh_project()
+        return self.my_skill(user, name)
+
+    def update_my_skill(
+        self, user: accounts_lib.User, name: str, body: Any
+    ) -> dict[str, Any]:
+        if not isinstance(body, dict):
+            raise WebError(400, "內容必須是物件")
+        folder = self._my_folder(user)
+        with _skill_errors():
+            meta, current = skill_admin.read_source(folder.path(name))
+            description = skill_admin.check_description(
+                body.get("description", meta.get("description"))
+            )
+            instructions = skill_admin.check_instructions(
+                body.get("instructions", current)
+            )
+            folder.write(name, description, instructions, meta)
+        self._personal_skill_cache.pop(user.id, None)
+        self.refresh_project()
+        return self.my_skill(user, name)
+
+    def delete_my_skill(
+        self, user: accounts_lib.User, name: str
+    ) -> dict[str, Any]:
+        folder = self._my_folder(user)
+        with _skill_errors():
+            detail = folder.detail(name)
+            folder.delete(name)
+        self._personal_skill_cache.pop(user.id, None)
+        self.refresh_project()
+        return {"name": name, "description": detail["description"]}
+
+    def upload_my_skill(
+        self, user: accounts_lib.User, data: bytes, filename: str, replace: bool
+    ) -> dict[str, Any]:
+        folder = self._my_folder(user)
+        fallback = pathlib.PurePath(filename or "").stem
+        with _skill_errors():
+            name = folder.unpack(data, fallback)
+            folder.check_room(name)
+        if folder.exists(name):
+            if not replace:
+                raise WebError(409, f"已經有 {name} 這個 skill，要取代它嗎？")
+        else:
+            self._check_personal_name(folder, name)
+        with _skill_errors():
+            folder.extract(data, fallback)
+        self._personal_skill_cache.pop(user.id, None)
+        self.refresh_project()
+        return self.my_skill(user, name)
+
+    def _check_personal_name(
+        self, folder: skill_admin.SkillFolder, name: str
+    ) -> None:
+        if folder.exists(name):
+            raise WebError(409, f"你已經有 {name} 這個 skill")
+        if name in self._all_skills():
+            raise WebError(
+                409, f"已經有公司或內建的 skill 叫 {name}，請換一個名稱"
+            )
 
     async def list_knowledge(self, user: accounts_lib.User) -> dict[str, Any]:
         """管理平台的知識庫頁：這個人可以管理的知識庫。
@@ -2857,7 +3390,7 @@ class Workspace:
         ]
         skills = [
             name
-            for name in self._available_skills()
+            for name in self._available_skills(user)
             if (
                 user_agents_lib.SANDBOX_TOOLSET in toolsets
                 or name not in user_agents_lib.SANDBOX_SKILLS
@@ -2915,7 +3448,7 @@ class Workspace:
                 for base in self.project.knowledge_bases.values()
             },
         )
-        check("skills", set(self._available_skills()), "技能")
+        check("skills", set(self._available_skills(user)), "技能")
         model = body.get("model")
         if isinstance(model, str) and model.strip():
             names = {item["name"] for item in self._model_options(access)}
@@ -3009,7 +3542,7 @@ class Workspace:
         if bases:
             search = knowledge_lib.search_tool(bases, None, 5)
             tools[search.name] = search
-        available = self._available_skills()
+        available = self._available_skills(owner_id=record.owner_id)
         chosen_skills = [
             available[name][0] for name in record.skills if name in available
         ]
@@ -3203,19 +3736,79 @@ class Workspace:
             found[0] = {**found[0], "isDefault": True}
         return found
 
-    def _available_skills(self) -> dict[str, tuple[skills_lib.Skill, bool]]:
-        """專案的 skills 加上內建 skills；同名時以專案的為準。
+    def _available_skills(
+        self,
+        user: accounts_lib.User | None = None,
+        owner_id: str | None = None,
+    ) -> dict[str, tuple[skills_lib.Skill, str]]:
+        """可以用的 skills：內建的、公司的（專案 skills/，同名時取代內建
+        的），扣掉管理者關掉的（web.disabledSkills）。
+
+        Args:
+            user: 給了的話只留這個人所屬群組開放的，再加上他自己的個人
+                skill（和公司的同名時用公司的）。
+            owner_id: 沒有 user 時，加上這個人的個人 skill（自建 agent
+                組成時用；群組限制在執行時套用）。
 
         Returns:
-            以名稱為鍵，值為 (skill, 是否為內建)。
+            以名稱為鍵，值為 (skill, 來源：builtin、company 或 personal)。
         """
+        found = self._all_skills()
+        for name in self._disabled_skills():
+            found.pop(name, None)
+        if user is not None:
+            access = self._access(user)
+            found = {
+                name: value
+                for name, value in found.items()
+                if access.allows("skills", name)
+            }
+            owner_id = user.id
+        if owner_id is not None:
+            for name, item in self._personal_skills(owner_id).items():
+                found.setdefault(name, (item, SKILL_PERSONAL))
+        return dict(sorted(found.items()))
+
+    def _all_skills(self) -> dict[str, tuple[skills_lib.Skill, str]]:
+        """內建與公司的 skills（含管理者關掉的），同名時用公司的。"""
         found = {
-            name: (item, True) for name, item in self._builtin_skills.items()
+            name: (item, SKILL_BUILTIN)
+            for name, item in self._builtin_skills.items()
         }
         found.update(
-            {name: (item, False) for name, item in self.project.skills.items()}
+            {
+                name: (item, SKILL_COMPANY)
+                for name, item in self.project.skills.items()
+            }
         )
         return dict(sorted(found.items()))
+
+    def _disabled_skills(self) -> set[str]:
+        """管理者關掉的 skills（harness.yaml 的 web.disabledSkills）。"""
+        web = config_lib.read_config(self.project.root).get("web")
+        names = web.get("disabledSkills") if isinstance(web, dict) else None
+        if not isinstance(names, list):
+            return set()
+        return {str(name) for name in names}
+
+    def _personal_skills(self, owner_id: str) -> dict[str, skills_lib.Skill]:
+        """這個人的個人 skills（有快取，改過時清掉）。"""
+        if (
+            self.auth_mode != "accounts"
+            or owner_id == accounts_lib.LOCAL_USER.id
+        ):
+            return {}
+        cached = self._personal_skill_cache.get(owner_id)
+        if cached is None:
+            try:
+                folder = skill_admin.personal_folder(
+                    self.project.root, owner_id
+                )
+            except skill_admin.SkillError:
+                return {}
+            cached = skill_admin.load_personal(folder)
+            self._personal_skill_cache[owner_id] = cached
+        return cached
 
     def _checked_options(
         self,
@@ -3257,7 +3850,7 @@ class Workspace:
             options["tools"] = tools
         if "skills" in changes:
             chosen = _string_list(changes["skills"] or [], "skills")
-            available = self._available_skills()
+            available = self._available_skills(user)
             unknown = [name for name in chosen if name not in available]
             if unknown:
                 raise WebError(400, f"沒有這些 skill：{'、'.join(unknown)}")
@@ -3266,7 +3859,7 @@ class Workspace:
             off = _string_list(
                 changes["disabledSkills"] or [], "disabledSkills"
             )
-            defaults = self._default_skill_names()
+            defaults = self._default_skill_names(user)
             unknown = [name for name in off if name not in defaults]
             if unknown:
                 raise WebError(
@@ -3487,7 +4080,11 @@ class Workspace:
             # skill 載入後才開放的工具也要在清單裡，不然載入 skill 就能
             # 繞過使用者關掉的工具。
             copy.skills = [_limit_tools(item, allowed) for item in agent.skills]
-        available = self._available_skills()
+        available = self._available_skills(
+            state.run_user or accounts_lib.LOCAL_USER
+        )
+        # 管理者關掉的、群組沒有開放的 skill，agent 自己設定的也不給。
+        copy.skills = [item for item in copy.skills if item.name in available]
         usable = self._usable_tools(state, copy.tools)
         copy.skills = self._with_default_skills(state, copy, available, usable)
         # 需要的工具這一輪用不到的 skill 不列出（例如群組沒有沙盒）。
@@ -3533,22 +4130,36 @@ class Workspace:
         ]
         return copy
 
-    def _default_skill_names(self) -> list[str]:
-        """每段對話預設開啟的 skill 名稱（只留存在的）。"""
+    def _site_default_skills(self) -> list[str]:
+        """全站預設開啟的 skill 名稱（harness.yaml 的 web.defaultSkills，
+        沒寫時是 DEFAULT_SKILLS），不管存不存在。"""
         names: Any = DEFAULT_SKILLS
         web = config_lib.read_config(self.project.root).get("web")
         if isinstance(web, dict) and "defaultSkills" in web:
             names = web["defaultSkills"]
             if not isinstance(names, list):
                 names = []
-        available = self._available_skills()
-        return [str(name) for name in names if str(name) in available]
+        return [str(name) for name in names]
+
+    def _default_skill_names(
+        self, user: accounts_lib.User | None = None
+    ) -> list[str]:
+        """每段對話預設開啟的 skill 名稱（只留存在、能用的），加上這個人
+        自己的個人 skill（和 Claude 一樣，個人 skill 預設開啟）。"""
+        available = self._available_skills(user)
+        names = [n for n in self._site_default_skills() if n in available]
+        names += [
+            name
+            for name, (_, source) in available.items()
+            if source == SKILL_PERSONAL
+        ]
+        return names
 
     def _with_default_skills(
         self,
         state: _State,
         agent: agents_lib.Agent,
-        available: dict[str, tuple[skills_lib.Skill, bool]],
+        available: dict[str, tuple[skills_lib.Skill, str]],
         usable: set[str],
     ) -> list[skills_lib.Skill]:
         """agent 的 skills 加上預設開啟的，扣掉這段對話關掉的。
@@ -3556,7 +4167,9 @@ class Workspace:
         預設 skill 的 requires（例如 run_python）要都在 usable 裡才加，
         也只開放 agent 原本就有的工具。
         """
-        defaults = self._default_skill_names()
+        defaults = self._default_skill_names(
+            state.run_user or accounts_lib.LOCAL_USER
+        )
         off = set(state.options.get("disabledSkills") or []) & set(defaults)
         kept = [item for item in agent.skills if item.name not in off]
         present = {item.name for item in kept}
@@ -4027,6 +4640,26 @@ def _write_json(path: pathlib.Path, data: Any) -> None:
     temporary = path.with_name(f"{path.name}.tmp")
     temporary.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
     os.replace(temporary, path)
+
+
+@contextlib.contextmanager
+def _agent_errors() -> Iterator[None]:
+    """把 AgentAdminError 轉成 WebError。"""
+    try:
+        yield
+    except agent_admin.AgentAdminError as error:
+        raise WebError(error.status, str(error)) from error
+
+
+@contextlib.contextmanager
+def _skill_errors() -> Iterator[None]:
+    """把 SkillError 與載入設定的錯誤轉成 WebError。"""
+    try:
+        yield
+    except skill_admin.SkillError as error:
+        raise WebError(error.status, str(error)) from error
+    except ValueError as error:
+        raise WebError(400, f"設定有誤，沒有儲存：{error}") from error
 
 
 @contextlib.contextmanager

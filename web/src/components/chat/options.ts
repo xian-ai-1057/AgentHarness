@@ -130,6 +130,31 @@ export function agentSkills(
   );
 }
 
+/**
+ * 每段對話自動開啟的公司與內建 skill（例如 docx、xlsx），不含個人的。
+ * 和 Claude 一樣，這些能力自動可用，使用者端不逐一列出；要調整請管理者
+ * 到管理平台的 Skills 頁。
+ */
+export function automaticSkills(project: ProjectInfo): Set<string> {
+  const personal = new Set(
+    (project.skills ?? []).filter((s) => s.personal).map((s) => s.name),
+  );
+  return new Set(
+    (project.defaultSkills ?? []).filter((name) => !personal.has(name)),
+  );
+}
+
+/** ＋ 選單列出、讓使用者自己挑的 skills：扣掉自動開啟的。 */
+export function choosableSkills(
+  project: ProjectInfo,
+  agent: AgentInfo | undefined,
+): SkillInfo[] {
+  const automatic = automaticSkills(project);
+  return agentSkills(project, agent).filter(
+    (skill) => !automatic.has(skill.name),
+  );
+}
+
 /** agent 預設開啟的 skills（只留它用得上的）。 */
 export function agentDefaultSkills(
   project: ProjectInfo,

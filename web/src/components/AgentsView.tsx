@@ -28,6 +28,7 @@ import {
 import { api } from "../api.ts";
 import { navigate } from "../router.ts";
 import { useStore } from "../store.ts";
+import { automaticSkills } from "./chat/options.ts";
 import {
   AddIcon,
   AgentIcon,
@@ -343,11 +344,20 @@ export function AgentEditor({ id }: { id: string }) {
               .join(" · ")
           : base.description,
       })),
-      skills: (project.skills ?? []).map((skill) => ({
-        name: skill.name,
-        label: skill.name,
-        hint: skill.description,
-      })),
+      // 自動開啟的公司與內建 skill（例如 docx、xlsx）每個 Agent 都有，
+      // 不用勾，也不列出來（和一般對話的 ＋ 選單一樣）。
+      automatic: automaticSkills(project),
+      skills: (project.skills ?? [])
+        .filter((skill) => !automaticSkills(project).has(skill.name))
+        .map((skill) => ({
+          name: skill.name,
+          label: skill.name,
+          hint: skill.personal
+            ? ["我的 skill，只有你能用", skill.description]
+                .filter(Boolean)
+                .join(" · ")
+            : skill.description,
+        })),
     };
   }, [project]);
 
@@ -385,6 +395,10 @@ export function AgentEditor({ id }: { id: string }) {
       : saved
         ? "所有變更都已儲存"
         : "填好名稱就可以建立");
+  // 清單上看得到、可以自己挑的 skills（扣掉自動開啟的）。
+  const chosenSkills = draft.skills.filter(
+    (name) => !options.automatic.has(name),
+  );
   // 之前選的東西後來被收回（群組改了）時，仍然顯示出來讓人取消勾選。
   const withMissing = (
     items: { name: string; label: string; hint?: string }[],
@@ -619,20 +633,30 @@ export function AgentEditor({ id }: { id: string }) {
             value={draft.knowledgeBases}
             onChange={(knowledgeBases) => edit({ knowledgeBases })}
           />
-          {(options.skills.length > 0 || draft.skills.length > 0) && (
+          {(options.skills.length > 0 || chosenSkills.length > 0) && (
             <CheckList
               legend="技能"
-              help="遇到相關的工作時，Agent 會載入技能，照著裡面的步驟做。製作 Excel、Word、PowerPoint 與 PDF 檔的技能要搭配「執行 Python」工具。"
+              help="遇到相關的工作時，Agent 會載入技能，照著裡面的步驟做。常用的技能（例如製作 Word、Excel 檔）已自動開啟，不用勾選；這類技能要搭配「執行 Python」工具。"
               empty="這個專案沒有技能。"
               warning={
-                draft.skills.some((name) => SANDBOX_SKILLS.has(name)) &&
+                chosenSkills.some((name) => SANDBOX_SKILLS.has(name)) &&
                 !draft.toolsets.includes(SANDBOX_TOOLSET)
                   ? sandboxWarning(project)
                   : undefined
               }
-              items={withMissing(options.skills, draft.skills)}
-              value={draft.skills}
-              onChange={(skills) => edit({ skills })}
+              items={withMissing(options.skills, chosenSkills)}
+              value={chosenSkills}
+              onChange={(skills) =>
+                // 自動開啟的照原樣保留（舊的 Agent 可能存過）。
+                edit({
+                  skills: [
+                    ...draft.skills.filter((name) =>
+                      options.automatic.has(name),
+                    ),
+                    ...skills,
+                  ],
+                })
+              }
             />
           )}
 
@@ -805,7 +829,7 @@ function ModelField({
   );
 }
 
-function CheckList({
+export function CheckList({
   legend,
   help,
   empty,

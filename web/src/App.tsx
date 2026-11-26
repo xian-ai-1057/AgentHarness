@@ -21,6 +21,7 @@ import { KnowledgeView } from "./components/KnowledgeView.tsx";
 import { NewChat } from "./components/NewChat.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Link, Sidebar } from "./components/Sidebar.tsx";
+import { SkillsView } from "./components/SkillsView.tsx";
 import { LocalKeyNotice, Login } from "./components/shell/Login.tsx";
 import { SearchDialog } from "./components/shell/SearchDialog.tsx";
 import { Toaster } from "./components/shell/toast.tsx";
@@ -42,6 +43,7 @@ function pageTitle(route: Route, state: State): string {
     return route.id === "new" ? "建立 Agent" : "編輯 Agent";
   if (route.page === "settings") return "設定";
   if (route.page === "knowledge") return "知識庫";
+  if (route.page === "skills") return "Skills";
   if (route.page === "admin") return "管理平台";
   return "新對話";
 }
@@ -214,6 +216,7 @@ function Shell() {
         {route.page === "knowledge" && (
           <KnowledgeView key={route.id ?? ""} id={route.id} />
         )}
+        {route.page === "skills" && <SkillsView />}
       </div>
       {searching && <SearchDialog onClose={() => setSearching(false)} />}
       <Toaster />

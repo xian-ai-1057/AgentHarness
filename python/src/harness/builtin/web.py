@@ -1,4 +1,6 @@
-"""內建的網頁工具（toolset 名稱：web）。
+"""內建的網頁工具（toolset 名稱：web）：web_search 搜尋、web_fetch 讀取網頁。
+
+web_search 在 websearch 模組（搜尋服務用環境變數設定）。
 
 設計參考 Claude Code 的 WebFetch：讀取一個網址，把 HTML 轉成好讀的純文字
 （保留標題層級、清單與連結）交給 agent。送出請求會把網址（可能含有對話
@@ -22,6 +24,7 @@ import aiohttp
 import aiohttp.abc
 
 from harness import tools
+from harness.builtin import websearch
 
 DEFAULT_MAX_CHARS = 20_000
 MAX_DOWNLOAD_BYTES = 2_000_000
@@ -395,4 +398,4 @@ def _find_blocked(error: BaseException) -> _Blocked | None:
     return None
 
 
-TOOLS = [web_fetch]
+TOOLS = [websearch.web_search, web_fetch]

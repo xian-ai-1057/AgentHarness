@@ -1906,6 +1906,33 @@ class Workspace:
             self._model_fn, tracker, lambda: allowed, on_route
         )
 
+    def _routed_compaction(
+        self,
+        state: _State,
+        user: accounts_lib.User,
+        settings: compaction_lib.Compaction | None,
+    ) -> compaction_lib.Compaction | None:
+        """資料分級可能把這一輪改送別的模型（例如地端的 Gemma），壓縮要
+        依實際送出的模型查上下文上限，否則可能來不及壓縮就超過上限。
+
+        和 classification.routed_model_fn 用同樣的規則挑模型；碰到的資料
+        等級在這一輪中途變高時也跟著變。
+        """
+        tracker = state.tracker
+        if settings is None or tracker is None:
+            return settings
+        allowed = [
+            item["name"] for item in self._model_options(self._access(user))
+        ]
+
+        def resolve(model: str) -> str:
+            policy = tracker.policy
+            if policy.allows(model, tracker.rank):
+                return model
+            return policy.pick(tracker.rank, allowed) or model
+
+        return dataclasses.replace(settings, resolve_model=resolve)
+
     def _keep_classification(self, state: _State) -> None:
         """把這一輪碰到的資料等級與改用的模型記在對話狀態（會存檔）。"""
         tracker = state.tracker
@@ -3059,7 +3086,9 @@ class Workspace:
             # ontology 依這一輪是誰套用群組權限（型別、動作、知識庫）。
             ontology_lib.set_viewer(self._ontology_viewer(user))
             model_fn = self._classified_model_fn(state, user)
-            compaction = await self._run_compaction()
+            compaction = self._routed_compaction(
+                state, user, await self._run_compaction()
+            )
             if state.compact_request is not None:
                 instructions = state.compact_request
                 state.compact_request = None

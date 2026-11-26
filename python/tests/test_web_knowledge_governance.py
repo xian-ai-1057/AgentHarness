@@ -215,6 +215,40 @@ class TestClassification:
             "confidential"
         )
 
+    async def test_context_window_follows_the_local_model(self, site):
+        windows = (
+            "\ncompaction:\n  contextWindows:\n"
+            f"    {llm.default_model()}: 1000000\n    local-gemma: 100000\n"
+        )
+        s = await site(
+            agent=KNOWLEDGE_AGENT,
+            extra=CLASSIFIED + windows,
+            prepare=kb_tests.add_documents,
+            script=[
+                *kb_tests.search_script(),
+                conftest.text_response("第二輪"),
+            ],
+        )
+        boss = await s.login("boss", password_of("boss"))
+        _, settings = await boss.api("GET", "/admin/classification")
+        settings["knowledgeBases"] = {"hr": "confidential"}
+        await boss.api("PUT", "/admin/classification", settings)
+
+        _, created = await boss.api(
+            "POST",
+            "/sessions",
+            {"text": "特休", "options": {"knowledge": ["hr"]}},
+        )
+        await boss.wait_idle(created["id"])
+        await boss.api(
+            "POST", f"/sessions/{created['id']}/messages", {"text": "再說一次"}
+        )
+        again = await boss.wait_idle(created["id"])
+
+        # 對話碰過機密資料、改送地端模型後，壓縮依地端模型的上限計算。
+        assert again["summary"]["context"]["window"] == 100_000
+        assert again["summary"]["context"]["threshold"] == 80_000
+
     async def test_disabling_removes_levels_and_members_cannot_edit(self, site):
         s = await site(extra=CLASSIFIED, prepare=kb_tests.add_documents)
         boss = await s.login("boss", password_of("boss"))

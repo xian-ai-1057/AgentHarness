@@ -1228,7 +1228,9 @@ compaction：
 3. **還是太長時才摘要**：把較舊的歷史交給模型，濃縮成固定結構的檢查點
    （使用者的需求、重要決定、資料與檔案、錯誤與修正、未完成的工作、
    目前進度、下一步），最近約 15% 的對話原文保留。
-4. **模型回報超過上下文上限時**，盡量壓縮後重試一次。
+4. **模型回報超過上下文上限時**，盡量壓縮後重試一次（認得 litellm 的
+   `ContextWindowExceededError`，以及 OpenAI、Anthropic、vLLM 等常見的
+   錯誤訊息）。
 
 **對話紀錄不會被改寫。** 壓縮與修剪都以額外的紀錄（`role: harness`）
 附加在 JSONL 裡，原始訊息完整保留，模型看到的歷史是從紀錄推算出來的。
@@ -1241,7 +1243,9 @@ TypeScript 版與網頁介面也讀得懂這些紀錄，同一段對話仍然可
 
 ```yaml
 compaction:
-  contextWindow: 128000    # 模型的上下文上限；省略時從 litellm 的模型資料查
+  contextWindow: 128000    # 所有模型共用的上下文上限；省略時從 litellm 的模型資料查
+  contextWindows:          # 個別模型的上限，優先於 contextWindow
+    gemma-4-31b: 196608
   thresholdRatio: 0.8      # 超過上限的這個比例時開始壓縮
   retainRatio: 0.15        # 原文保留的近期對話，佔上限的比例
   summaryModel: openai/gpt-5-mini   # 負責摘要的模型，省略時用 agent 的模型
@@ -1255,9 +1259,12 @@ compaction:
 
 不要壓縮的話寫 `compaction: false`。
 
-- **自架端點、LiteLLM Proxy 的模型名稱 litellm 查不到上限**，這時要寫
-  `contextWindow`，否則不會主動壓縮（模型回報超過上限時仍會壓縮後
-  重試）。
+- **上限的查法**依序是：`contextWindows` 裡這個模型的設定、網頁版從
+  端點查到的值（vLLM 的 `max_model_len`、LiteLLM Proxy `/model/info` 的
+  `max_input_tokens`）、`contextWindow`、litellm 的模型資料。自架模型
+  （vLLM、LiteLLM Proxy 後面的模型）litellm 查不到，網頁版會自動向端點
+  查；CLI 或端點查不到時要寫 `contextWindows`，否則不會主動壓縮（模型
+  回報超過上限時仍會壓縮後重試）。
 - 預留給回覆的 `modelParams.max_tokens` 會從門檻扣掉。
 - 摘要多一次模型呼叫，它的用量會算進 `RunResult.usage`。
 - 摘要失敗（模型出錯、沒有回傳文字、摘要沒有比原文短）時，對話照常
@@ -1268,7 +1275,9 @@ compaction:
 ### 手動壓縮
 
 聊天時輸入 `/compact`，會把最近一段之外的對話都交給摘要。也可以用
-`pyharness run -c /compact` 壓縮最新的對話。
+`pyharness run -c /compact` 壓縮最新的對話。網頁版的輸入框也可以打
+`/compact`，後面可以接摘要時要特別保留的重點（例如
+`/compact 保留報表欄位名稱`）；見[網頁介面](https://agent-harness-docs-ten.vercel.app/guide/web#對話壓縮)。
 
 ### 在程式裡使用
 
@@ -1278,12 +1287,23 @@ settings = harness.Compaction(context_window=128_000)
 await harness.run(agent, text, session=session, compaction=settings)
 
 result = await harness.compact(agent, session, settings=settings)  # 手動壓縮
+result = await harness.compact(
+    agent, session, settings=settings, instructions="保留報表欄位名稱"
+)  # 指定摘要時要保留的重點
 ```
 
 `run` 不傳 `compaction` 時不壓縮（`load_project` 載入的專案設定在
-`project.compaction`）。串流時會收到 `compaction` 事件
-（`{"result": CompactionResult}`），自動壓縮失敗時是 `compaction_failed`
-（`{"error": str}`）。
+`project.compaction`）。串流時的事件：
+
+| 事件 | 內容 | 什麼時候 |
+|---|---|---|
+| `compaction_start` | `{"reason": "threshold" \| "overflow"}` | 開始壓縮（摘要要多呼叫一次模型，介面可以先顯示「正在壓縮」） |
+| `compaction` | `{"result": CompactionResult}` | 壓縮完成 |
+| `compaction_failed` | `{"error": str}` | 自動壓縮失敗，對話照常繼續 |
+| `context_usage` | `{"tokens", "window", "threshold", "auto"}` | 每次模型回應與壓縮後的上下文用量（不知道上限時 `window`、`threshold` 是 `None`） |
+
+壓縮紀錄另外記著 `summarized`（被摘要的訊息數）、`tokens_before`、
+`tokens_after`，給介面顯示用。
 
 `session.messages` 與 `RunResult.messages` 是完整紀錄（含壓縮紀錄）；
 模型實際看到的歷史用 `harness.compaction.model_history(messages)` 取得。

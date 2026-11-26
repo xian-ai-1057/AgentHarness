@@ -43,7 +43,7 @@ pyharness web --port 8080   # 換埠號
 
 管理平台修改 `harness.yaml` 時只改 `model`、`maxTurns` 與 `permissions` 那幾行，其他內容和註解都保持不動。檔案用了錨點（`&`、`*`）等特殊寫法、無法安全修改時，會請你直接編輯檔案。
 
-Python 版另外會顯示：handoff 後換成接手的 agent、subagent 呼叫的工具即時列在交辦步驟底下、標出「對話已壓縮」的位置、訊息被[防護](/advanced/guardrails)擋下的原因。
+Python 版另外會顯示：handoff 後換成接手的 agent、subagent 呼叫的工具即時列在交辦步驟底下、標出「對話已壓縮」的位置（點開可以看摘要）、訊息被[防護](/advanced/guardrails)擋下的原因。長對話的上下文用量與 `/compact` 見[對話壓縮](#對話壓縮)。
 
 ::: info 截圖
 上面的截圖是改版前的畫面；目前的配色是白底、中性灰與紅色重點色。
@@ -55,7 +55,7 @@ Python 版另外會顯示：handoff 後換成接手的 agent、subagent 呼叫�
 
 | 分類 | 網址 | 內容 |
 |---|---|---|
-| 模型 | `/admin/model` | 模型連線（Python 版：供應商、金鑰、可以切換的模型；TypeScript 版：模型名稱與端點狀態）、`maxTurns` |
+| 模型 | `/admin/model` | 模型連線（Python 版：供應商、金鑰、可以切換的模型；TypeScript 版：模型名稱與端點狀態）、`maxTurns`、[對話壓縮](#對話壓縮)（Python 版） |
 | 權限 | `/admin/permissions` | 權限模式與允許、先問我、拒絕規則 |
 | Agent | `/admin/agents` | 新增與修改公司的 agent（`agents/*.md`）的說明、指示、工具、skills 與知識庫（Python 版，見[公司 Agent](#公司-agent)） |
 | Skills | `/admin/skills` | 新增、修改、刪除或上傳公司的 skill，關閉內建的 skill、決定哪些預設開啟（Python 版，見[在網頁上管理 skills](/advanced/skills#在網頁上管理)） |
@@ -456,6 +456,15 @@ models:
 - 專案頁右上的 ⋮ 可以重新命名或刪除專案。刪除專案**不會**刪除裡面的對話，對話改成未分類。
 - 每個人只看得到自己的專案（要登入時存在 `.harness/users/<識別碼>/categories.json`，不必登入時是 `.harness/categories.json`）；對話屬於哪個專案記在對話的 `.meta.json`。名稱最多 50 個字，同一個人的專案名稱不能重複。
 - API：`GET`／`POST /api/categories`、`PATCH`／`DELETE /api/categories/:id`、`PATCH /api/sessions/:id` 的 `category`（`null` 表示移出專案）、`POST /api/sessions` 的 `category`，以及一次處理好幾段對話的 `POST /api/sessions/bulk {action: "delete" | "move", ids, category}`（一次最多 500 段，回傳處理好的與略過的對話）。
+
+## 對話壓縮 <span class="badge-py">Python 版</span> {#對話壓縮}
+
+模型的上下文長度有限（例如自架的 Gemma 4 31B 約 195k tokens），多輪對話或讀了很多檔案之後可能超過上限而出錯。和 Claude 一樣，對話接近上限時會自動把較早的內容濃縮成摘要，之後 agent 看到的是摘要加上最近的對話，可以繼續聊下去。做法見[對話壓縮](/advanced/compaction)。
+
+- **上下文用量**：用量超過一半時，輸入框下方出現「上下文 62%」，滑鼠移上去看用了多少 tokens、到多少會自動壓縮；快到門檻時改成提醒的顏色。
+- **自動壓縮**：預設用到上限的 80% 時壓縮。壓縮時畫面顯示「正在壓縮對話」，完成後對話裡出現一條「對話接近上下文上限，已自動壓縮 · 較早的 12 則訊息濃縮成摘要 · 約 150k → 20k tokens」，點開可以看摘要的內容。原本的訊息仍然完整保留在畫面與紀錄裡。
+- **手動壓縮**：在輸入框打 `/compact`（打 `/` 會提示），後面可以接要特別保留的重點，例如 `/compact 保留報表欄位名稱與十月的數字`。點上下文用量也會幫你填好 `/compact`。
+- **管理平台**：「模型」頁下方的「對話壓縮」可以開關自動壓縮、調整門檻，並列出每個模型的上下文上限與它從哪裡查到。連 vLLM 時從端點的 `max_model_len` 自動查；連 LiteLLM Proxy 時從 `/model/info` 的 `max_input_tokens` 查。查不到的模型（顯示紅字）請直接填上，否則只會在模型回報超過上限後才壓縮。設定寫進 `harness.yaml` 的 `compaction`。
 
 ## 回覆的評價 <span class="badge-py">Python 版</span> {#回覆的評價}
 

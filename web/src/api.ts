@@ -13,6 +13,7 @@ import type {
   BulkRequest,
   BulkResult,
   ChatCategory,
+  CompactionSettings,
   ConnectionSettings,
   CurrentUser,
   Feedback,
@@ -130,6 +131,11 @@ export const api = {
   },
   retry: (id: string) =>
     request<SessionSummary>("POST", `/sessions/${id}/retry`, {}),
+  /** 壓縮對話（聊天中輸入 /compact）；instructions 是摘要時要保留的重點。 */
+  compact: (id: string, instructions: string) =>
+    request<SessionSummary>("POST", `/sessions/${id}/compact`, {
+      instructions,
+    }),
   stop: (id: string) => request("POST", `/sessions/${id}/stop`, {}),
   setMode: (id: string, mode: PermissionMode | null) =>
     request("PUT", `/sessions/${id}/mode`, { mode }),
@@ -144,6 +150,13 @@ export const api = {
   saveConnection: (settings: ConnectionSettings) =>
     request("PUT", "/settings/connection", settings),
   testModel: () => request<ModelTestResult>("POST", "/settings/model/test", {}),
+  compactionSettings: () =>
+    request<CompactionSettings>("GET", "/settings/compaction"),
+  saveCompactionSettings: (settings: {
+    auto: boolean;
+    thresholdRatio: number;
+    contextWindows: Record<string, number | null>;
+  }) => request<{ ok: true }>("PUT", "/settings/compaction", settings),
   discoverModels: (settings: Omit<ConnectionSettings, "model">) =>
     request<{ models: ModelChoice[] }>(
       "POST",

@@ -18,6 +18,7 @@ import {
   type SessionDetail,
   type SubagentStep,
 } from "../../src/web/protocol.ts";
+import { formatTokens } from "./format.ts";
 
 /** denied：使用者拒絕了這次呼叫（不算工具錯誤）。 */
 export type StepStatus =
@@ -58,6 +59,7 @@ export type Block =
       messageIndex?: number;
     }
   | { kind: "notice"; key: string; text: string }
+  | { kind: "compaction"; key: string; title: string; summary: string }
   | { kind: "steps"; key: string; steps: Step[] };
 
 export interface Turn {
@@ -97,7 +99,36 @@ export interface FileChange {
 }
 
 const ERROR_PREFIX = "[錯誤] ";
-const COMPACTED = "對話已壓縮：較早的內容濃縮成摘要，agent 之後看到的是摘要。";
+/** Python 版寫進紀錄的壓縮紀錄（role 為 harness、type 為 compaction）。 */
+interface CompactionRecord {
+  summary?: string;
+  reason?: string;
+  summarized?: number;
+  tokens_before?: number;
+  tokens_after?: number;
+}
+
+const COMPACTION_REASONS: Record<string, string> = {
+  manual: "已壓縮對話",
+  threshold: "對話接近上下文上限，已自動壓縮",
+  overflow: "對話超過模型的上下文上限，已自動壓縮後重試",
+};
+
+/** 壓縮紀錄的標題，例如「已自動壓縮 · 較早的 12 則訊息 · 約 150k → 20k tokens」。 */
+export function compactionTitle(record: CompactionRecord): string {
+  const parts = [COMPACTION_REASONS[record.reason ?? ""] ?? "對話已壓縮"];
+  if (record.summarized) {
+    parts.push(`較早的 ${record.summarized} 則訊息濃縮成摘要`);
+  }
+  if (record.tokens_before && record.tokens_after) {
+    parts.push(
+      `約 ${formatTokens(record.tokens_before)} → ${formatTokens(
+        record.tokens_after,
+      )} tokens`,
+    );
+  }
+  return parts.join(" · ");
+}
 
 export function buildTurns(
   detail: SessionDetail,
@@ -130,11 +161,13 @@ export function buildTurns(
     // Python 版會在紀錄裡寫入自己的紀錄（壓縮、修剪），role 是 harness。
     const role: string = message.role;
     if (role === "harness") {
-      if ((message as { type?: string }).type === "compaction") {
+      const record = message as CompactionRecord & { type?: string };
+      if (record.type === "compaction") {
         current().blocks.push({
-          kind: "notice",
+          kind: "compaction",
           key: `c${index}`,
-          text: COMPACTED,
+          title: compactionTitle(record),
+          summary: record.summary ?? "",
         });
       }
       return;

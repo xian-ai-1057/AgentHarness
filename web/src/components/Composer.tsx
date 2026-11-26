@@ -52,6 +52,14 @@ const OTHER_FOLDER = "在另一個資料夾，請移除後重新附加";
 
 let nextKey = 0;
 
+/** 輸入框可以打的指令。 */
+export interface ChatCommand {
+  /** 例如 /compact。 */
+  name: string;
+  /** 一句說明。 */
+  hint: string;
+}
+
 export function Composer({
   placeholder,
   busy,
@@ -65,6 +73,7 @@ export function Composer({
   maxUploadBytes,
   options,
   folder,
+  commands,
 }: {
   placeholder: string;
   busy: boolean;
@@ -83,6 +92,8 @@ export function Composer({
   options?: ComposerOptions;
   /** 工作資料夾選單；沒有提供時不顯示。 */
   folder?: FolderChoice;
+  /** 可以輸入的指令（例如 /compact）；打 / 開頭時列出符合的指令。 */
+  commands?: ChatCommand[];
 }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -119,6 +130,19 @@ export function Composer({
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, []);
+
+  // 打到一半的指令（還沒有空白）：列出開頭符合的指令，點一下補完。
+  const typed = /^\/\S*$/.test(text) ? text : null;
+  const matches =
+    typed === null
+      ? []
+      : (commands ?? []).filter(
+          (item) => item.name.startsWith(typed) && item.name !== typed,
+        );
+  const complete = (name: string) => {
+    setText(`${name} `);
+    ref.current?.focus();
+  };
 
   const ready = attachments.filter((item) => item.status === "done");
   const pending = attachments.some((item) => item.status !== "done");
@@ -208,6 +232,11 @@ export function Composer({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Tab" && matches.length > 0) {
+      event.preventDefault();
+      complete(matches[0]?.name ?? "");
+      return;
+    }
     if (event.key !== "Enter" || event.shiftKey) return;
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     event.preventDefault();
@@ -251,6 +280,22 @@ export function Composer({
                 onClick={() => remove(item.key)}
               >
                 <CloseIcon size={12} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {matches.length > 0 && (
+        <ul className="composer-commands" aria-label="可以輸入的指令">
+          {matches.map((item) => (
+            <li key={item.name}>
+              <button
+                type="button"
+                className="composer-command"
+                onClick={() => complete(item.name)}
+              >
+                <span className="mono">{item.name}</span>
+                <span className="composer-command-hint">{item.hint}</span>
               </button>
             </li>
           ))}

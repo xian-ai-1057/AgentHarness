@@ -564,6 +564,17 @@ def _session_routes(routes: web.RouteTableDef) -> None:
         summary = _ws(request).retry(_user(request), _id(request))
         return _json(summary, status=202)
 
+    @routes.post(f"/api/sessions/{session_id}/compact")
+    async def compact(request: web.Request) -> web.Response:
+        body = await _body(request)
+        instructions = body.get("instructions") or ""
+        if not isinstance(instructions, str):
+            raise workspace_lib.WebError(400, "instructions 必須是文字")
+        summary = _ws(request).compact(
+            _user(request), _id(request), instructions
+        )
+        return _json(summary, status=202)
+
     @routes.post(f"/api/sessions/{session_id}/stop")
     async def stop(request: web.Request) -> web.Response:
         await _body(request)
@@ -1570,6 +1581,26 @@ def _settings_routes(routes: web.RouteTableDef) -> None:
             raise workspace_lib.WebError(400, "models 必須是字串的陣列")
         _ws(request).update_model_choices(names)
         _audit(request, "settings.models", detail={"models": names})
+        return _json({"ok": True})
+
+    @routes.get("/api/settings/compaction")
+    async def get_compaction(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(await _ws(request).compaction_settings())
+
+    @routes.put("/api/settings/compaction")
+    async def save_compaction(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        _ws(request).update_compaction_settings(body)
+        _audit(
+            request,
+            "settings.compaction",
+            detail={
+                key: body.get(key)
+                for key in ("auto", "thresholdRatio", "contextWindows")
+            },
+        )
         return _json({"ok": True})
 
     @routes.post("/api/settings/model/test")

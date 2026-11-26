@@ -71,6 +71,22 @@ class TestCheckRequest:
         with pytest.raises(ValueError):
             sandbox_runner.check_request(_settings(), _body(subpath=subpath))
 
+    def test_office_preview_jobs_are_the_only_harness_exception(self):
+        job = ".harness/previews/jobs/" + "a" * 32
+
+        checked = sandbox_runner.check_request(_settings(), _body(subpath=job))
+
+        assert checked["subpath"] == job
+        for bad in (
+            ".harness/previews/jobs",
+            ".harness/previews/jobs/" + "a" * 31,
+            ".harness/previews/jobs/" + "a" * 32 + "/x",
+            ".harness/previews/jobs/../../secrets",
+            ".harness/previews/x" + "a" * 32,
+        ):
+            with pytest.raises(ValueError):
+                sandbox_runner.check_request(_settings(), _body(subpath=bad))
+
     @pytest.mark.parametrize(
         "argv",
         [

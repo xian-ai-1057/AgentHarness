@@ -19,7 +19,7 @@ MCP 伺服器給它工具，再從命令列、網頁或自己的程式裡和它�
 git clone https://github.com/xian-ai-1057/AgentHarness.git
 cd AgentHarness
 docker compose up -d
-docker compose logs harness      # 看網址與自動產生的登入密碼
+docker compose exec harness cat /assistant/.harness/secrets/web-password  # 管理者 admin 自動產生的密碼
 ```
 
 用瀏覽器打開 `http://<這台電腦的位址>:4321`，登入後依畫面選模型供應商、

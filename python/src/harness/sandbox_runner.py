@@ -51,6 +51,8 @@ DEFAULT_MAX_CPUS = 2.0
 MAX_TIMEOUT_SECONDS = 900
 # 一段程式（從標準輸入交給 python）最多多大。
 MAX_STDIN_BYTES = 2_000_000
+# 網頁版 Office 預覽的轉檔暫存資料夾（web.office 的 _convert）。
+PREVIEW_JOB = re.compile(r"^\.harness/previews/jobs/[0-9a-f]{32}$")
 _MEMORY = re.compile(r"^([0-9]+)([kmg]?)$", re.IGNORECASE)
 _UNITS = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3}
 
@@ -134,9 +136,15 @@ def parse_memory(text: str) -> int:
 def check_subpath(subpath: Any) -> str:
     """檢查要掛載的子資料夾，回傳整理過的寫法。
 
+    .harness/ 底下只有一個例外：網頁把 Office 檔轉成 PDF 預覽時的暫存
+    資料夾 .harness/previews/jobs/<32 位十六進位>（見 web.office），裡面
+    只有要轉的那一份檔案。
+
     Raises:
         ValueError: 不是 volume 裡一個允許掛載的子資料夾。
     """
+    if isinstance(subpath, str) and PREVIEW_JOB.match(subpath):
+        return subpath
     if not isinstance(subpath, str) or not subpath.strip():
         raise ValueError("subpath 不能是空的：不能掛載整個 volume")
     if subpath.startswith("/") or "\\" in subpath or "\0" in subpath:

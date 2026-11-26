@@ -45,13 +45,13 @@ Python 版的特點：
 git clone https://github.com/xian-ai-1057/AgentHarness.git
 cd AgentHarness
 docker compose up -d             # 第一次會建置映像檔，需要幾分鐘
-docker compose logs harness      # 看管理者 admin 自動產生的密碼
+docker compose exec harness cat /assistant/.harness/secrets/web-password  # 管理者 admin 自動產生的密碼
 ```
 
 接著：
 
 1. 用瀏覽器打開 `http://<這台電腦的位址>:4321`，用帳號 `admin` 登入（密碼
-   在上面的 log 裡），再從帳號選單打開「管理平台 → 成員」幫其他人建立帳號。
+   用上面的 `cat` 指令查看，不會印在 log 裡），再從帳號選單打開「管理平台 → 成員」幫其他人建立帳號。
 2. 第一次會看到「還沒有連接模型」：按「前往管理平台」，選供應商、貼上金鑰，
    按「測試連線並儲存」。
 3. 開始對話。可以直接上傳 Excel、PDF、CSV 請它分析。
@@ -107,8 +107,9 @@ docker compose restart harness   # 改了 harness.yaml 或 agent 之後重新載
 - **金鑰只給平台自己用**：agent 執行的指令與 stdio MCP 伺服器拿到的環境
   變數會拿掉名稱像金鑰的變數（含 `KEY`、`SECRET`、`TOKEN`、`PASSWORD`
   等字）與網頁上填的金鑰。
-- **admin 的密碼會印在 log 裡**，看得到 `docker compose logs` 的人就能
-  以管理者登入。第一次登入後請在帳號選單改掉。
+- **admin 自動產生的密碼存在 volume 的 `.harness/secrets/web-password`**，
+  不會印在 log 裡；能執行 `docker compose exec` 的人就讀得到，第一次登入後
+  請在帳號選單改掉。
 - **這個設定是 http，沒有加密。** 只在內網或 VPN 裡使用；要從網際網路
   連線，請在前面加上 HTTPS 的反向代理（見
   [部署到伺服器](#部署到伺服器)的 nginx 設定）。
@@ -1447,7 +1448,7 @@ permissions:
 | 模式 | 行為 |
 |---|---|
 | `ask`（預設） | 需要同意的工具，執行前先問使用者 |
-| `bypass` | 全部直接執行 |
+| `bypass` | 全部直接執行（網頁版要登入時只對管理者有效，成員照樣要確認） |
 | `dontAsk` | 不詢問；需要同意的工具一律拒絕，適合無人值守的排程 |
 
 「需要同意的工具」是標記 `needs_approval=True` 的工具，以及名稱符合
@@ -1726,7 +1727,7 @@ Python 版另外會處理：
   agent、工具與知識庫搜尋都只剩開放的部分，直接呼叫 API 也一樣（見
   [說明文件的「存取群組」](https://agent-harness-docs-ten.vercel.app/guide/web#存取群組)）。
 - 成員只看得到自己的對話、「我的檔案」與被開放的共用資料夾，不能修改
-  模型連線、全站權限與成員，也不能讓對話「全部直接執行」（bypass）。
+  模型連線、全站權限與成員，也不能讓對話「全部直接執行」（bypass）；專案設成 bypass 時成員照樣要確認。
   成員的 `run_command` 一律在沙盒裡執行，沒有沙盒時不提供；管理者在
   共用資料夾裡的 `run_command` 也在沙盒執行。
 - 登入用 HttpOnly、SameSite=Strict 的 cookie，12 小時沒有使用就要重新
@@ -1882,9 +1883,10 @@ export HARNESS_MODEL=claude
 ```
 
 - **讓其他電腦連線時一定要登入。** 第一次啟動時自動建立管理者帳號
-  `admin`，密碼是 `HARNESS_WEB_PASSWORD`；沒有設定時自動產生一組並印在
-  啟動訊息裡，存在專案的 `.harness/secrets/web-password`。之後每次啟動
-  都會再顯示，直到 admin 自己改了密碼。從舊版（只有一組密碼）升級時，
+  `admin`，密碼是 `HARNESS_WEB_PASSWORD`；沒有設定時自動產生一組，存在
+  專案的 `.harness/secrets/web-password`（只有執行 pyharness 的使用者能讀）。
+  啟動訊息只印出這個檔案的位置，不印密碼本身，因為看得到 log 的人不一定
+  該是管理者。從舊版（只有一組密碼）升級時，
   原本的密碼就是 admin 的密碼。
 - 環境變數只在建立 admin 時使用一次；之後改密碼請在網頁的帳號選單，
   或用 `pyharness user passwd admin`。

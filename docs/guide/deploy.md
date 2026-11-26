@@ -6,12 +6,12 @@
 git clone https://github.com/xian-ai-1057/AgentHarness.git
 cd AgentHarness
 docker compose up -d             # 第一次會建置映像檔，需要幾分鐘
-docker compose logs harness      # 看網址與管理者 admin 自動產生的密碼
+docker compose exec harness cat /assistant/.harness/secrets/web-password  # 管理者 admin 自動產生的密碼
 ```
 
 接著：
 
-1. **登入**：用瀏覽器打開 `http://<這台電腦的位址>:4321`，帳號 `admin`，密碼在上面的 log 裡。第一次登入後請在帳號選單改密碼，再從帳號選單打開「管理平台 → 成員」幫其他人建立帳號（見[帳號與成員](/guide/web#帳號與成員)）。
+1. **登入**：用瀏覽器打開 `http://<這台電腦的位址>:4321`，帳號 `admin`，密碼用上面的 `cat` 指令查看（為了安全，不會印在 log 裡）。第一次登入後請在帳號選單改密碼，再從帳號選單打開「管理平台 → 成員」幫其他人建立帳號（見[帳號與成員](/guide/web#帳號與成員)）。
 2. **連接模型**：第一次會看到「還沒有連接模型」，按「前往管理平台」，選供應商、貼上金鑰，按「測試連線並儲存」（見[在網頁上連接模型](/guide/web#在網頁上連接模型)）。
 3. **開始對話**：可以直接上傳 Excel、PDF、CSV 請它分析。
 
@@ -80,7 +80,7 @@ agent 寫的程式與執行的指令都在拋棄式的沙盒容器裡執行。�
 ::: warning
 - **`sandbox-runner` 掛載主機的 Docker socket**，平台容器沒有（見[沙盒服務](#沙盒服務)）。沙盒服務本身等於擁有主機的 root 權限，請放在專用的機器或虛擬機上，也不要把 `sandbox` 網路接到其他服務。
 - **金鑰只給平台自己用**：agent 執行的指令、stdio MCP 伺服器拿到的環境變數會拿掉名稱像金鑰的變數（含 `KEY`、`SECRET`、`TOKEN`、`PASSWORD` 等字）與網頁上填的金鑰；沙盒容器裡完全沒有。
-- **admin 的密碼會印在 log 裡**，看得到 `docker compose logs` 的人就能以管理者登入，直到 admin 自己改掉密碼。
+- **admin 自動產生的密碼存在 volume 的 `.harness/secrets/web-password`**，不會印在 log 裡；能執行 `docker compose exec` 的人就讀得到，請在第一次登入後改掉。
 - **這個設定是 http，沒有加密。** 只在內網或 VPN 裡使用；要從網際網路連線，請在前面加上 HTTPS 的反向代理（見[部署到伺服器](/advanced/server)），並在 `.env` 用 `HARNESS_TRUSTED_PROXIES` 寫上反向代理連進容器的位址（例如 `172.16.0.0/12`），登入限制才會依使用者真正的 IP 計算、cookie 才會加上 Secure。
 - 每個人的對話與「我的檔案」分開，共用資料夾所有能使用的人都拿得到；成員與管理者的差別見[部署到伺服器](/advanced/server#安全上要知道的事)。
 :::

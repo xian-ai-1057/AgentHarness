@@ -423,3 +423,25 @@ class TestCompactCommand:
         cli.main(["run", "-p", str(project_dir), "-c", "再問"])
 
         assert "⟳ 對話已壓縮" in capsys.readouterr().out
+
+
+def test_generated_web_password_is_not_printed(tmp_path, monkeypatch):
+    # 看得到 log 的人不一定該是管理者：只說密碼存在哪裡。
+    import argparse
+
+    from harness import project as project_lib
+
+    monkeypatch.delenv(cli.WEB_PASSWORD_ENV, raising=False)
+    from harness import scaffold
+
+    root = tmp_path / "web"
+    scaffold.create_assistant(root, sandbox=False)
+    args = argparse.Namespace(host="0.0.0.0", allowed_host=None)
+
+    with project_lib.load_project(root) as loaded:
+        password, note = cli._web_password(args, loaded)
+
+    assert password
+    assert password not in note
+    assert "web-password" in note
+    assert "cat " in note

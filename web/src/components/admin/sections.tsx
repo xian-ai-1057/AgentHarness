@@ -27,7 +27,8 @@ type RuleKind = "allow" | "ask" | "deny";
 
 const MODE_DESCRIPTIONS: Record<PermissionMode, string> = {
   ask: "需要同意的工具，執行前先問你。預設。",
-  bypass: "不詢問，所有工具直接執行。只在信任的環境用。",
+  bypass:
+    "不詢問，工具直接執行（要登入時只對管理者有效，成員還是會被問）。只在信任的環境用。",
   dontAsk: "需要同意的工具一律拒絕，適合無人值守的排程。",
 };
 

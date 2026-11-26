@@ -11,6 +11,7 @@ import yaml
 from harness import classification
 from harness import knowledge as knowledge_lib
 from harness import knowledge_eval
+from harness import llm
 from harness import project as project_lib
 from harness.web import knowledge_eval as eval_web
 from tests import conftest
@@ -321,6 +322,42 @@ class TestEvaluation:
         assert result.judge == "天數不同"
         assert result.reasons == ["和參考答案不一致：天數不同"]
         assert "搜尋結果" in model.requests[0]["messages"][1]["content"]
+
+    async def test_explains_missing_and_inactive_documents(self, tmp_path):
+        base = leave_base(tmp_path)
+        (tmp_path / "eval-kb" / knowledge_lib.DOCUMENTS_FILE).write_text(
+            "hr/leave.md:\n  effective: 2999-01-01\n", encoding="utf-8"
+        )
+        questions = [
+            knowledge_eval.Question("q1", "特休怎麼算", ["leave.md"]),
+            knowledge_eval.Question("q2", "特休怎麼算", ["no-such.pdf"]),
+        ]
+
+        report = await knowledge_eval.run([base], questions)
+        reasons = {item["id"]: item["reasons"] for item in report["results"]}
+
+        assert "「hr/leave.md」尚未生效，今天搜尋不到" in reasons["q1"]
+        assert "知識庫裡沒有符合「no-such.pdf」的文件" in reasons["q2"]
+
+    async def test_classification_block_stops_the_whole_run(self, tmp_path):
+        base = leave_base(tmp_path)
+        rules = classification.load_policy({"defaultClearance": "public"})
+        tracker = classification.Tracker(rules, level="internal")
+        model = conftest.FakeModel([conftest.text_response("不該呼叫")])
+        routed = classification.routed_model_fn(
+            model, tracker, subject="這次評測"
+        )
+        question = knowledge_eval.Question("q1", "特休怎麼算", ["leave.md"])
+
+        with pytest.raises(
+            classification.ClassificationError, match="這次評測用到"
+        ):
+            await knowledge_eval.run(
+                [base], [question], answer_model="m", model_fn=routed
+            )
+        assert model.requests == []
+        explained = llm.explain_error(classification.ClassificationError("x"))
+        assert explained == "x"
 
     def test_checked_question(self):
         item = knowledge_eval.checked_question(

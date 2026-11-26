@@ -336,6 +336,7 @@ def routed_model_fn(
     tracker: Tracker,
     candidates: Callable[[], Sequence[str]] = tuple,
     on_route: Callable[[str, str], None] | None = None,
+    subject: str = "這段對話",
 ) -> llm.ModelFn:
     """包一層模型函式：呼叫前檢查目前的模型能不能處理碰過的資料。
 
@@ -345,6 +346,7 @@ def routed_model_fn(
         candidates: 改用模型時依序考慮的模型（routeTo 優先）。
         on_route: 改用模型時呼叫（原本的模型, 改用的模型），例如通知
             瀏覽器。
+        subject: 錯誤訊息的主詞，例如「這段對話」「這次評測」。
 
     Returns:
         新的模型函式；沒有模型可以處理時丟出 ClassificationError。
@@ -363,7 +365,7 @@ def routed_model_fn(
             chosen = policy.pick(rank, list(candidates()))
             if chosen is None:
                 raise ClassificationError(
-                    f"這段對話用到「{policy.name(tracker.level)}」等級的資料"
+                    f"{subject}用到「{policy.name(tracker.level)}」等級的資料"
                     f"（{'、'.join(tracker.sources) or '分級資料'}），但沒有"
                     "可以處理這個等級的模型，已經停止，資料沒有送出。請管理者"
                     "在管理平台的「資料分級」指定可以處理的模型（例如地端模型）。"

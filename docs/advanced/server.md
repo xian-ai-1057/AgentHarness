@@ -124,6 +124,15 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now harness
 ```
 
+## 5. 更新版本 {#更新版本}
+
+```bash
+sudo -iu harness ~/venv/bin/pip install -U "git+https://github.com/xian-ai-1057/AgentHarness.git#subdirectory=python"
+sudo systemctl restart harness
+```
+
+不需要先備份。新版第一次啟動時，會先把資料庫與設定檔自動快照到專案的 `.harness/backups/`（只留最近 3 份），再自動升級資料庫，`journalctl -u harness` 看得到「已自動備份資料庫與設定」。更新後有問題時，先 `sudo systemctl stop harness`，再在專案資料夾執行 `pyharness data list` 找出升級前的快照、`pyharness data restore <名稱>` 還原，最後重新啟動。細節見[快速部署 → 更新版本](/guide/deploy#更新版本)。快照和資料在同一顆硬碟上，整台主機的備份仍要另外做（備份專案資料夾即可）。
+
 ## 正式上線前的安全設定 {#正式上線前的安全設定}
 
 給多人使用（要登入）時，下面幾件事預設就是比較安全的做法，不必另外設定：

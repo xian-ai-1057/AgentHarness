@@ -132,6 +132,7 @@ Python 版另外會顯示：handoff 後換成接手的 agent、subagent 呼叫�
 .harness/users/<識別碼>/memory.json      長期記憶（harness.yaml 開啟 memory 時）
 .harness/users/<識別碼>/permissions.json 自己「以後都允許」的工具
 private/<識別碼>/                        「我的檔案」
+.harness/backups/                       更新前自動拍的資料庫與設定快照（見[更新版本](/guide/deploy#更新版本)）
 ```
 
 別人的對話一律當成不存在（回 404），列表、搜尋與即時更新也只有自己的對話。

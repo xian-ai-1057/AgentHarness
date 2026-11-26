@@ -40,9 +40,14 @@ pyharness user add <名稱>     新增網頁版的帳號，印出產生的密碼
 pyharness user list          列出帳號
 pyharness user passwd <名稱>  重設密碼（原本的登入全部失效）
 pyharness user disable <名稱> 停用帳號（enable 重新啟用）
+pyharness data               網頁版的資料庫版本與快照
+pyharness data backup        現在拍一份快照（資料庫與設定檔）
+pyharness data restore <名稱> 換回某一份快照（先停止網頁版）
 ```
 
 `pyharness user` 管理[網頁版的帳號](/guide/web#帳號與成員)，存在專案的 `.harness/harness.db`，`-p` 指定專案資料夾。
+
+`pyharness data` 管理網頁版的資料版本：`pyharness web` 啟動時發現程式換了版本，會先把資料庫與設定檔快照到 `.harness/backups/`，再自動升級資料庫，所以更新不需要手動備份（見[更新版本](/guide/deploy#更新版本)）。
 
 `pyharness web` 另外有這些選項：
 

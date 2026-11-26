@@ -92,7 +92,19 @@ docker compose exec harness ls /assistant
 docker compose restart harness   # 改了 harness.yaml 或 agent 之後重新載入
 ```
 
-更新版本：`git pull && docker compose up -d --build`。
+更新版本：`git pull && docker compose up -d --build`，不需要先備份或事後
+匯入資料。新版第一次啟動時會先把資料庫與設定檔自動快照到 volume 裡的
+`.harness/backups/`（只留最近 3 份），再自動升級資料庫。更新後有問題時：
+
+```bash
+docker compose run --rm harness pyharness data list -p /assistant
+docker compose stop harness
+docker compose run --rm harness pyharness data restore <快照名稱> -p /assistant
+docker compose up -d
+```
+
+快照和資料在同一個 volume，搬主機或 volume 損壞時仍要靠 volume 本身的
+備份，見文件網站的[快速部署 → 更新版本](https://agent-harness-docs-ten.vercel.app/guide/deploy#更新版本)。
 
 **安全上要知道的事**
 
@@ -1722,6 +1734,8 @@ Python 版另外會處理：
   pyharness user list
   pyharness user passwd alice              # 重設密碼，原本的登入全部失效
   pyharness user disable alice             # 停用；enable 重新啟用
+  pyharness data                           # 資料庫版本與更新前的快照
+  pyharness data restore <快照名稱>         # 換回快照（先停止網頁版）
   ```
 
 - 至少要留一位可以使用的管理者。停用的人立刻被登出，他正在執行的對話

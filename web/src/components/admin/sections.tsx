@@ -15,6 +15,7 @@ import { api } from "../../api.ts";
 import { MODE_LABELS, SOURCE_LABELS } from "../../format.ts";
 import { ConnectionForm } from "../ConnectionForm.tsx";
 import { CheckIcon, CloseIcon } from "../Icons.tsx";
+import { CompactionSection } from "./CompactionSettings.tsx";
 
 export interface Draft {
   model: string;
@@ -249,6 +250,8 @@ export function ModelSection({
           留空使用預設值 20。agent 檔案自己有寫的話以 agent 檔案為準。
         </div>
       </div>
+
+      {python && <CompactionSection />}
     </section>
   );
 }

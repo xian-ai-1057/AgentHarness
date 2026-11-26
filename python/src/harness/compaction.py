@@ -93,6 +93,12 @@ SUMMARY_INSTRUCTION = """\
 摘要。
 """
 
+# 手動壓縮時使用者另外交代要保留的重點，接在 SUMMARY_INSTRUCTION 後面。
+FOCUS_INSTRUCTION = """
+使用者這次手動壓縮時特別交代（摘要時優先保留相關內容）：
+{instructions}
+"""
+
 
 class CompactionError(Exception):
     """無法完成壓縮（沒有模型可以摘要、摘要失敗或沒有變短）。"""
@@ -103,9 +109,12 @@ class Compaction:
     """壓縮的設定。
 
     Attributes:
-        context_window: 模型的上下文上限（token）。None 表示從 litellm
-            的模型資料查詢；查不到時不會主動壓縮，但模型回報超過上限時
-            仍會壓縮後重試。
+        context_window: 模型的上下文上限（token），套用到所有模型。None
+            表示從 litellm 的模型資料查詢；查不到時不會主動壓縮，但模型
+            回報超過上限時仍會壓縮後重試。
+        context_windows: 個別模型的上下文上限，{模型名稱: token}；優先於
+            context_window。自架端點（vLLM、LiteLLM Proxy）的模型 litellm
+            查不到，寫在這裡。
         threshold_ratio: 請求超過上限的這個比例時開始壓縮。
         retain_ratio: 壓縮後原文保留的近期對話，佔上限的比例。
         summary_model: 負責摘要的模型，None 表示用 agent 的模型。
@@ -119,6 +128,7 @@ class Compaction:
     """
 
     context_window: int | None = None
+    context_windows: dict[str, int] = dataclasses.field(default_factory=dict)
     threshold_ratio: float = 0.8
     retain_ratio: float = 0.15
     summary_model: str | None = None
@@ -137,6 +147,13 @@ class Compaction:
             )
         if self.context_window is not None and self.context_window <= 0:
             raise ValueError("context_window 必須是正整數")
+        for model, window in self.context_windows.items():
+            if (
+                not isinstance(window, int)
+                or isinstance(window, bool)
+                or window <= 0
+            ):
+                raise ValueError(f"{model} 的上下文上限必須是正整數")
         if self.summary_max_tokens <= 0:
             raise ValueError("summary_max_tokens 必須是正整數")
         if min(self.prune_head, self.prune_tail) < 0:
@@ -238,12 +255,61 @@ def context_window(settings: Compaction, model: str) -> int | None:
         settings: 壓縮設定。
         model: litellm 的模型名稱。
 
+    依序使用：context_windows 裡這個模型的設定、context_window、litellm
+    的模型資料。
+
     Returns:
         token 數；設定沒寫、litellm 也查不到時為 None。
     """
+    return context_window_source(settings, model)[0]
+
+
+def context_window_source(
+    settings: Compaction, model: str
+) -> tuple[int | None, str | None]:
+    """取得模型的上下文上限，以及它從哪裡來。
+
+    Args:
+        settings: 壓縮設定。
+        model: litellm 的模型名稱。
+
+    Returns:
+        (token 數, 來源)；來源是 model（context_windows）、default
+        （context_window）或 litellm。都查不到時為 (None, None)。
+    """
+    # litellm_proxy/ 開頭是 litellm 連 LiteLLM Proxy 的寫法，Proxy 上的名稱
+    # 沒有這一段。
+    window = settings.context_windows.get(
+        model
+    ) or settings.context_windows.get(model.removeprefix(llm.PROXY_PREFIX))
+    if window:
+        return window, "model"
     if settings.context_window:
-        return settings.context_window
-    return _lookup_context_window(model)
+        return settings.context_window, "default"
+    window = _lookup_context_window(model)
+    if window:
+        return window, "litellm"
+    return None, None
+
+
+def threshold(
+    settings: Compaction, model: str, model_params: dict[str, Any]
+) -> int | None:
+    """開始自動壓縮的 token 數：上限的 threshold_ratio，再扣掉預留的輸出。
+
+    Args:
+        settings: 壓縮設定。
+        model: litellm 的模型名稱。
+        model_params: agent 的模型參數（max_tokens 是預留給回覆的量）。
+
+    Returns:
+        token 數；不知道模型的上限時為 None。
+    """
+    window = context_window(settings, model)
+    if window is None:
+        return None
+    reserved = int(model_params.get("max_tokens") or 0)
+    return int(window * settings.threshold_ratio) - reserved
 
 
 class Compactor:
@@ -272,6 +338,59 @@ class Compactor:
         if tokens <= 0:
             return
         self._measured = (len(model_history(session_messages)), tokens)
+
+    def context_usage(
+        self,
+        agent: agents.Agent,
+        system: str,
+        history: list[datatypes.Message],
+        tools: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """目前的上下文用量，給介面顯示（例如「已用 62%」）。
+
+        Args:
+            agent: 目前負責對話的 agent。
+            system: system prompt。
+            history: 模型看得到的歷史。
+            tools: 工具定義。
+
+        Returns:
+            {"tokens": 估計的 token 數, "window": 上限或 None,
+            "threshold": 開始自動壓縮的 token 數或 None,
+            "auto": 是否自動壓縮}。
+        """
+        model = agent.model or llm.default_model()
+        return {
+            "tokens": self.estimate(system, history, tools),
+            "window": context_window(self.settings, model),
+            "threshold": threshold(self.settings, model, agent.model_params),
+            "auto": self.settings.auto,
+        }
+
+    def needs_compaction(
+        self,
+        agent: agents.Agent,
+        session: sessions.Session,
+        system: str,
+        tools: list[dict[str, Any]],
+    ) -> bool:
+        """下一次請求是不是超過自動壓縮的門檻。
+
+        Args:
+            agent: 目前負責對話的 agent。
+            session: 對話紀錄。
+            system: system prompt。
+            tools: 工具定義。
+
+        Returns:
+            超過門檻時為 True；不知道模型的上限時為 False。
+        """
+        model = agent.model or llm.default_model()
+        limit = threshold(self.settings, model, agent.model_params)
+        if limit is None:
+            return False
+        history = model_history(session.messages)
+        return self.estimate(system, history, tools) > limit
 
     def estimate(
         self,
@@ -316,7 +435,7 @@ class Compactor:
             CompactionError: 摘要失敗。
         """
         model = agent.model or llm.default_model()
-        limit = self._threshold(agent, model)
+        limit = threshold(self.settings, model, agent.model_params)
         if limit is None:
             return None
         history = model_history(session.messages)
@@ -334,6 +453,7 @@ class Compactor:
         system: str,
         tools: list[dict[str, Any]],
         reason: str,
+        instructions: str = "",
     ) -> CompactionResult | None:
         """不管門檻直接壓縮（手動，或模型回報超過上限時）。
 
@@ -346,6 +466,7 @@ class Compactor:
             system: system prompt。
             tools: 工具定義。
             reason: manual 或 overflow。
+            instructions: 使用者另外交代摘要時要保留的重點（手動壓縮）。
 
         Returns:
             壓縮結果；沒有東西可以壓縮時為 None。
@@ -356,16 +477,8 @@ class Compactor:
         history = model_history(session.messages)
         before = self.estimate(system, history, tools)
         return await self._compact(
-            agent, session, system, tools, reason, before, None
+            agent, session, system, tools, reason, before, None, instructions
         )
-
-    def _threshold(self, agent: agents.Agent, model: str) -> int | None:
-        """開始壓縮的 token 數：上限的比例，再扣掉預留的輸出。"""
-        window = context_window(self.settings, model)
-        if window is None:
-            return None
-        reserved = int(agent.model_params.get("max_tokens") or 0)
-        return int(window * self.settings.threshold_ratio) - reserved
 
     async def _compact(
         self,
@@ -376,6 +489,7 @@ class Compactor:
         reason: str,
         before: int,
         limit: int | None,
+        instructions: str = "",
     ) -> CompactionResult | None:
         """先修剪、不夠再摘要。limit 為 None 表示一定要摘要。"""
         pruned = self._prune(session)
@@ -393,10 +507,15 @@ class Compactor:
                 return CompactionResult(reason, pruned, 0, before, after_prune)
             return None
         region = [item.message for item in items[:split]]
-        summary, usage = await self._summarize(agent, system, region, tools)
+        summary, usage = await self._summarize(
+            agent, system, region, tools, instructions
+        )
         checkpoint = _checkpoint_message(summary)
         if estimate_tokens([checkpoint]) >= estimate_tokens(region):
             raise CompactionError("摘要沒有比原本的對話短，放棄這次壓縮")
+        summarized = sum(1 for item in items[:split] if item.index is not None)
+        kept = [checkpoint, *(item.message for item in items[split:])]
+        after = estimate_tokens(_with_system(system, kept), tools)
         session.append(
             {
                 "role": RECORD_ROLE,
@@ -404,12 +523,14 @@ class Compactor:
                 "keep_from": items[split].index,
                 "summary": summary,
                 "reason": reason,
+                # 以下給介面顯示（例如「約 150k → 20k tokens」），推算歷史
+                # 時用不到。
+                "summarized": summarized,
+                "tokens_before": before,
+                "tokens_after": after,
             }
         )
         self._measured = None
-        history = model_history(session.messages)
-        after = estimate_tokens(_with_system(system, history), tools)
-        summarized = sum(1 for item in items[:split] if item.index is not None)
         return CompactionResult(
             reason, pruned, summarized, before, after, usage
         )
@@ -483,14 +604,20 @@ class Compactor:
         system: str,
         region: list[datatypes.Message],
         tools: list[dict[str, Any]],
+        instructions: str = "",
     ) -> tuple[str, datatypes.Usage]:
         """請模型把 region 摘要成檢查點。"""
         model = (
             self.settings.summary_model or agent.model or llm.default_model()
         )
+        prompt = SUMMARY_INSTRUCTION
+        if instructions.strip():
+            prompt += FOCUS_INSTRUCTION.format(
+                instructions=instructions.strip()
+            )
         request = [
             *_with_system(system, region),
-            {"role": "user", "content": SUMMARY_INSTRUCTION},
+            {"role": "user", "content": prompt},
         ]
         params = {
             **agent.model_params,

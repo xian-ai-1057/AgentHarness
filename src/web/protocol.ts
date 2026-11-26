@@ -28,7 +28,8 @@ export type SessionStatus =
 
 /** 正在跑的對話此刻在做什麼。 */
 export interface Activity {
-  kind: "thinking" | "tool" | "writing" | "waiting";
+  /** compacting：正在壓縮對話（Python 版，摘要要多呼叫一次模型）。 */
+  kind: "thinking" | "tool" | "writing" | "waiting" | "compacting";
   /** kind 為 tool 或 waiting 時，相關的工具名稱。 */
   tool?: string;
   /**
@@ -36,6 +37,43 @@ export interface Activity {
    * 沒有時表示是直接和使用者對話的 agent。
    */
   agent?: string;
+}
+
+/** 上下文用量（Python 版，見對話壓縮）。 */
+export interface ContextUsage {
+  /** 下一次請求大約的 token 數（以模型上次回報的用量為準）。 */
+  tokens: number;
+  /** 模型的上下文上限；查不到時為 null。 */
+  window: number | null;
+  /** 超過這個 token 數會自動壓縮；不知道上限時為 null。 */
+  threshold: number | null;
+  /** 是否開啟自動壓縮。 */
+  auto: boolean;
+}
+
+/** 管理平台「對話壓縮」裡一個模型的上下文上限。 */
+export interface CompactionModel {
+  name: string;
+  label: string;
+  /** 實際使用的上限；查不到時為 null（不會主動壓縮）。 */
+  window: number | null;
+  /** 上限從哪裡來：管理者設定、端點查到、harness.yaml 的預設值或 litellm。 */
+  source: "config" | "detected" | "default" | "litellm" | null;
+  /** 管理者另外設定的值。 */
+  configured: number | null;
+  /** 從端點（vLLM、LiteLLM Proxy）查到的值。 */
+  detected: number | null;
+}
+
+/** 管理平台「對話壓縮」的設定（Python 版）。 */
+export interface CompactionSettings {
+  /** harness.yaml 寫了 compaction: false 時為 false。 */
+  enabled: boolean;
+  auto: boolean;
+  thresholdRatio: number;
+  /** harness.yaml 的 compaction.contextWindow（套用到所有模型）。 */
+  defaultWindow: number | null;
+  models: CompactionModel[];
 }
 
 /** subagent 內部呼叫的一個工具（Python 版）。 */
@@ -86,6 +124,8 @@ export interface SessionSummary {
   approval?: Approval;
   /** 自建 agent 的名稱（Python 版）；agent 刪掉後仍然保留。 */
   agentLabel?: string;
+  /** 最近一次的上下文用量（Python 版）。 */
+  context?: ContextUsage;
 }
 
 /** 寫檔類工具執行前，給使用者看的內容。 */

@@ -190,6 +190,23 @@ export function describeDetail(entry: AuditEntry): string {
     }
     case "settings.models":
       return Array.isArray(detail.models) ? detail.models.join("、") : "";
+    case "settings.compaction": {
+      const parts = [
+        detail.auto === false ? "自動壓縮：關閉" : "自動壓縮：開啟",
+      ];
+      if (typeof detail.thresholdRatio === "number") {
+        parts.push(`門檻 ${Math.round(detail.thresholdRatio * 100)}%`);
+      }
+      const windows = Object.entries(
+        (detail.contextWindows ?? {}) as Record<string, unknown>,
+      ).filter(([, value]) => value != null);
+      if (windows.length > 0) {
+        parts.push(
+          windows.map(([name, value]) => `${name}=${String(value)}`).join("、"),
+        );
+      }
+      return parts.join(" · ");
+    }
     case "audit.export":
       return `格式：${String(detail.format ?? "").toUpperCase()}`;
     default:

@@ -145,6 +145,13 @@ _UNTITLED = "新對話"
 _TITLE_LENGTH = 40
 _PREVIEW_LIMIT = 200_000
 _MODEL_TEST_TIMEOUT = 20
+# 從端點查到的各模型上下文上限，多久重新查一次（秒），以及查詢的逾時。
+_CONTEXT_WINDOW_TTL = 600
+_CONTEXT_WINDOW_TIMEOUT = 5
+# 手動壓縮的說明（/compact 後面的文字）的長度上限。
+_COMPACT_INSTRUCTIONS_LIMIT = 2000
+# 手動壓縮時對話太短、沒有可以壓縮的內容。
+NOTHING_TO_COMPACT = "nothing_to_compact"
 # 向模型中台查詢這個人能用哪些模型：結果保留多久、查不到時多久後再查、
 # 最多等多久（讀取專案資訊時會等它）。
 MODEL_ACCESS_TTL = 300
@@ -256,6 +263,11 @@ class _State:
     approved_calls: set[str] = dataclasses.field(default_factory=set)
     # 被伺服器停下時（例如帳號被停用）顯示的說明。
     stop_notice: str | None = None
+    # 最近一次的上下文用量（見 loop 的 context_usage 事件），存在 .meta.json。
+    context: dict[str, Any] | None = None
+    # 這一輪是手動壓縮（/compact）時，摘要要特別保留的重點；None 表示一般
+    # 的一輪。
+    compact_request: str | None = None
 
 
 class Workspace:
@@ -340,6 +352,9 @@ class Workspace:
         self._personal_skill_cache: dict[str, dict[str, skills_lib.Skill]] = {}
         # 模型中台回覆的「這個人能用的模型」：使用者識別 → (到期時間, 名稱)。
         self._model_access: dict[str, tuple[float, frozenset[str] | None]] = {}
+        # 從端點查到的各模型上下文上限（對話壓縮用）與查詢的時間。
+        self._detected_windows: dict[str, int] = {}
+        self._windows_checked = 0.0
         # 管理者在管理平台掛載的 MCP 伺服器；網站啟動後由 server 呼叫
         # mcp.start() 在背景連線，工具連上後才加進專案。
         self.mcp = mcp_admin.McpAdmin(project, self.refresh_project)
@@ -2029,6 +2044,82 @@ class Workspace:
         self._start(state, None, user, folder)
         return self._summary(state)
 
+    def compact(
+        self, user: accounts_lib.User, session_id: str, instructions: str = ""
+    ) -> dict[str, Any]:
+        """在背景壓縮一段對話（聊天中輸入 /compact）。
+
+        不管有沒有超過門檻，把最近一段之外的對話交給模型摘要，之後模型
+        看到的是摘要。
+
+        Args:
+            user: 發出請求的人。
+            session_id: 要壓縮的對話。
+            instructions: 摘要時特別要保留的重點，可以留空。
+
+        Raises:
+            WebError: 對話還在執行、這個人不能使用這個 agent，或說明太長。
+        """
+        state = self._require(user, session_id)
+        self._assert_idle(state)
+        self._check_run_allowed(user, state.agent)
+        instructions = instructions.strip()
+        if len(instructions) > _COMPACT_INSTRUCTIONS_LIMIT:
+            raise WebError(
+                400, f"說明不能超過 {_COMPACT_INSTRUCTIONS_LIMIT} 個字"
+            )
+        folder = self._run_folder(user, state.options["folder"])
+        state.compact_request = instructions
+        self._start(state, None, user, folder)
+        self._set_activity(state, {"kind": "compacting"})
+        return self._summary(state)
+
+    async def _compact_now(
+        self,
+        state: _State,
+        agent: agents_lib.Agent,
+        user: accounts_lib.User,
+        settings: compaction_lib.Compaction | None,
+        instructions: str,
+    ) -> None:
+        """手動壓縮的本體（在 _execute 裡執行）。"""
+        settings = settings or compaction_lib.Compaction()
+        try:
+            result = await loop.compact(
+                agent,
+                state.session,
+                settings=settings,
+                model_fn=self._model_fn,
+                memory=self._memory_for(user),
+                instructions=instructions,
+            )
+        except compaction_lib.CompactionError as error:
+            raise WebError(400, f"壓縮失敗：{error}") from error
+        state.status = "done"
+        if result is None:
+            state.stop_reason = NOTHING_TO_COMPACT
+        else:
+            state.stop_reason = "end_turn"
+            model = agent.model or llm.default_model()
+            state.context = {
+                "tokens": result.tokens_after,
+                "window": compaction_lib.context_window(settings, model),
+                "threshold": compaction_lib.threshold(
+                    settings, model, agent.model_params
+                ),
+                "auto": settings.auto,
+            }
+            self._emit(
+                {"type": "session_reload", "sessionId": state.session.id}
+            )
+        self._emit(
+            {
+                "type": "run_end",
+                "sessionId": state.session.id,
+                "stopReason": state.stop_reason,
+            }
+        )
+
     def rename(
         self, user: accounts_lib.User, session_id: str, title: str
     ) -> dict[str, Any]:
@@ -2620,6 +2711,14 @@ class Workspace:
             llm.set_caller(self._caller(user, session_id, agent.name))
             # ontology 依這一輪是誰套用群組權限（型別、動作、知識庫）。
             ontology_lib.set_viewer(self._ontology_viewer(user))
+            compaction = await self._run_compaction()
+            if state.compact_request is not None:
+                instructions = state.compact_request
+                state.compact_request = None
+                await self._compact_now(
+                    state, agent, user, compaction, instructions
+                )
+                return
             events = loop.run_stream(
                 agent,
                 text,
@@ -2628,7 +2727,7 @@ class Workspace:
                 workdir=folder.path,
                 hooks=project.hooks,
                 memory=self._memory_for(user),
-                compaction=project.compaction,
+                compaction=compaction,
                 model_fn=self._model_fn,
                 hidden=folder.hidden,
                 hide_dotfiles=folder.hide_dotfiles,
@@ -2723,9 +2822,19 @@ class Workspace:
             state.replying = data["to"]
             # 摘要裡的 agent 由對話紀錄推算，轉交後自然換成接手的 agent。
             self._touch(state)
+        elif event.type == "compaction_start":
+            self._set_activity(state, {"kind": "compacting"})
         elif event.type == "compaction":
             # 壓縮紀錄已經寫進 session，讓瀏覽器重新讀取。
             self._emit({"type": "session_reload", "sessionId": session_id})
+            self._set_activity(state, {"kind": "thinking"})
+        elif event.type == "compaction_failed":
+            _LOG.warning("對話 %s 自動壓縮失敗：%s", session_id, data["error"])
+            self._set_activity(state, {"kind": "thinking"})
+        elif event.type == "context_usage":
+            state.context = dict(data)
+            self._save_meta(state)
+            self._touch(state)
         elif event.type == "subagent":
             self._handle_subagent(state, data)
         elif event.type == "run_end":
@@ -3064,6 +3173,134 @@ class Workspace:
         self.forget_model_access()
         self._emit({"type": "project"})
 
+    async def compaction_settings(self) -> dict[str, Any]:
+        """管理平台「對話壓縮」的設定，以及各模型的上下文上限與來源。
+
+        每次打開都重新向端點查詢上限（自架模型改了 max_model_len 時可以
+        馬上看到）。
+
+        Returns:
+            {"enabled", "auto", "thresholdRatio", "defaultWindow",
+            "models": [{"name", "label", "window", "source", "configured",
+            "detected"}]}。source 是 config（管理者設定）、detected（從
+            端點查到）、default（harness.yaml 的 contextWindow）、litellm
+            或 None（查不到，不會主動壓縮）。
+        """
+        settings = self.project.compaction or compaction_lib.Compaction()
+        self._windows_checked = 0.0
+        detected = await self._context_windows()
+        configured = settings.context_windows
+        merged = dataclasses.replace(
+            settings, context_windows={**detected, **configured}
+        )
+        models = []
+        for name, label in self._compaction_models().items():
+            window, source = compaction_lib.context_window_source(merged, name)
+            bare = name.removeprefix(llm.PROXY_PREFIX)
+            own = configured.get(name) or configured.get(bare)
+            if source == "model":
+                source = "config" if own else "detected"
+            models.append(
+                {
+                    "name": name,
+                    "label": label,
+                    "window": window,
+                    "source": source,
+                    "configured": own,
+                    "detected": detected.get(name) or detected.get(bare),
+                }
+            )
+        return {
+            "enabled": self.project.compaction is not None,
+            "auto": settings.auto,
+            "thresholdRatio": settings.threshold_ratio,
+            "defaultWindow": settings.context_window,
+            "models": models,
+        }
+
+    def _compaction_models(self) -> dict[str, str]:
+        """管理平台列出上下文上限的模型：{名稱: 顯示名稱}。
+
+        包含各 agent 使用的模型、對話中可以切換的模型，以及設定過上限的
+        模型（才能清掉不再使用的設定）。
+        """
+        models: dict[str, str] = {}
+        for agent in self.project.agents.values():
+            name = agent.model or llm.default_model()
+            models.setdefault(name, name)
+        for item in self._model_choices:
+            models[item["name"]] = item.get("label") or item["name"]
+        settings = self.project.compaction
+        for name in settings.context_windows if settings else {}:
+            models.setdefault(name, name)
+        return models
+
+    def update_compaction_settings(self, body: dict[str, Any]) -> None:
+        """儲存「對話壓縮」的設定（寫進 harness.yaml 的 compaction）。
+
+        Args:
+            body: {"auto": bool, "thresholdRatio": 0.5–0.95,
+                "contextWindows": {模型名稱: token 數或 null}}。null 或沒列
+                出的模型表示不另外設定（用查到的值）。compaction 區塊裡的
+                其他設定保持原樣。
+
+        Raises:
+            WebError: 設定值不合法，或 harness.yaml 無法安全地修改。
+        """
+        auto = body.get("auto")
+        ratio = body.get("thresholdRatio")
+        windows = body.get("contextWindows")
+        if not isinstance(auto, bool):
+            raise WebError(400, "auto 必須是 true 或 false")
+        if (
+            not isinstance(ratio, (int, float))
+            or isinstance(ratio, bool)
+            or not 0.5 <= ratio <= 0.95
+        ):
+            raise WebError(400, "壓縮門檻必須介於 50% 到 95%")
+        if not isinstance(windows, dict):
+            raise WebError(400, "contextWindows 必須是 {模型名稱: token 數}")
+        cleaned: dict[str, int] = {}
+        for name, value in windows.items():
+            if value is None:
+                continue
+            if (
+                not isinstance(name, str)
+                or not name.strip()
+                or len(name) > 200
+                or not isinstance(value, int)
+                or isinstance(value, bool)
+                or not 1000 <= value <= 100_000_000
+            ):
+                raise WebError(
+                    400,
+                    f"{name} 的上下文上限必須是 1000 到 1 億之間的整數",
+                )
+            cleaned[name.strip()] = value
+        current = config_lib.read_config(self.project.root).get("compaction")
+        block = dict(current) if isinstance(current, dict) else {}
+        if auto:
+            block.pop("auto", None)
+        else:
+            block["auto"] = False
+        if round(float(ratio), 4) == compaction_lib.Compaction.threshold_ratio:
+            block.pop("thresholdRatio", None)
+        else:
+            block["thresholdRatio"] = round(float(ratio), 4)
+        if cleaned:
+            block["contextWindows"] = cleaned
+        else:
+            block.pop("contextWindows", None)
+        try:
+            settings = project_lib.load_compaction(block or None)
+            config_lib.save_block(
+                self.project.root, "compaction", block or None
+            )
+        except ValueError as error:
+            raise WebError(400, str(error)) from error
+        self.project.compaction = settings
+        self._emit({"type": "project"})
+
     def _connection_values(
         self, settings: dict[str, Any]
     ) -> tuple[dict[str, str], str]:
@@ -3288,6 +3525,42 @@ class Workspace:
     def forget_model_access(self) -> None:
         """模型連線或模型清單改了：下次重新向模型中台查詢。"""
         self._model_access.clear()
+        self._windows_checked = 0.0
+
+    async def _context_windows(self) -> dict[str, int]:
+        """端點上各模型的上下文上限（快取 _CONTEXT_WINDOW_TTL 秒）。
+
+        查不到時沿用上次的結果，不影響對話。
+        """
+        now = time.monotonic()
+        if self._windows_checked and now - self._windows_checked < (
+            _CONTEXT_WINDOW_TTL
+        ):
+            return self._detected_windows
+        self._windows_checked = now
+        try:
+            self._detected_windows = await asyncio.wait_for(
+                model_catalog.context_windows(), _CONTEXT_WINDOW_TIMEOUT
+            )
+        except (TimeoutError, model_catalog.CatalogError) as error:
+            _LOG.info("查不到端點上模型的上下文上限：%s", error)
+        return self._detected_windows
+
+    async def _run_compaction(self) -> compaction_lib.Compaction | None:
+        """這一輪的壓縮設定：harness.yaml 的設定，加上從端點查到的上限。
+
+        harness.yaml 的 compaction.contextWindows 優先於查到的值。
+        """
+        settings = self.project.compaction
+        if settings is None:
+            return None
+        detected = await self._context_windows()
+        if not detected:
+            return settings
+        return dataclasses.replace(
+            settings,
+            context_windows={**detected, **settings.context_windows},
+        )
 
     # ---- 自建 agent（見 user_agents.py）----
 
@@ -4336,6 +4609,8 @@ class Workspace:
             meta["sessionTools"] = sorted(state.session_tools)
         if state.approved_calls:
             meta["approvedCalls"] = sorted(state.approved_calls)
+        if state.context is not None:
+            meta["context"] = state.context
         if (
             state.status in ("running", "waiting")
             or state.stop_reason == INTERRUPTED_STOP_REASON
@@ -4428,6 +4703,7 @@ class Workspace:
             "approval": pending.approval if pending else None,
             "category": state.category,
             "agentLabel": label,
+            "context": state.context,
         }
         summary.update({k: v for k, v in optional.items() if v is not None})
         return summary
@@ -4787,6 +5063,9 @@ def _restore_meta(state: _State, meta: dict[str, Any]) -> None:
             for key, value in feedback.items()
             if isinstance(value, dict) and value.get("rating") in RATINGS
         }
+    context = meta.get("context")
+    if isinstance(context, dict) and isinstance(context.get("tokens"), int):
+        state.context = context
     reply_models = meta.get("replyModels")
     if isinstance(reply_models, dict):
         state.reply_models = {
@@ -5028,6 +5307,8 @@ def _empty_document_note(path: str) -> str:
 
 
 def _describe(error: BaseException) -> str:
+    if isinstance(error, WebError):
+        return str(error)
     return f"{type(error).__name__}: {error}"
 
 

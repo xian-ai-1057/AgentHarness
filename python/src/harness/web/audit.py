@@ -53,6 +53,7 @@ ACTIONS = {
     "settings.model": "修改預設模型",
     "settings.connection": "修改模型連線",
     "settings.models": "修改可選的模型",
+    "settings.compaction": "修改對話壓縮設定",
     "knowledge.create": "新增知識庫",
     "knowledge.update": "修改知識庫",
     "knowledge.delete": "拿掉知識庫",

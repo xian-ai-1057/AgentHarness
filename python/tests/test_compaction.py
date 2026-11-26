@@ -543,14 +543,139 @@ class TestOverflowRecovery:
             ("This model's maximum context length is 8192 tokens", True),
             ("prompt is too long: 210000 tokens > 200000 maximum", True),
             ("Rate limit reached for tokens per min", False),
+            (
+                "The decoder prompt (length 200000) is longer than the "
+                "maximum model length of 196608.",
+                True,
+            ),
+            (
+                "Input prompt (200000 tokens) is too long and exceeds limit "
+                "of 196608",
+                True,
+            ),
+            ("litellm.ContextWindowExceededError: BadRequest", True),
         ],
     )
     def test_is_context_overflow_reads_messages(self, message, expected):
         assert llm.is_context_overflow(RuntimeError(message)) is expected
 
 
+class TestContextWindow:
+    """各模型的上下文上限與用量事件。"""
+
+    def test_per_model_setting_wins(self):
+        settings = harness.Compaction(
+            context_window=100_000, context_windows={"gemma": 196_608}
+        )
+
+        assert compaction.context_window_source(settings, "gemma") == (
+            196_608,
+            "model",
+        )
+        assert compaction.context_window_source(settings, "other") == (
+            100_000,
+            "default",
+        )
+
+    def test_proxy_prefix_matches_endpoint_name(self):
+        settings = harness.Compaction(context_windows={"gemma": 196_608})
+
+        assert compaction.context_window(settings, "litellm_proxy/gemma") == (
+            196_608
+        )
+
+    def test_unknown_model_has_no_window(self):
+        settings = harness.Compaction()
+
+        assert compaction.context_window_source(
+            settings, "my-own-model-xyz"
+        ) == (None, None)
+
+    def test_threshold_reserves_reply_tokens(self):
+        settings = harness.Compaction(context_windows={"m": 100_000})
+
+        assert compaction.threshold(settings, "m", {"max_tokens": 4000}) == (
+            76_000
+        )
+
+    def test_invalid_per_model_window_is_rejected(self):
+        with pytest.raises(ValueError, match="正整數"):
+            harness.Compaction(context_windows={"m": 0})
+
+    async def test_run_reports_context_usage(self, fake_model):
+        model = fake_model([conftest.text_response("好")])
+        events = []
+
+        async for event in harness.run_stream(
+            harness.Agent(name="a", model="m"),
+            "嗨",
+            compaction=harness.Compaction(context_windows={"m": 100_000}),
+            model_fn=model,
+        ):
+            events.append(event)
+
+        [usage] = [e for e in events if e.type == "context_usage"]
+        assert usage.data["window"] == 100_000
+        assert usage.data["threshold"] == 80_000
+        assert usage.data["tokens"] > 0
+        assert usage.data["auto"] is True
+
+    async def test_compaction_start_comes_before_summary(self, fake_model):
+        session = sessions.Session()
+        _long_history(session)
+        model = fake_model([_summary_response(), conftest.text_response("好")])
+        types = []
+
+        async for event in harness.run_stream(
+            harness.Agent(name="a"),
+            "新問題",
+            session=session,
+            compaction=harness.Compaction(context_window=2000),
+            model_fn=model,
+        ):
+            types.append(event.type)
+
+        start = types.index("compaction_start")
+        assert types[start + 1] == "compaction"
+        assert types[start + 2] == "context_usage"
+
+    async def test_record_keeps_numbers_for_display(self, fake_model):
+        session = sessions.Session()
+        _long_history(session)
+        model = fake_model([_summary_response(), conftest.text_response("好")])
+
+        await harness.run(
+            harness.Agent(name="a"),
+            "新問題",
+            session=session,
+            compaction=harness.Compaction(context_window=2000),
+            model_fn=model,
+        )
+
+        [record] = [m for m in session.messages if compaction.is_record(m)]
+        assert record["summarized"] == 8
+        assert record["tokens_after"] < record["tokens_before"]
+
+
 class TestManualCompaction:
     """harness.compact。"""
+
+    async def test_instructions_are_added_to_summary_request(self, fake_model):
+        session = sessions.Session()
+        _long_history(session, turns=2, size=50)
+        session.append({"role": "user", "content": "最新"})
+        model = fake_model([_summary_response()])
+
+        await harness.compact(
+            harness.Agent(name="a"),
+            session,
+            model_fn=model,
+            instructions="保留報表的欄位名稱",
+        )
+
+        prompt = model.requests[0]["messages"][-1]["content"]
+        assert prompt.startswith(compaction.SUMMARY_INSTRUCTION)
+        assert "保留報表的欄位名稱" in prompt
 
     async def test_compact_summarizes_even_below_threshold(self, fake_model):
         session = sessions.Session()
@@ -627,6 +752,22 @@ class TestProjectConfig:
 
         assert settings.context_window == 32000
         assert settings.retain_ratio == 0.2
+
+    def test_per_model_windows_are_mapped(self, project_dir):
+        self._append(
+            project_dir,
+            "compaction:\n  contextWindows:\n    gemma-4-31b: 196608\n",
+        )
+
+        settings = harness.load_project(project_dir).compaction
+
+        assert settings.context_windows == {"gemma-4-31b": 196608}
+
+    def test_per_model_windows_must_be_a_mapping(self, project_dir):
+        self._append(project_dir, "compaction:\n  contextWindows: 5\n")
+
+        with pytest.raises(ValueError, match="contextWindows"):
+            harness.load_project(project_dir)
 
     def test_unknown_setting_is_an_error(self, project_dir):
         self._append(project_dir, "compaction:\n  window: 1\n")

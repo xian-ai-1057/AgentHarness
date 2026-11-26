@@ -57,7 +57,10 @@ RESPONSES = {
                 "model_info": {"mode": "embedding"},
             },
             {"model_name": "cohere-rerank", "model_info": {"mode": "rerank"}},
-            {"model_name": "gpt-5", "model_info": {"mode": "chat"}},
+            {
+                "model_name": "gpt-5",
+                "model_info": {"mode": "chat", "max_input_tokens": 272000},
+            },
             # 沒標明用途的依名稱猜。
             {"model_name": "bge-m3", "model_info": {}},
             {"model_name": "my-chat"},
@@ -67,7 +70,7 @@ RESPONSES = {
         "data": [
             {"id": "Qwen3-Embedding-8B"},
             {"id": "bge-reranker-v2-m3"},
-            {"id": "gemma-4-31b"},
+            {"id": "gemma-4-31b", "max_model_len": 196608},
         ]
     },
     "/api/tags": {"models": [{"name": "hermes3:latest"}, {"name": "qwen3"}]},
@@ -387,3 +390,39 @@ class TestRetrievalModels:
 
         with pytest.raises(model_catalog.CatalogError, match="金鑰"):
             await model_catalog.list_retrieval_models()
+
+
+class TestContextWindows:
+    """對話壓縮用的各模型上下文上限。"""
+
+    @pytest.fixture(autouse=True)
+    def no_connection(self, monkeypatch):
+        monkeypatch.delenv("HARNESS_BASE_URL", raising=False)
+
+    async def test_vllm_max_model_len_is_read(self, fake, monkeypatch):
+        base, _ = fake
+        monkeypatch.setenv("HARNESS_BASE_URL", f"{base}/vllm/v1")
+
+        found = await model_catalog.context_windows()
+
+        assert found == {"gemma-4-31b": 196608}
+
+    async def test_litellm_model_info_is_read(self, fake, monkeypatch):
+        base, _ = fake
+        monkeypatch.setenv("HARNESS_BASE_URL", f"{base}/litellm/v1")
+
+        found = await model_catalog.context_windows()
+
+        assert found == {"gpt-5": 272000}
+
+    async def test_problems_give_an_empty_result(self, fake, monkeypatch):
+        base, _ = fake
+        monkeypatch.setenv("HARNESS_BASE_URL", f"{base}/denied")
+
+        assert await model_catalog.context_windows() == {}
+
+    async def test_without_an_endpoint_nothing_is_asked(self, fake):
+        _, seen = fake
+
+        assert await model_catalog.context_windows() == {}
+        assert seen == []

@@ -25,7 +25,15 @@ export const SOURCE_LABELS: Record<SettingSource, string> = {
 export const STOP_NOTICES: Record<string, string> = {
   max_turns: "已達到這一輪的回合上限，可以再傳訊息讓它繼續。",
   max_tokens: "回覆達到長度上限而被截斷。",
+  nothing_to_compact: "對話還很短，沒有需要壓縮的內容。",
 };
+
+/** token 數，例如「8,200」「121k」「1.2M」。 */
+export function formatTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 10_000) return `${Math.round(tokens / 1000)}k`;
+  return tokens.toLocaleString("en-US");
+}
 
 /** 正在做什麼，例如「執行 read_file」。 */
 export function activityLabel(activity: Activity | undefined): string {
@@ -35,6 +43,7 @@ export function activityLabel(activity: Activity | undefined): string {
     return `${who}等你確認 ${activity.tool ?? ""}`;
   if (activity.kind === "tool") return `${who}執行 ${activity.tool ?? "工具"}`;
   if (activity.kind === "writing") return `${who}撰寫回覆`;
+  if (activity.kind === "compacting") return `${who}正在壓縮對話`;
   return `${who}思考中`;
 }
 

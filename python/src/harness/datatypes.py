@@ -94,8 +94,13 @@ class Event:
         tool_call:   {"call": ToolCall}
         tool_result: {"result": ToolResult}
         handoff:     {"from": str, "to": str}（agent 名稱）
+        compaction_start: {"reason": "threshold" | "overflow"}（開始壓縮，
+                      摘要要多呼叫一次模型）
         compaction:  {"result": compaction.CompactionResult}（對話被壓縮）
         compaction_failed: {"error": str}（自動壓縮失敗，對話照常繼續）
+        context_usage: {"tokens": int, "window": int | None,
+                      "threshold": int | None, "auto": bool}（每次模型
+                      回應與壓縮後的上下文用量；有傳 compaction 時才有）
         subagent:    {"agent": str, "path": list[str], "call_id": str,
                       "event": Event}（subagent 內部的進度）
         run_end:     {"result": RunResult}

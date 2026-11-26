@@ -41,6 +41,12 @@ _OVERFLOW_PATTERNS = (
     "prompt is too long",
     "input is too long",
     "exceeds the context",
+    # vLLM：The decoder prompt (length …) is longer than the maximum model
+    # length of …；Input prompt (… tokens) is too long and exceeds limit of …
+    "maximum model length",
+    "is too long and exceeds limit",
+    # LiteLLM Proxy 轉回來的錯誤只剩例外名稱寫在訊息裡。
+    "contextwindowexceedederror",
 )
 
 # LiteLLM Proxy 認得的標頭：使用者（customer / end user）、同一段對話的

@@ -264,7 +264,7 @@ def _assemble(
         if config.get("memory")
         else None,
         hooks=_load_guardrails(config.get("guardrails") or {}),
-        compaction=_load_compaction(config.get("compaction")),
+        compaction=load_compaction(config.get("compaction")),
         sandbox=sandbox,
         mcp_connections=connections,
         toolsets=toolsets,
@@ -912,6 +912,7 @@ _KNOWLEDGE_FIELDS = {"path", "name", "description", *_RETRIEVAL_FIELDS}
 
 _COMPACTION_FIELDS = {
     "contextWindow": "context_window",
+    "contextWindows": "context_windows",
     "thresholdRatio": "threshold_ratio",
     "retainRatio": "retain_ratio",
     "summaryModel": "summary_model",
@@ -924,8 +925,18 @@ _COMPACTION_FIELDS = {
 }
 
 
-def _load_compaction(config: Any) -> compaction_lib.Compaction | None:
-    """依 harness.yaml 的 compaction 區塊建立設定；沒寫時使用預設值。"""
+def load_compaction(config: Any) -> compaction_lib.Compaction | None:
+    """依 harness.yaml 的 compaction 區塊建立設定；沒寫時使用預設值。
+
+    Args:
+        config: compaction 的值（None、true、false 或設定區塊）。
+
+    Returns:
+        壓縮設定；寫 false 時為 None。
+
+    Raises:
+        ValueError: 寫法不對或設定值不合理。
+    """
     if config is False:
         return None
     if config is None or config is True:
@@ -938,9 +949,15 @@ def _load_compaction(config: Any) -> compaction_lib.Compaction | None:
             f"compaction 有不認得的設定：{unknown}，"
             f"可用的有：{sorted(_COMPACTION_FIELDS)}"
         )
-    return compaction_lib.Compaction(
-        **{_COMPACTION_FIELDS[key]: value for key, value in config.items()}
-    )
+    windows = config.get("contextWindows")
+    if windows is not None and not isinstance(windows, dict):
+        raise ValueError(
+            "compaction.contextWindows 必須是 {模型名稱: token 數} 的設定"
+        )
+    values = {_COMPACTION_FIELDS[key]: value for key, value in config.items()}
+    if windows is not None:
+        values["context_windows"] = {str(k): v for k, v in windows.items()}
+    return compaction_lib.Compaction(**values)
 
 
 def _load_guardrails(config: dict[str, Any]) -> hooks_lib.Hooks:

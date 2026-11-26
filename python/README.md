@@ -291,7 +291,7 @@ TypeScript 版的名稱、參數與輸出都相同。內建工具**要在 agent 
 
 | toolset | 工具 | 用途 | 需要同意 |
 |---|---|---|---|
-| `files` | `read_file` | 讀取文字檔；可用 `offset`、`limit` 只讀其中幾行 | |
+| `files` | `read_file` | 讀取文字檔；可用 `offset`、`limit` 只讀其中幾行。PDF、Word（.docx）、PowerPoint（.pptx）、Excel（.xlsx）直接取出文字，不需要沙盒 | |
 | | `list_dir` | 列出資料夾內容 | |
 | | `find_files` | 用 glob 樣式找檔案，例如 `*.py`、`src/**/*.ts` | |
 | | `search_files` | 用正規表示式搜尋檔案內容，回傳「路徑:行號: 內容」 | |
@@ -299,7 +299,8 @@ TypeScript 版的名稱、參數與輸出都相同。內建工具**要在 agent 
 | | `edit_file` | 把一段原文精準換成新文字，不必重寫整個檔案 | ✓ |
 | `shell` | `run_command` | 在專案資料夾執行指令（測試、建置、git…），回傳結束代碼與輸出 | ✓ |
 | `plan` | `update_plan` | 列出多步驟工作的計畫並更新每一步的狀態 | |
-| `web` | `web_fetch` | 讀取網址，HTML 轉成保留標題、清單與連結的純文字 | ✓ |
+| `web` | `web_search` | 用關鍵字搜尋網路，回傳標題、網址與摘要（見[網頁搜尋](#網頁搜尋)） | |
+| | `web_fetch` | 讀取網址，HTML 轉成保留標題、清單與連結的純文字 | ✓ |
 
 ```markdown
 ---
@@ -322,6 +323,30 @@ skills: [code-review, debugging]
 - `update_plan` 不存任何狀態：最新一次呼叫的參數就是目前的計畫。
 - `web_fetch` 會把網址送到外部，所以預設需要同意；信任的話加上
   `permissions.allow: [web_fetch]`。它會使用 `HTTPS_PROXY` 等代理設定。
+- `read_file` 讀 PDF、.docx、.pptx、.xlsx 時用和知識庫相同的解析器，PDF
+  依頁、PowerPoint 依投影片、Excel 依工作表分段；掃描的 PDF 沒有文字層會
+  提醒要先 OCR，舊格式的 .doc、.xls、.ppt 請先另存成新格式，單檔最大
+  50 MB。要修改或產生這些檔案時改用內建的 xlsx、docx、pptx、pdf skills。
+
+### 網頁搜尋
+
+`web_search` 只送出搜尋字詞，不需要同意；agent 先搜尋，再用 `web_fetch`
+讀需要的網頁。搜尋服務用環境變數選：
+
+| 環境變數 | 說明 |
+|---|---|
+| `HARNESS_WEB_SEARCH` | `duckduckgo`（預設，不需要金鑰）、`searxng`、`brave`、`tavily`，或 `off` 關閉 |
+| `SEARXNG_URL` | 自架 SearXNG 的網址（要開啟 JSON 格式） |
+| `BRAVE_API_KEY` | Brave Search API 的金鑰 |
+| `TAVILY_API_KEY` | Tavily 的金鑰 |
+| `HARNESS_WEB_SEARCH_REGION` | DuckDuckGo 的地區，預設 `wt-wt`，例如 `tw-tzh` |
+
+沒有設定 `HARNESS_WEB_SEARCH` 時，有 `TAVILY_API_KEY`、`BRAVE_API_KEY`、
+`SEARXNG_URL` 就依序用它們，否則用 DuckDuckGo。DuckDuckGo 沒有正式 API、
+常會擋下伺服器的請求（被擋時先改用精簡版再試），只適合試用；正式部署
+請設定 SearXNG、Brave 或 Tavily。MCP 伺服器（例如 LiteLLM
+的 webiq）提供同名的 `web_search` 時，內建的會讓位；不能直接連外的環境請
+用 MCP 搜尋並設定 `HARNESS_WEB_SEARCH=off`。
 
 在程式裡使用：
 
@@ -942,7 +967,7 @@ requires: [run_python]                 # 選用，agent 要有這些工具才用
   明確列出。
 - `requires` 列出 skill 用得上的前提工具（例如要在沙盒裡執行腳本的
   skill 寫 `run_python`）。網頁上這段對話的 agent 沒有這些工具（專案沒有
-  沙盒、群組沒開放，或在「＋ → 工具」取消了）時，這個 skill 不會預設開啟，
+  沙盒、群組沒開放，或舊對話停用了這個工具）時，這個 skill 不會預設開啟，
   使用者挑了也不會套用。
 - 載入狀態是從對話紀錄推算的，接續對話時已載入的 skill 仍然有效。
 
@@ -958,6 +983,16 @@ refund = harness.Skill(
 )
 agent = harness.Agent(name="cs", instructions="...", skills=[refund])
 ```
+
+### 在網頁上管理 skills
+
+網頁版的管理者可以在「管理平台 → Skills」新增、修改、刪除 skill，或上傳
+整個 skill 資料夾的 zip（存成專案的 `skills/<名稱>/`，馬上生效）；內建的
+skill 不能刪，但可以關閉、設成預設開啟，修改時會複製成公司版本取代它。
+存取群組可以限制每個群組能用哪些 skill。要登入時，每個人還能在側欄的
+「Skills」頁建立只有自己能用的個人 skill（存在
+`.harness/personal-skills/`，不能分享）。詳見
+[說明文件](https://agent-harness-docs-ten.vercel.app/advanced/skills#在網頁上管理)。
 
 ### 內建 skills
 
@@ -1040,10 +1075,10 @@ skill 與下面「其他改寫自官方的 skills」，伺服器自動把它們�
 agent 需要時才載入。需要執行程式的（`SKILL.md` 寫了
 `requires: [run_python]`：這四個加上 `algorithmic-art`、`canvas-design`、
 `web-artifacts-builder`、`webapp-testing`）只在專案有開沙盒、而且 agent 能
-執行程式（工具有 `run_python`，沒有被群組或這段對話關掉）時才開；群組沒有
-開放沙盒時「＋ → Skills」也不列出它們，在「＋ → 工具」取消 `run_python`
-時它們變成灰色、不能勾選。使用者可以在「＋ → Skills」取消勾選標「預設」的
-項目（只影響這段對話）。要換成別的清單或全部關掉：
+執行程式（工具有 `run_python`，沒有被群組關掉）時才開。和 Claude 一樣，
+使用者端不列出預設開啟的 skill（「＋ → Skills」、Skills 頁與自建 Agent 的
+技能清單都看不到），只有管理者在「管理平台 → Skills」看得到、能調整。要換成
+別的清單或全部關掉：
 
 ```yaml
 web:
@@ -1574,9 +1609,10 @@ Python 版另外會處理：
 - **訊息防護**：使用者的訊息被擋下時，顯示被擋下的原因。
 - **連接模型**：在網頁上選供應商、填金鑰與模型，不需要設定環境變數
   （見下方的[在網頁上連接模型](#在網頁上連接模型)）。
-- **每段對話選模型、工具與 skills**：輸入框右下角選模型，左下角的 ＋
-  勾選 skills 與工具，下一則訊息開始生效。改寫自 Anthropic 官方的 skills
-  預設開啟（需要執行程式的要有沙盒），可以在這裡關掉（見 [Skills](#skills)）。要多開放幾個模型給使用者選，
+- **每段對話選模型與 skills**：輸入框右下角選模型，左下角的 ＋
+  勾選 skills 與知識庫，下一則訊息開始生效。網頁搜尋、讀檔等工具與改寫自
+  Anthropic 官方的 skills 自動開啟（需要執行程式的要有沙盒），和 Claude
+  一樣不在這裡列出（見 [Skills](#skills)）。要多開放幾個模型給使用者選，
   在 `harness.yaml` 寫 `models: [openai/gpt-5, ...]`（每一項也可以是
   `{name, label}`）。
 - **帳號與工作資料夾**：讓其他人使用時每個人用自己的帳號登入，對話、

@@ -38,6 +38,7 @@ import {
   useStore,
 } from "../store.ts";
 import { CategoryNameDialog, MoveDialog } from "./CategoryDialogs.tsx";
+import { SparkIcon } from "./chat/icons.tsx";
 import {
   AddIcon,
   AgentIcon,
@@ -309,6 +310,16 @@ export function Sidebar({
         >
           <BookIcon />
           <span className="grow">知識庫</span>
+        </Link>
+      )}
+      {project?.features?.personalSkills !== undefined && (
+        <Link
+          to="/skills"
+          className={`side-item ${route.page === "skills" ? "active" : ""}`}
+          current={route.page === "skills"}
+        >
+          <SparkIcon />
+          <span className="grow">Skills</span>
         </Link>
       )}
 

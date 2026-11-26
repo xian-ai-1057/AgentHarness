@@ -4,10 +4,16 @@
 paths.open_path：路徑上的捷徑（symlink）一律拒絕，列資料夾時也不列出捷徑。
 
 設計參考 Claude Code 的 Read / Write / Edit / Glob / Grep：
-    read_file: 讀整個檔案，或用 offset / limit 只讀其中幾行。
+    read_file: 讀整個檔案，或用 offset / limit 只讀其中幾行。PDF、Word、
+        PowerPoint、Excel 會先轉成文字（和知識庫用同一套解析器，不需要
+        沙盒），所以使用者上傳的文件可以直接讀。
     edit_file: 精準取代一段文字，不必為了改一行重寫整個檔案。
     find_files、search_files: 依檔名或內容找檔案（見 search 模組）。
 """
+
+import io
+import os
+import pathlib
 
 from harness import datatypes
 from harness import tools
@@ -15,6 +21,11 @@ from harness.builtin import paths
 from harness.builtin import search
 
 MAX_READ_CHARS = 100_000
+# read_file 會先轉成文字的文件格式（解析器見 harness.knowledge）。
+DOCUMENT_SUFFIXES = (".pdf", ".docx", ".pptx", ".xlsx")
+MAX_DOCUMENT_BYTES = 50_000_000
+# 舊版 Office 格式讀不了，要轉檔或用沙盒處理。
+_LEGACY_OFFICE = (".doc", ".xls", ".ppt")
 
 # 保留原本的匯入路徑（harness.builtin.files.resolve_path）。
 resolve_path = paths.resolve_path
@@ -48,9 +59,11 @@ def read_file(
     offset: int | None = None,
     limit: int | None = None,
 ) -> str:
-    """讀取專案資料夾裡的文字檔。
+    """讀取專案資料夾裡的檔案內容。
 
-    檔案很長時，用 offset 與 limit 只讀需要的那幾行。
+    文字檔原樣讀出；PDF、Word（.docx）、PowerPoint（.pptx）、Excel
+    （.xlsx）會轉成文字，並標出頁碼、投影片或工作表。檔案很長時，用
+    offset 與 limit 只讀需要的那幾行。
 
     Args:
         path: 相對於專案根目錄的檔案路徑。
@@ -60,10 +73,65 @@ def read_file(
     for name, value in (("offset", offset), ("limit", limit)):
         if value is not None and value < 1:
             raise tools.ToolError(f"{name} 必須大於或等於 1")
-    text = paths.read_text(context, path)
+    suffix = pathlib.PurePosixPath(path).suffix.lower()
+    if suffix in DOCUMENT_SUFFIXES:
+        text = _read_document(context, path, suffix)
+    else:
+        try:
+            text = paths.read_text(context, path)
+        except UnicodeDecodeError as error:
+            hint = (
+                "舊版 Office 格式（.doc、.xls、.ppt）要先另存成 .docx、.xlsx、"
+                ".pptx，或用 run_python 處理"
+                if suffix in _LEGACY_OFFICE
+                else "這不是文字檔，不能用 read_file 讀取"
+            )
+            raise tools.ToolError(f"{path}：{hint}") from error
     if offset is None and limit is None:
         return _truncate(text)
     return _truncate(_slice_lines(text, offset or 1, limit))
+
+
+def _read_document(
+    context: datatypes.RunContext, path: str, suffix: str
+) -> str:
+    """把 PDF、Word、PowerPoint、Excel 轉成文字，每段前面標出位置。"""
+    # 和知識庫共用解析器；用到時才載入（knowledge 會載入模型相關套件）。
+    from harness import knowledge
+
+    fd = paths.open_path(context, path, paths.READ_FLAGS)
+    with os.fdopen(fd, "rb") as file:
+        paths.require_file(file.fileno(), path)
+        if os.fstat(file.fileno()).st_size > MAX_DOCUMENT_BYTES:
+            raise tools.ToolError(
+                f"{path} 超過 {MAX_DOCUMENT_BYTES // 1_000_000} MB，太大了"
+            )
+        data = file.read()
+    parser = knowledge.DEFAULT_PARSERS[suffix]
+    try:
+        sections = parser(io.BytesIO(data))
+    except ImportError as error:
+        raise tools.ToolError(str(error)) from error
+    except Exception as error:  # noqa: BLE001 壞掉的檔案各種錯誤都有可能
+        raise tools.ToolError(
+            f"無法解析 {path}：{error or type(error).__name__}"
+        ) from error
+    parts = []
+    for section in sections:
+        body = section.text.strip()
+        if not body:
+            continue
+        parts.append(
+            f"## {section.location}\n\n{body}" if section.location else body
+        )
+    if not parts:
+        note = (
+            "（可能是掃描檔，需要 OCR：有沙盒時載入 pdf 技能處理）"
+            if suffix == ".pdf"
+            else ""
+        )
+        return f"[{path} 沒有可以讀出的文字{note}]"
+    return "\n\n".join(parts)
 
 
 @tools.tool

@@ -43,9 +43,9 @@ import { FolderContext } from "./chat/folder.ts";
 import {
   agentDefaultSkills,
   agentKnowledge,
-  agentSkills,
   agentTools,
   type ComposerOptions,
+  choosableSkills,
   effectiveModel,
   modelLabel,
   optionsEnabled,
@@ -278,7 +278,7 @@ export function Conversation({ id }: { id: string }) {
     project && optionsEnabled(project)
       ? {
           models,
-          skills: agentSkills(project, agentInfo),
+          skills: choosableSkills(project, agentInfo),
           defaultSkills: agentDefaultSkills(project, agentInfo),
           tools: agentInfo ? agentTools(project, agentInfo) : [],
           knowledgeBases: project.knowledgeBases ?? [],

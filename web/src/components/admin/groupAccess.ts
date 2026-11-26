@@ -11,6 +11,7 @@ export const ACCESS_KINDS: AccessKind[] = [
   "toolsets",
   "knowledgeBases",
   "knowledge",
+  "skills",
 ];
 
 export const KIND_LABELS: Record<AccessKind, string> = {
@@ -18,6 +19,7 @@ export const KIND_LABELS: Record<AccessKind, string> = {
   toolsets: "工具組",
   knowledgeBases: "知識庫",
   knowledge: "知識庫標籤",
+  skills: "Skills",
 };
 
 /** 和知識庫有關的類別：專案沒有知識庫時不顯示。 */
@@ -42,13 +44,16 @@ export function accessSummary(
     toolsets: catalog.toolsets.length,
     knowledgeBases: catalog.knowledgeBases.length,
     knowledge: catalog.knowledge.length,
+    skills: catalog.skills?.length ?? 0,
   };
   return ACCESS_KINDS.filter(
-    (kind) => !isKnowledgeKind(kind) || catalog.hasKnowledge,
+    (kind) =>
+      (!isKnowledgeKind(kind) || catalog.hasKnowledge) &&
+      (kind !== "skills" || catalog.skills !== undefined),
   )
     .map(
       (kind) =>
-        `${KIND_LABELS[kind]} ${kindSummary(group[kind], totals[kind])}`,
+        `${KIND_LABELS[kind]} ${kindSummary(group[kind] ?? null, totals[kind])}`,
     )
     .join(" · ");
 }
@@ -66,6 +71,8 @@ export function groupDirty(saved: AccessGroup, draft: AccessGroup): boolean {
     saved.name !== draft.name ||
     saved.description !== draft.description ||
     !sameList(saved.members, draft.members) ||
-    ACCESS_KINDS.some((kind) => !sameList(saved[kind], draft[kind]))
+    ACCESS_KINDS.some(
+      (kind) => !sameList(saved[kind] ?? null, draft[kind] ?? null),
+    )
   );
 }

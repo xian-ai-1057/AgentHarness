@@ -1239,7 +1239,10 @@ def parse_pdf(path: pathlib.Path) -> list[Section]:
         raise ImportError(
             "讀取 PDF 需要 pypdf，請執行 pip install pypdf"
         ) from error
-    reader = pypdf.PdfReader(str(path))
+    # 也接受已經打開的檔案（read_file 用 BytesIO 傳進來）。
+    reader = pypdf.PdfReader(
+        str(path) if isinstance(path, pathlib.Path) else path
+    )
     return [
         Section(page.extract_text() or "", f"第 {number} 頁")
         for number, page in enumerate(reader.pages, start=1)

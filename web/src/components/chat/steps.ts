@@ -42,8 +42,18 @@ export function describeStep(step: {
       return withTarget("搜尋", args.pattern, "quote");
     case "run_command":
       return withTarget("執行", firstLine(args.command), "code");
+    case "web_search":
+      return withTarget("搜尋網路", args.query, "quote");
     case "web_fetch":
       return withTarget("讀取網頁", hostOf(args.url), "plain");
+    case "load_skill":
+      return withTarget("載入 skill", args.name, "code");
+    case "read_skill_file":
+      return withTarget(
+        "讀取 skill 參考檔",
+        [text(args.name), text(args.path)].filter(Boolean).join("/"),
+        "code",
+      );
     case "update_plan":
       return { verb: "更新計畫" };
     case "sandbox":
@@ -95,8 +105,11 @@ const TOOL_LABELS: Record<string, string> = {
   find_files: "尋找檔案",
   search_files: "搜尋檔案內容",
   run_command: "執行指令",
+  web_search: "搜尋網路",
   web_fetch: "讀取網頁",
   update_plan: "更新計畫",
+  load_skill: "載入 skill",
+  read_skill_file: "讀取 skill 參考檔",
   sandbox: "執行 Python 程式",
   run_python: "執行 Python 程式",
   find_entity: "查詢業務物件",

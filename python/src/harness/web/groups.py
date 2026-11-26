@@ -2,9 +2,10 @@
 
 做法參考 MaiAgent 的角色與 LiteLLM 的 access group：
 
-    - 群組列出可以使用的資源：agent、工具組（toolset）、知識庫，以及
-      知識庫裡的標籤（細部過濾：有標籤的文件只有開放該標籤的人搜尋
-      得到）。每一類可以是「全部」（存成 NULL），或一份名稱清單。
+    - 群組列出可以使用的資源：agent、工具組（toolset）、知識庫、知識庫
+      裡的標籤（細部過濾：有標籤的文件只有開放該標籤的人搜尋得到），
+      以及 skills（內建與公司的；個人 skill 只有建立的人能用，不歸群組
+      管）。每一類可以是「全部」（存成 NULL），或一份名稱清單。
     - 模型不歸群組管：誰能用哪些模型、額度與限流由模型中台（LiteLLM
       Proxy）決定，見 workspace.py 的 refresh_model_access。資料表保留
       舊的 models 欄位，但不再讀取。
@@ -16,7 +17,7 @@
 
 群組存在帳號資料庫（.harness/harness.db）：
 
-    access_groups   群組：識別碼、名稱、說明、四類資源（JSON 或 NULL）
+    access_groups   群組：識別碼、名稱、說明、五類資源（JSON 或 NULL）
     group_members   成員屬於哪些群組（不含「所有人」，它是隱含的）
 
 這裡只管資料；伺服器怎麼依 Access 擋下沒開放的資源見 workspace.py。
@@ -34,9 +35,9 @@ from harness.web import accounts as accounts_lib
 
 EVERYONE_ID = "everyone"
 EVERYONE_NAME = "所有人"
-# 群組管的四類資源，對應資料表的欄位與 Access、Group 的屬性。
+# 群組管的五類資源，對應資料表的欄位與 Access、Group 的屬性。
 # knowledge_bases 是知識庫的識別碼，knowledge 是知識庫裡的標籤。
-KINDS = ("agents", "toolsets", "knowledge_bases", "knowledge")
+KINDS = ("agents", "toolsets", "knowledge_bases", "knowledge", "skills")
 # API（見 src/web/protocol.ts 的 AccessKind）用 camelCase。
 API_NAMES = {kind: kind for kind in KINDS} | {
     "knowledge_bases": "knowledgeBases"
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS access_groups (
     toolsets TEXT,
     knowledge TEXT,
     knowledge_bases TEXT,
+    skills TEXT,
     created_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS group_members (
@@ -90,6 +92,7 @@ class Access:
     toolsets: frozenset[str] | None = None
     knowledge_bases: frozenset[str] | None = None
     knowledge: frozenset[str] | None = None
+    skills: frozenset[str] | None = None
 
     @property
     def unrestricted(self) -> bool:
@@ -119,6 +122,7 @@ class Group:
         knowledge_bases: 可以搜尋的知識庫（識別碼）；None 表示全部。
         knowledge: 知識庫裡可以搜尋的標籤；None 表示全部。沒有標籤的
             文件所有人都搜尋得到，不受這裡限制。
+        skills: 可以使用的 skill（內建與公司的）；None 表示全部。
         members: 成員的識別碼（「所有人」是空的，代表每一位成員）。
     """
 
@@ -129,6 +133,7 @@ class Group:
     toolsets: tuple[str, ...] | None = None
     knowledge_bases: tuple[str, ...] | None = None
     knowledge: tuple[str, ...] | None = None
+    skills: tuple[str, ...] | None = None
     members: tuple[str, ...] = ()
     created_at: float = 0.0
 
@@ -175,6 +180,10 @@ class GroupStore:
                 db.execute(
                     "ALTER TABLE access_groups ADD COLUMN knowledge_bases TEXT"
                 )
+            if "skills" not in columns:
+                # 群組管 skills 之前建立的資料庫：原本的群組可以用全部
+                # skill，和升級前一樣。
+                db.execute("ALTER TABLE access_groups ADD COLUMN skills TEXT")
             # 內建的「所有人」：一開始什麼都能用，和加入群組之前一樣。
             db.execute(
                 "INSERT OR IGNORE INTO access_groups (id, name, created_at) "
@@ -227,7 +236,7 @@ class GroupStore:
                 db.execute(
                     "INSERT INTO access_groups (id, name, description, "
                     f"{', '.join(KINDS)}, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    f"VALUES (?, ?, ?, {', '.join('?' for _ in KINDS)}, ?)",
                     (
                         group_id,
                         _checked_name(name),
@@ -406,6 +415,7 @@ def _group(row: sqlite3.Row, members: tuple[str, ...]) -> Group:
         toolsets=_decode(row["toolsets"]),
         knowledge_bases=_decode(row["knowledge_bases"]),
         knowledge=_decode(row["knowledge"]),
+        skills=_decode(row["skills"]),
         members=() if row["id"] == EVERYONE_ID else members,
         created_at=row["created_at"],
     )

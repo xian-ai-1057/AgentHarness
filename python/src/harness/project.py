@@ -38,6 +38,7 @@ import importlib.util
 import pathlib
 import re
 import sys
+from collections.abc import Collection
 from typing import Any
 
 import yaml
@@ -271,6 +272,85 @@ def _assemble(
     )
 
 
+def reload_definitions(
+    project: Project, skip_toolsets: Collection[str] = ()
+) -> None:
+    """重新讀取 skills/ 與 agents/，不重新連線 MCP 伺服器。
+
+    網頁的管理平台新增或修改 skill、agent 之後呼叫。先全部讀好、檢查過
+    才換上，有錯時丟出 ValueError，專案維持原樣。已經存在的 agent 就地
+    更新（轉交、子 agent 與執行中的對話都握有同一個物件）；模型設定不動，
+    由網頁的模型設定決定。
+
+    Args:
+        project: 載入完成的專案。
+        skip_toolsets: 不算專案工具的 toolset（例如網頁上另外掛載的 MCP
+            伺服器，由它自己決定加給哪些 agent）。
+
+    Raises:
+        ValueError: skill 或 agent 的設定有誤。
+    """
+    root = project.root
+    config_path = root / CONFIG_FILE
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    toolsets = {
+        name: items
+        for name, items in project.toolsets.items()
+        if name not in skip_toolsets
+    }
+    reserved = (sandbox_lib.TOOLSET, ontology_lib.TOOLSET)
+    project_tools = {
+        item.name: item
+        for set_name, items in toolsets.items()
+        if not builtin.is_builtin_toolset(set_name, items)
+        and set_name not in reserved
+        for item in items
+    }
+    skills = _load_skills(root / "skills", toolsets, project_tools)
+    resources = _Resources(
+        toolsets,
+        project_tools,
+        skills,
+        project.knowledge_bases,
+        builtin_skills(),
+        project.ontology,
+    )
+    shared = _read_optional(root / "AGENTS.md")
+    loaded: dict[str, agents.Agent] = {}
+    metas: dict[str, dict[str, Any]] = {}
+    for agent_path in sorted((root / "agents").glob("*.md")):
+        agent, meta = _load_agent(agent_path, config, shared, resources)
+        if agent.name in loaded:
+            raise ValueError(f"agent 名稱重複：{agent.name}")
+        loaded[agent.name] = agent
+        metas[agent.name] = meta
+    if not loaded:
+        raise ValueError(f"{root / 'agents'} 裡沒有任何 agent（*.md）")
+    _link_agents(loaded, metas)
+
+    for name, fresh in loaded.items():
+        current = project.agents.get(name)
+        if current is None:
+            project.agents[name] = fresh
+            continue
+        for field in ("instructions", "tools", "skills", "description"):
+            setattr(current, field, getattr(fresh, field))
+    for name, fresh in loaded.items():
+        current = project.agents[name]
+        current.subagents = [project.agents[a.name] for a in fresh.subagents]
+        current.handoffs = [project.agents[a.name] for a in fresh.handoffs]
+    project.skills = skills
+    project.agent_knowledge = {
+        name: setting
+        for name, meta in metas.items()
+        if (
+            setting := knowledge_setting(
+                name, meta.get("knowledge"), project.knowledge_bases
+            )
+        )
+    }
+
+
 @dataclasses.dataclass
 class _Resources:
     """建立 agent 時可以引用的專案資源。"""
@@ -350,6 +430,9 @@ def resolve_tools(
             known = sorted({*toolsets, *project_tools})
             raise ValueError(f"找不到工具或 toolset：{name}，可用的有：{known}")
         for item in found:
+            # 內建的 web_search 和 MCP 的同名工具同時列出時，用 MCP 的。
+            if item.name in resolved and builtin.yields_to_mcp(item):
+                continue
             resolved[item.name] = item
     return list(resolved.values())
 
@@ -393,6 +476,8 @@ def _connect_servers(
             set_name in servers and builtin.is_builtin_toolset(set_name, items)
         )
         for item in items
+        # 內建的 web_search 讓給 MCP 的同名工具（見 resolve_tools）。
+        if not builtin.yields_to_mcp(item)
     }
     found: dict[str, list[tools_lib.Tool]] = {}
     for server_name, server_config in servers.items():

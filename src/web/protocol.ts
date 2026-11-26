@@ -236,6 +236,8 @@ export interface SkillInfo {
   description: string;
   /** 內建 skill 或專案 skills/ 裡的。 */
   builtin: boolean;
+  /** 自己建立的個人 skill（只有自己看得到，預設開啟）。 */
+  personal?: boolean;
   /**
    * agent 要有這些工具才用得上（例如 run_python）。沒有時 ＋ 選單不列出；
    * 這段對話取消了這些工具時不能勾選（Python 版）。
@@ -313,6 +315,12 @@ export interface ServerFeatures {
    * 遠端 MCP 伺服器，工具和其他工具組一樣依存取群組開放（見 McpServerInfo）。
    */
   mcpServers?: boolean;
+  /** 管理平台的「Skills」頁：新增、修改、刪除、上傳、關閉公司 skill。 */
+  skillAdmin?: boolean;
+  /** 管理平台的「Agent」頁：新增與修改公司的 agent（agents/*.md）。 */
+  agentAdmin?: boolean;
+  /** 個人 skill（帳號模式）：每個人在 /skills 建立自己的 skill。 */
+  personalSkills?: boolean;
 }
 
 /**
@@ -400,7 +408,12 @@ export interface IssuedPassword {
  * knowledge 是知識庫裡的標籤（細部過濾）。模型不在這裡：誰能用哪些模型、
  * 額度與限流由模型中台（LiteLLM Proxy）決定。
  */
-export type AccessKind = "agents" | "toolsets" | "knowledgeBases" | "knowledge";
+export type AccessKind =
+  | "agents"
+  | "toolsets"
+  | "knowledgeBases"
+  | "knowledge"
+  | "skills";
 
 /**
  * 存取群組（Python 版帳號模式，只有管理者能讀寫）。每一類資源是名稱清單，
@@ -425,6 +438,11 @@ export interface AccessGroup {
   knowledgeBases: string[] | null;
   /** 可以搜尋的知識庫標籤；沒有標籤的文件所有人都搜尋得到。 */
   knowledge: string[] | null;
+  /**
+   * 可以用的 skill（內建與公司的；個人 skill 不歸群組管）。Python 版才有，
+   * TypeScript 版沒有這一類。
+   */
+  skills?: string[] | null;
 }
 
 /**
@@ -500,6 +518,8 @@ export interface GroupCatalog {
   knowledge: string[];
   /** 專案有沒有知識庫。 */
   hasKnowledge: boolean;
+  /** 內建與公司的 skill（Python 版）。 */
+  skills?: { name: string; description: string; builtin: boolean }[];
 }
 
 export interface GroupList {
@@ -1049,5 +1069,136 @@ export interface UserAgentList {
     instructions: number;
     starter: number;
     starters: number;
+  };
+}
+
+/**
+ * 管理平台的 Skills 頁（Python 版，features.skillAdmin，只有管理者能用）。
+ *   GET    /api/admin/skills → AdminSkillList
+ *   GET    /api/admin/skills/:name → SkillDetail
+ *   POST   /api/admin/skills {name, description, instructions} → SkillDetail
+ *   PATCH  /api/admin/skills/:name {description?, instructions?, enabled?,
+ *          default?} → SkillDetail（改內建 skill 的內容會複製成公司版本）
+ *   DELETE /api/admin/skills/:name（公司 skill；取代內建的刪掉後還原）
+ *   POST   /api/admin/skills/upload?replace=1 multipart（skill 資料夾的 zip）
+ */
+export type SkillSource = "builtin" | "company" | "personal";
+
+export interface AdminSkillInfo {
+  name: string;
+  description: string;
+  source: SkillSource;
+  /** 公司版本取代了同名的內建 skill。 */
+  overridesBuiltin: boolean;
+  /** 管理者沒有關掉（harness.yaml 的 web.disabledSkills）。 */
+  enabled: boolean;
+  /** 每段對話預設開啟（web.defaultSkills）。 */
+  default: boolean;
+  requires: string[];
+  /** skill 的專屬工具。 */
+  tools: string[];
+  /** 參考檔案與腳本的數量。 */
+  files: number;
+  /** 明確列出它的公司 agent。 */
+  usedBy: string[];
+}
+
+export interface SkillLimits {
+  maxSkills: number | null;
+  maxZipBytes: number;
+  maxFiles: number;
+  descriptionLimit: number;
+  instructionsLimit: number;
+}
+
+export interface AdminSkillList {
+  skills: AdminSkillInfo[];
+  limits: SkillLimits;
+}
+
+/** 一個 skill 的完整內容（編輯頁）。管理平台的另外有 AdminSkillInfo 的欄位。 */
+export interface SkillDetail extends Partial<Omit<AdminSkillInfo, "files">> {
+  name: string;
+  description: string;
+  instructions: string;
+  requires: string[];
+  tools: string[];
+  /** 參考檔案的路徑。 */
+  files: string[];
+}
+
+/**
+ * 個人 skill（features.personalSkills）。只有建立的人看得到、用得到，
+ * 不能分享，預設在自己的對話開啟。
+ *   GET    /api/my/skills → MySkillList
+ *   GET    /api/my/skills/:name → SkillDetail
+ *   POST   /api/my/skills {name, description, instructions} → SkillDetail
+ *   PATCH  /api/my/skills/:name {description?, instructions?} → SkillDetail
+ *   DELETE /api/my/skills/:name
+ *   POST   /api/my/skills/upload?replace=1 multipart（zip）
+ */
+export interface MySkillInfo {
+  name: string;
+  description: string;
+  requires: string[];
+  files: number;
+  /** 管理者後來新增了同名的公司 skill，對話裡用公司的。 */
+  shadowed: boolean;
+}
+
+export interface MySkillList {
+  enabled: boolean;
+  skills: MySkillInfo[];
+  /** 可以用的公司與內建 skill。 */
+  shared: { name: string; description: string; builtin: boolean }[];
+  limits: SkillLimits;
+}
+
+/**
+ * 管理平台的 Agent 頁（features.agentAdmin，只有管理者能用）：公司的
+ * agent，也就是專案的 agents/*.md。
+ *   GET    /api/admin/agents → AdminAgentList
+ *   GET    /api/admin/agents/:name → AdminAgentInfo
+ *   POST   /api/admin/agents AdminAgentInput & {name} → AdminAgentInfo
+ *   PATCH  /api/admin/agents/:name AdminAgentInput → AdminAgentInfo
+ * 存檔前會重新載入檢查，設定有誤時不儲存。其他設定（model、subagents、
+ * handoffs、ontology…）原樣保留，只能改檔案。
+ */
+export interface AdminAgentInfo {
+  name: string;
+  /** 例如 agents/main.md。 */
+  file: string;
+  description: string;
+  instructions: string;
+  /** 工具組或工具名稱；null 表示沒有設定（可以用專案所有的工具）。 */
+  tools: string[] | null;
+  /** null 表示沒有設定（可以用專案所有的公司 skill）。 */
+  skills: string[] | null;
+  /** 預設搜尋的知識庫。 */
+  knowledge: string[];
+  /** knowledge 還設定了標籤或 topK（會保留）。 */
+  knowledgeFilter: boolean;
+  /** 網頁上不能改、原樣保留的設定名稱。 */
+  otherSettings: string[];
+  /** 是不是專案的預設 agent。 */
+  default: boolean;
+}
+
+export interface AdminAgentInput {
+  description?: string;
+  instructions?: string;
+  tools?: string[] | null;
+  skills?: string[] | null;
+  knowledge?: string[];
+}
+
+export interface AdminAgentList {
+  agents: AdminAgentInfo[];
+  catalog: {
+    toolsets: { name: string; builtin: boolean; tools: string[] }[];
+    skills: { name: string; description: string; builtin: boolean }[];
+    knowledgeBases: KnowledgeBaseInfo[];
+    /** 管理平台掛載的 MCP 伺服器（在「MCP 工具」頁指定 agent）。 */
+    mcpServers: string[];
   };
 }

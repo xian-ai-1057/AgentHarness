@@ -144,6 +144,8 @@ class McpAdmin:
         self._lock = threading.Lock()
         self._servers = {item.name: item for item in self._load()}
         self._live: dict[str, _Live] = {}
+        # 讓給 MCP 同名工具的內建工具：(agent 名稱, 伺服器名稱) → 工具。
+        self._yielded: dict[tuple[str, str], list[tools_lib.Tool]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._closed = False
 
@@ -412,7 +414,40 @@ class McpAdmin:
         project.tools = {**project.tools, **{t.name: t for t in items}}
         for agent_name, agent in project.agents.items():
             if server.agents is None or agent_name in server.agents:
-                agent.tools = [*agent.tools, *items]
+                self._add_to(agent, server.name, items)
+
+    def _add_to(
+        self, agent: Any, server_name: str, items: list[tools_lib.Tool]
+    ) -> None:
+        """把工具加給一個 agent；內建的同名 web_search 先讓出來（拿掉時
+        再放回去，見 _detach）。"""
+        names = {item.name for item in items}
+        yielded = [
+            t
+            for t in agent.tools
+            if t.name in names and builtin.yields_to_mcp(t)
+        ]
+        if yielded:
+            self._yielded[(agent.name, server_name)] = yielded
+        kept = [t for t in agent.tools if not any(t is y for y in yielded)]
+        agent.tools = [*kept, *items]
+
+    def apply_to_agents(self) -> None:
+        """agent 重新載入（管理平台改了 agent 或 skill）之後，把連上的
+        工具再加給選定的 agent。"""
+        for name, live in self._live.items():
+            server = self._servers.get(name)
+            if server is None or not live.tools:
+                continue
+            for agent_name, agent in self.project.agents.items():
+                if (
+                    server.agents is not None
+                    and agent_name not in server.agents
+                ):
+                    continue
+                if any(t is live.tools[0] for t in agent.tools):
+                    continue
+                self._add_to(agent, name, live.tools)
 
     def _detach(self, name: str, items: list[tools_lib.Tool]) -> None:
         project = self.project
@@ -427,18 +462,22 @@ class McpAdmin:
         for agent in project.agents.values():
             if any(id(item) in ids for item in agent.tools):
                 agent.tools = [t for t in agent.tools if id(t) not in ids]
+                agent.tools += self._yielded.pop((agent.name, name), [])
 
     def _conflict(self, name: str, items: list[tools_lib.Tool]) -> str:
         """工具名稱和其他工具組重複時的說明；沒有重複時是空字串。"""
+        # 內建的 web_search 會讓給同名的 MCP 工具（見 _add_to），不算重複。
         owners = {
             item.name: set_name
             for set_name, set_items in self.project.toolsets.items()
             if set_name != name
             for item in set_items
+            if not builtin.yields_to_mcp(item)
         }
         for agent in self.project.agents.values():
             for item in agent.tools:
-                owners.setdefault(item.name, f"agent {agent.name}")
+                if not builtin.yields_to_mcp(item):
+                    owners.setdefault(item.name, f"agent {agent.name}")
         for item in items:
             if item.name in owners:
                 return (

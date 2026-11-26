@@ -3,7 +3,6 @@
 import pytest
 import yaml
 
-from harness import compaction
 from harness import model_catalog
 from tests import conftest
 from tests.test_web import start  # noqa: F401  pytest fixture
@@ -84,7 +83,7 @@ async def test_compact_command_summarizes_the_conversation(start):  # noqa: F811
     prompt = h.model.requests[2]["messages"][-1]["content"]
     assert "保留營收數字" in prompt
     _, detail = await h.api("GET", f"/sessions/{session_id}")
-    [record] = [m for m in detail["messages"] if compaction.is_record(m)]
+    [record] = [m for m in detail["messages"] if m.get("type") == "compaction"]
     assert record["reason"] == "manual"
     assert record["summary"] == SUMMARY
     assert detail["summary"]["context"]["tokens"] == record["tokens_after"]

@@ -396,7 +396,8 @@ class TestCompactCommand:
 
         output = capsys.readouterr().out
         assert code == 0
-        assert "⟳ 對話已壓縮：摘要了 3 則較早的訊息" in output
+        # 對話停在完整的回覆，所以四則全部摘要。
+        assert "⟳ 對話已壓縮：摘要了 4 則較早的訊息" in output
         assert len(model.requests) == 1
 
     def test_compact_failure_is_reported(

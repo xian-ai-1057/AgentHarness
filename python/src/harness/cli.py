@@ -61,6 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         return _command_user(args)
     if args.command == "sandbox-runner":
         return _command_sandbox_runner(args)
+    if args.command == "data":
+        return _command_data(args)
     commands = {
         "memory": _command_memory,
         "knowledge": _command_knowledge,
@@ -71,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "web":
             _prepare_web_project(args.project)
+            _prepare_web_data(args.project)
         # 在網頁上填過的金鑰存在專案裡，聊天與單次執行也用得到。
         credentials.apply(args.project)
         # with 確保專案啟動的 MCP 伺服器在結束時關閉。
@@ -186,6 +189,31 @@ def _build_parser() -> argparse.ArgumentParser:
         "--port", type=int, default=4322, help="監聽的埠號（預設 4322）"
     )
 
+    data = commands.add_parser(
+        "data",
+        help="網頁版資料的版本與快照：查看、手動備份、還原升級前的狀態",
+    )
+    data.add_argument("-p", "--project", default=".", help="專案資料夾")
+    data_actions = data.add_subparsers(dest="action")
+    data_commands = [
+        data_actions.add_parser(
+            "status", help="資料庫版本、程式版本與快照（預設）"
+        ),
+        data_actions.add_parser("list", help="列出所有快照"),
+        data_actions.add_parser(
+            "backup", help="現在拍一份快照（不會被自動刪除）"
+        ),
+    ]
+    restore = data_actions.add_parser(
+        "restore", help="把資料庫與設定檔換回某一份快照（先停止網頁版）"
+    )
+    restore.add_argument("name", help="快照名稱（pyharness data list 看得到）")
+    data_commands.append(restore)
+    for command in data_commands:
+        command.add_argument(
+            "-p", "--project", default=argparse.SUPPRESS, help="專案資料夾"
+        )
+
     knowledge = commands.add_parser("knowledge", help="檢查知識庫")
     knowledge.add_argument("-p", "--project", default=".", help="專案資料夾")
     knowledge.add_argument("query", nargs="?", help="要試著搜尋的內容")
@@ -268,6 +296,17 @@ def _prepare_web_project(path: str) -> None:
         return
     scaffold.create_assistant(root, sandbox=sandbox_lib.available())
     print(f"{root.resolve()} 是空的，已經建立一個可以直接使用的助手。")
+
+
+def _prepare_web_data(path: str) -> None:
+    """升級資料庫；換了版本時先自動快照（見 harness.web.datastore）。"""
+    from harness.web import datastore
+
+    root = pathlib.Path(path)
+    if not (root / project_lib.CONFIG_FILE).exists():
+        return
+    for line in datastore.prepare(root).messages():
+        print(line)
 
 
 def _web_password(
@@ -394,6 +433,71 @@ def _command_web(args: argparse.Namespace, loaded: project_lib.Project) -> int:
             f"無法在 {args.host}:{args.port} 啟動：{error}"
         ) from error
     return 0
+
+
+def _command_data(args: argparse.Namespace) -> int:
+    """網頁版資料的版本與快照。"""
+    from harness.web import datastore
+
+    root = pathlib.Path(args.project)
+    if not (root / project_lib.CONFIG_FILE).exists():
+        print(
+            f"錯誤：{root.resolve()} 裡沒有 {project_lib.CONFIG_FILE}，"
+            "請用 -p 指定專案資料夾",
+            file=sys.stderr,
+        )
+        return 1
+    action = args.action or "status"
+    try:
+        if action == "backup":
+            snapshot = datastore.create_snapshot(root)
+            print(
+                f"已備份資料庫與設定：{snapshot.path}（{_size(snapshot.size)}）"
+            )
+            print("手動快照不會被自動刪除，不需要時請自己刪掉這個資料夾。")
+            return 0
+        if action == "restore":
+            before = datastore.restore(root, args.name)
+            print(f"已還原快照 {args.name}。")
+            print(f"還原前的狀態另外存成 {before.name}，需要時可以再換回來。")
+            print("請重新啟動網頁版。")
+            return 0
+    except datastore.DataError as error:
+        print(f"錯誤：{error}", file=sys.stderr)
+        return 1
+    if action == "status":
+        current = datastore.schema_version(root)
+        print(
+            f"資料庫版本：第 {current} 版"
+            f"（這版程式：第 {datastore.SCHEMA_VERSION} 版）"
+        )
+        print(f"程式版本：{datastore.app_version()}")
+        if current > datastore.SCHEMA_VERSION:
+            print("資料比這版程式新，網頁版不會啟動；請換回新版或還原快照。")
+        elif current < datastore.SCHEMA_VERSION:
+            print("下次啟動網頁版時會先自動快照，再升級資料庫。")
+    snapshots = datastore.list_snapshots(root)
+    if not snapshots:
+        print("還沒有任何快照。")
+        return 0
+    print("快照（新的在前）：")
+    for item in snapshots:
+        when = datetime.datetime.fromtimestamp(item.created_at).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        kind = "自動" if item.automatic else "手動"
+        print(
+            f"  {item.name}  {when}  {kind}  資料庫第 {item.schema_version} 版"
+            f"  {_size(item.size)}  {item.reason}"
+        )
+    return 0
+
+
+def _size(size: int) -> str:
+    """位元組數轉成好讀的大小。"""
+    if size < 1024 * 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size / 1024 / 1024:.1f} MB"
 
 
 def _command_user(args: argparse.Namespace) -> int:

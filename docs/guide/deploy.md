@@ -52,7 +52,40 @@ docker compose exec harness ls /assistant
 docker compose restart harness   # 改了 harness.yaml 或 agent 之後重新載入
 ```
 
-更新版本：`git pull && docker compose up -d --build`。
+## 更新版本 {#更新版本}
+
+```bash
+git pull && docker compose up -d --build
+```
+
+不需要先備份、也不需要事後匯入資料。資料都在 volume 裡，換映像檔不會動到它；新版第一次啟動時會自己做這兩件事：
+
+1. **自動快照**：發現程式換了版本，先把資料庫（`.harness/harness.db`：帳號、群組、自建 agent、知識庫設定、稽核紀錄…，以及 `.harness/ontology.db`）和設定檔（`harness.yaml`、`agents/`、`skills/`、MCP 設定、金鑰、每個人的記憶與權限）複製到 volume 裡的 `.harness/backups/<時間>-auto/`，只留最近 3 份。
+2. **自動升級資料庫**：新版要調整資料表時，依序執行還沒做過的升級步驟，做完的版本記在資料庫裡，下次不會重做。
+
+log 裡會看到「已自動備份資料庫與設定」與「資料庫升級到第 N 版」。對話紀錄、上傳的檔案與知識庫文件不會被升級改寫，所以不放進快照（快照通常只有幾百 KB 到幾 MB）。
+
+**更新後有問題，要退回原本的狀態：**
+
+```bash
+docker compose run --rm harness pyharness data list -p /assistant     # 找出升級前的快照
+docker compose stop harness
+docker compose run --rm harness pyharness data restore <快照名稱> -p /assistant
+docker compose up -d
+```
+
+還原會把資料庫與設定檔換回快照的內容，還原前的狀態另外存一份手動快照，還原錯了也能再換回來。只想退回舊版程式時，換回舊的映像檔（`git checkout <舊版> && docker compose up -d --build`）通常就夠了：升級步驟只做「新增」，舊版讀得懂。資料庫是比程式更新的版本建立、舊版讀不懂時，平台會拒絕啟動並在 log 提示用 `pyharness data restore` 還原，不會寫壞資料。
+
+其他指令：`pyharness data`（目前的資料庫版本與所有快照）、`pyharness data backup`（現在拍一份手動快照，不會被自動刪除）。
+
+**快照不能取代 volume 備份。** 快照和資料放在同一個 volume，搬到別台主機、刪掉 volume（`docker compose down -v`）或硬碟壞掉時要靠 volume 本身的備份，例如：
+
+```bash
+docker compose stop
+docker run --rm -v harness-data:/data:ro -v "$PWD":/backup --entrypoint tar agent-harness \
+  -czpf /backup/harness-data-$(date +%Y%m%d).tgz -C /data .
+docker compose start
+```
 
 從多人帳號之前的版本升級時，第一次啟動會把原本的對話紀錄與記憶交給 `admin`，放在只有他看得到的「舊資料（專案資料夾）」裡，舊對話的附件與檔案照樣打得開；`workspace/` 裡的檔案不搬，也**不會**分享給其他成員。
 

@@ -123,6 +123,16 @@ pytest
   底下有 `LICENSE.txt` 的資料夾）不套用本專案的風格，方便日後與上游同步；
   修改時在 `SKILL.md` 開頭註明改了什麼。
 
+## 修改資料庫的資料表
+
+網頁版的資料表在 `.harness/harness.db`。要加欄位或資料表時，在
+`python/src/harness/web/datastore.py` 的 `MIGRATIONS` 最後加一個升級步驟
+（版本號加一），不要改已經發布的步驟；同時更新該模組自己的
+`CREATE TABLE IF NOT EXISTS`，讓新建的資料庫一開始就是最新的樣子（新建時
+不執行升級步驟）。步驟要能重複執行，加欄位用 `datastore.add_column`。盡量
+只做「新增」，舊版程式讀得懂，換回舊版時才不必還原。升級前的自動快照
+與還原由 datastore 處理，不需要另外寫。
+
 ## 測試
 
 - 修錯誤時，先寫一個會重現錯誤的測試，再修到它通過。

@@ -48,6 +48,7 @@ describe("壓縮標記", () => {
     buildTurns(detail(messages), {}).map((turn) => [
       turn.user ?? "",
       ...turn.blocks.map((block) => block.kind),
+      ...(turn.after ?? []).map((block) => `after:${block.kind}`),
     ]);
   const record = (keepFrom: number) => ({
     role: "harness",
@@ -72,6 +73,20 @@ describe("壓縮標記", () => {
     ]);
   });
 
+  it("保留的第一則是使用者訊息時，放在上一輪的回覆動作之後", () => {
+    const messages = [
+      { role: "user", content: "一" },
+      { role: "assistant", content: "答一" },
+      { role: "user", content: "二" },
+      record(2),
+      { role: "assistant", content: "答二" },
+    ];
+    expect(kinds(messages)).toEqual([
+      ["一", "text", "after:compaction"],
+      ["二", "text"],
+    ]);
+  });
+
   it("全部摘要時顯示在最後", () => {
     const messages = [
       { role: "user", content: "一" },
@@ -81,7 +96,7 @@ describe("壓縮標記", () => {
       { role: "assistant", content: "答二" },
     ];
     expect(kinds(messages)).toEqual([
-      ["一", "text", "compaction"],
+      ["一", "text", "after:compaction"],
       ["二", "text"],
     ]);
   });

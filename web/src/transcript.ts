@@ -69,6 +69,11 @@ export interface Turn {
   /** 使用者訊息附上的檔案路徑。 */
   attachments: string[];
   blocks: Block[];
+  /**
+   * 回覆與回覆的動作之後才顯示的區塊：壓縮標記落在兩輪之間時放這裡，
+   * 不夾在回覆內文和它的複製、評價按鈕之間。
+   */
+  after?: Block[];
   files: FileChange[];
   /** 沙盒在這一輪產生的檔案（相對於專案根目錄），依出現順序、不重複。 */
   produced: string[];
@@ -178,18 +183,26 @@ export function buildTurns(
     markers.set(at, [...(markers.get(at) ?? []), { index, record }]);
   });
   const pushMarkers = (at: number) => {
+    // 保留的第一則是使用者訊息，或全部摘要（落在紀錄本身）時，標記在
+    // 兩輪之間；保留的第一則是回覆時，標記在這一輪裡、那則回覆前面。
+    const between = detail.messages[at]?.role !== "assistant";
     for (const { index, record } of markers.get(at) ?? []) {
-      current().blocks.push({
+      const target = current();
+      const block: Block = {
         kind: "compaction",
         key: `c${index}`,
         title: compactionTitle(record),
         summary: record.summary ?? "",
-      });
+      };
+      if (between) {
+        target.after = [...(target.after ?? []), block];
+      } else {
+        target.blocks.push(block);
+      }
     }
   };
 
   detail.messages.forEach((message, index) => {
-    // 保留的訊息是使用者訊息時，標記放在上一輪的最後，緊接在它前面。
     pushMarkers(index);
     // Python 版會在紀錄裡寫入自己的紀錄（壓縮、修剪、用量），role 是
     // harness，不顯示成訊息。

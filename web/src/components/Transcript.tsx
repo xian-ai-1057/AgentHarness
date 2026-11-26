@@ -109,6 +109,9 @@ export function TurnView({
         />
       )}
       {reply?.text && <MessageActions {...reply} />}
+      {turn.after?.map((block) => (
+        <BlockView key={block.key} block={block} localFiles={canLoadFiles} />
+      ))}
     </>
   );
 }

@@ -2579,3 +2579,22 @@ button.ch-cite:focus-visible {
 .ch-edit-agent {
   margin-left: auto;
 }
+
+/* 對話用到分級資料時的提示（資料分級）。 */
+.ch-classified {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-bg);
+  color: var(--warn);
+  align-items: flex-start;
+}
+
+.ch-classified-icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.ch-source-version {
+  font-size: 12px;
+}

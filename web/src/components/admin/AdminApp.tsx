@@ -22,6 +22,7 @@ import {
   CheckIcon,
   ChipIcon,
   ListIcon,
+  LockIcon,
   PlugIcon,
   ShieldIcon,
   UserIcon,
@@ -32,6 +33,7 @@ import { Link } from "../Sidebar.tsx";
 import { UserMenu } from "../shell/UserMenu.tsx";
 import { Agents } from "./Agents.tsx";
 import { Audit } from "./Audit.tsx";
+import { Classification } from "./Classification.tsx";
 import { Groups } from "./Groups.tsx";
 import { Knowledge } from "./Knowledge.tsx";
 import { McpServers } from "./McpServers.tsx";
@@ -50,6 +52,7 @@ export const ADMIN_LABELS: Record<AdminSection, string> = {
   skills: "Skills",
   mcp: "MCP 工具",
   knowledge: "知識庫",
+  classification: "資料分級",
   members: "成員",
   groups: "群組",
   audit: "稽核紀錄",
@@ -62,6 +65,7 @@ const ADMIN_ICONS: Record<AdminSection, typeof ChipIcon> = {
   skills: SparkIcon,
   mcp: PlugIcon,
   knowledge: BookIcon,
+  classification: LockIcon,
   members: UserIcon,
   groups: UsersIcon,
   audit: ListIcon,
@@ -188,6 +192,7 @@ function AdminMain({ section }: { section: AdminSection }) {
             section === "skills" ||
             section === "mcp" ||
             section === "knowledge" ||
+            section === "classification" ||
             section === "audit"
               ? project.name
               : `${project.name} / harness.yaml`}
@@ -218,6 +223,7 @@ function AdminMain({ section }: { section: AdminSection }) {
             {section === "skills" && <Skills />}
             {section === "mcp" && <McpServers />}
             {section === "knowledge" && <Knowledge />}
+            {section === "classification" && <Classification />}
             {section === "audit" && <Audit />}
           </div>
         </div>

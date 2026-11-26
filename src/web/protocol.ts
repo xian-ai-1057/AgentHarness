@@ -86,6 +86,24 @@ export interface SessionSummary {
   approval?: Approval;
   /** 自建 agent 的名稱（Python 版）；agent 刪掉後仍然保留。 */
   agentLabel?: string;
+  /** 這段對話碰過分級的資料（Python 版，見 SessionClassification）。 */
+  classification?: SessionClassification;
+}
+
+/**
+ * 資料分級（Python 版）：這段對話碰過的最高等級。資料超過目前模型能處理的
+ * 等級時，伺服器自動改用可以處理的模型（例如地端模型），之後每一輪都
+ * 繼續用它。
+ */
+export interface SessionClassification {
+  /** 等級識別碼，例如 confidential。 */
+  level: string;
+  /** 等級名稱，例如「機密」。 */
+  name: string;
+  /** 資料來自哪裡，例如「知識庫「人資規章」」。 */
+  sources: string[];
+  /** 因此改用的模型；沒有改用時是 null。 */
+  model: string | null;
 }
 
 /** 寫檔類工具執行前，給使用者看的內容。 */
@@ -321,6 +339,10 @@ export interface ServerFeatures {
   agentAdmin?: boolean;
   /** 個人 skill（帳號模式）：每個人在 /skills 建立自己的 skill。 */
   personalSkills?: boolean;
+  /** 知識庫的文件版本、生效期間與題庫回歸評測（Python 版）。 */
+  knowledgeGovernance?: boolean;
+  /** 管理平台的「資料分級」頁：機密資料自動改用核可的模型。 */
+  classification?: boolean;
 }
 
 /**
@@ -624,7 +646,8 @@ export interface KnowledgeSettings {
  *   POST   /api/knowledge/:id/documents?dir=&replace=（multipart，要帶
  *          X-Harness-Upload: 1）→ {files: {path, size}[]}
  *   DELETE /api/knowledge/:id/documents?path=
- *   POST   /api/knowledge/:id/search {query, topK?} → {hits: KnowledgeHit[]}
+ *   POST   /api/knowledge/:id/search {query, topK?, asOf?, allVersions?}
+ *          → {hits: KnowledgeHit[]}
  */
 export interface KnowledgeAdminBase extends KnowledgeBaseInfo {
   /** 預設知識庫（不能刪除）。 */
@@ -641,6 +664,138 @@ export interface KnowledgeAdminBase extends KnowledgeBaseInfo {
   agents: string[];
   /** 維護者的 id（MemberInfo.id）；只有管理者看得到。 */
   maintainers?: string[];
+  /** 資料分級（ClassificationSettings 的等級識別碼）；沒有分級時是 null。 */
+  classification?: string | null;
+  /** 資料分級的名稱，例如「機密」。 */
+  classificationName?: string;
+  /** 題庫評測的概況。 */
+  evaluation?: KnowledgeEvalBrief;
+}
+
+/** 知識庫清單上的評測概況。 */
+export interface KnowledgeEvalBrief {
+  questions: number;
+  running: boolean;
+  latest: {
+    id: string;
+    mode: KnowledgeEvalMode;
+    /** 秒（Unix time）。 */
+    startedAt: number;
+    summary: KnowledgeEvalSummary | null;
+    regressions: number;
+  } | null;
+}
+
+/**
+ * 知識庫的題庫回歸評測（管理者或維護者）：
+ *   GET    /api/knowledge/:id/eval → KnowledgeEval
+ *   POST   /api/knowledge/:id/eval/questions {question, sources?, keywords?,
+ *          answer?} → KnowledgeEvalQuestion
+ *   PATCH  /api/knowledge/:id/eval/questions/:qid → KnowledgeEvalQuestion
+ *   DELETE /api/knowledge/:id/eval/questions/:qid
+ *   POST   /api/knowledge/:id/eval/import?replace=1（multipart CSV/.xlsx）
+ *          → {added}
+ *   GET    /api/knowledge/:id/eval/export → CSV
+ *   POST   /api/knowledge/:id/eval/run {answerModel?, topK?} → {id}
+ *   GET    /api/knowledge/:id/eval/runs/:runId → KnowledgeEvalRun（含 results）
+ * 文件、版本資訊或檢索設定改動後，伺服器會自動評測檢索（trigger 寫原因，
+ * startedBy 是「自動」）。
+ */
+export type KnowledgeEvalMode = "retrieval" | "answer";
+
+export interface KnowledgeEvalQuestion {
+  id: string;
+  question: string;
+  /** 應該找到的文件（路徑、檔名或樣式，可以加「› 位置」）。 */
+  sources: string[];
+  /** 應該出現的字詞。 */
+  keywords: string[];
+  /** 參考答案（用模型評測回答時比對）。 */
+  answer: string;
+}
+
+export interface KnowledgeEvalSummary {
+  total: number;
+  passed: number;
+  passRate: number | null;
+  /** 有寫應該找到的文件的題目裡，找到的比例。 */
+  hitRate: number | null;
+  /** 第一個正確結果名次的倒數平均。 */
+  mrr: number | null;
+  topK: number;
+  errors: number;
+}
+
+export interface KnowledgeEvalResult {
+  id: string;
+  question: string;
+  passed: boolean;
+  rank: number | null;
+  missing_keywords: string[];
+  hits: string[];
+  answer: string | null;
+  judge: string | null;
+  reasons: string[];
+  error: string | null;
+}
+
+export interface KnowledgeEvalRun {
+  id: string;
+  mode: KnowledgeEvalMode;
+  status: "running" | "done" | "error";
+  /** 手動，或自動評測的原因（例如「上傳文件」）。 */
+  trigger: string;
+  startedBy: string;
+  /** 秒（Unix time）。 */
+  startedAt: number;
+  finishedAt: number | null;
+  /** 評測當時的檢索設定。 */
+  settings: Record<string, string | number | null>;
+  summary: KnowledgeEvalSummary | null;
+  /** 上次（同類型）通過、這次沒過的題目 id。 */
+  regressions: string[];
+  fixed: string[];
+  error: string | null;
+  results?: KnowledgeEvalResult[];
+}
+
+export interface KnowledgeEval {
+  questions: KnowledgeEvalQuestion[];
+  runs: KnowledgeEvalRun[];
+  /** 執行中的評測 id。 */
+  running: string | null;
+  /** 評測回答可以選的模型。 */
+  models: string[];
+  limit: number;
+}
+
+/**
+ * 管理平台 → 資料分級（管理者）：
+ *   GET /api/admin/classification → ClassificationSettings
+ *   PUT /api/admin/classification ClassificationSettings → ClassificationSettings
+ * 寫進 harness.yaml 的 dataClassification 與每個知識庫的 classification。
+ */
+export interface ClassificationSettings {
+  enabled: boolean;
+  /** 由低到高。 */
+  levels: { id: string; name: string }[];
+  /** 沒列在 models 的模型最高能處理的等級；null 表示不限制。 */
+  defaultClearance: string | null;
+  /** 每個模型最高能處理的等級。 */
+  models: Record<string, string>;
+  /** 資料超過模型等級時自動改用的模型。 */
+  routeTo: string | null;
+  /** 所有個人知識庫的等級。 */
+  personalKnowledge: string | null;
+  /** 工具組的等級。 */
+  toolsets: Record<string, string>;
+  /** 知識庫的等級。 */
+  knowledgeBases: Record<string, string>;
+  /** 以下只在 GET 回傳：畫面用的選項。 */
+  modelNames?: string[];
+  toolsetNames?: string[];
+  bases?: { id: string; name: string }[];
+  personalEnabled?: boolean;
 }
 
 /**
@@ -679,7 +834,33 @@ export interface KnowledgeDocument {
   labels: string[];
   /** 支援的格式卻搜尋不到時的原因，例如掃描的 PDF 沒有文字。 */
   note?: string;
+  /** 版本與生效期間（documents.yaml 或 frontmatter），沒有設定時是 {}。 */
+  version?: KnowledgeDocumentVersion;
+  /** 今天的狀態：有效、還沒生效、已失效、被新版取代。 */
+  status?: KnowledgeDocumentStatus;
+  /** 取代這份文件的新版（已生效的）。 */
+  supersededBy?: string[];
 }
+
+/**
+ * 文件的版本資訊（Python 版）：
+ *   PUT /api/knowledge/:id/documents/info?path= KnowledgeDocumentVersion
+ *       → {path, version, status}
+ * 日期是 YYYY-MM-DD。搜尋時只找今天有效的文件。
+ */
+export interface KnowledgeDocumentVersion {
+  version?: string;
+  effective?: string;
+  expires?: string;
+  supersedes?: string[];
+  note?: string;
+}
+
+export type KnowledgeDocumentStatus =
+  | "active"
+  | "pending"
+  | "expired"
+  | "superseded";
 
 export interface KnowledgeDocuments {
   documents: KnowledgeDocument[];
@@ -713,6 +894,10 @@ export interface KnowledgeHit {
   labels: string[];
   similarity: number | null;
   rerankScore: number | null;
+  /** 文件的版本說明，例如「2026 年版，2026-01-01 起生效」。 */
+  version?: string;
+  /** 文件在查詢日期的狀態（勾選「包含舊版」時可能不是 active）。 */
+  status?: KnowledgeDocumentStatus;
 }
 
 /**

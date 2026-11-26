@@ -1652,6 +1652,9 @@ class TestProjectChoices:
             "agentAdmin": True,
             # 個人 skill 只在帳號模式（本機模式用公司 skill）。
             "personalSkills": False,
+            # 知識庫的文件版本、題庫評測，以及管理平台的資料分級頁。
+            "knowledgeGovernance": True,
+            "classification": True,
         }
         assert info["auth"] == {
             "mode": "local",

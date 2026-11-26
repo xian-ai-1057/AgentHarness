@@ -690,6 +690,14 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 網頁版回覆裡的 `[1]` 可以點，在右側打開原文（PDF 跳到那一頁）；對不到
 搜尋結果的編號會標成「可能不正確」。
 
+規章改版時，可以在知識庫資料夾的 `documents.yaml` 記下每份文件的版本、
+生效日、失效日與取代的舊版，搜尋只找得到今天有效的文件（`as_of` 可以查
+過去的規定）；題庫回歸評測在文件或設定改動後自動檢查答不答得出來；
+`dataClassification` 替知識庫與工具組分級，機密資料只交給核可的模型（見
+[文件版本與生效日](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#文件版本與生效日)、
+[題庫回歸評測](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#題庫回歸評測)、
+[資料分級](https://agent-harness-docs-ten.vercel.app/advanced/classification)）。
+
 - **檢索方式。** 有三種，用 `searchMode` 選（見[檢索方式](#檢索方式)）：
   - **關鍵字**（`keyword`）：精確比對，只看查詢的字詞有沒有出現、出現
     幾次，不需要任何模型。適合查表單編號、專有名詞。

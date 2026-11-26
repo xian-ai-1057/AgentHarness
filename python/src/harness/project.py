@@ -45,6 +45,7 @@ import yaml
 
 from harness import agents
 from harness import builtin
+from harness import classification as classification_lib
 from harness import compaction as compaction_lib
 from harness import guardrails
 from harness import hooks as hooks_lib
@@ -101,6 +102,8 @@ class Project:
             工具，以 toolset 名稱為鍵。
         ontology: 語意層（ontology/ 資料夾，見 ontology 模組），沒有時為
             None。
+        classification: 資料分級（harness.yaml 的 dataClassification，見
+            classification 模組），沒有設定時為 None。
     """
 
     name: str
@@ -130,6 +133,7 @@ class Project:
         default_factory=dict
     )
     ontology: ontology_lib.Ontology | None = None
+    classification: classification_lib.Policy | None = None
 
     def __enter__(self) -> "Project":
         return self
@@ -269,6 +273,9 @@ def _assemble(
         mcp_connections=connections,
         toolsets=toolsets,
         ontology=ontology,
+        classification=classification_lib.load_policy(
+            config.get(classification_lib.CONFIG_KEY)
+        ),
     )
 
 
@@ -807,6 +814,9 @@ def load_knowledge_bases(
             "name": settings.get("name") or base_id,
         }
 
+    policy = classification_lib.load_policy(
+        config.get(classification_lib.CONFIG_KEY)
+    )
     paths: dict[str, pathlib.Path] = {}
     for base_id, spec in specs.items():
         path = (root / str(spec["path"])).resolve()
@@ -829,6 +839,9 @@ def load_knowledge_bases(
             id=base_id,
             name=str(spec["name"]),
             description=str(spec.get("description") or ""),
+            classification=classification_lib.check_level(
+                policy, spec.get("classification"), f"知識庫 {base_id}"
+            ),
             knowledge=knowledge_lib.Knowledge(
                 path,
                 **retrieval_options(spec, f"知識庫 {base_id}"),
@@ -907,7 +920,13 @@ _RETRIEVAL_FIELDS = {
     "minSimilarity",
     "minRerankScore",
 }
-_KNOWLEDGE_FIELDS = {"path", "name", "description", *_RETRIEVAL_FIELDS}
+_KNOWLEDGE_FIELDS = {
+    "path",
+    "name",
+    "description",
+    "classification",
+    *_RETRIEVAL_FIELDS,
+}
 
 
 _COMPACTION_FIELDS = {

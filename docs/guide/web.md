@@ -60,7 +60,8 @@ Python 版另外會顯示：handoff 後換成接手的 agent、subagent 呼叫�
 | Agent | `/admin/agents` | 新增與修改公司的 agent（`agents/*.md`）的說明、指示、工具、skills 與知識庫（Python 版，見[公司 Agent](#公司-agent)） |
 | Skills | `/admin/skills` | 新增、修改、刪除或上傳公司的 skill，關閉內建的 skill、決定哪些預設開啟（Python 版，見[在網頁上管理 skills](/advanced/skills#在網頁上管理)） |
 | MCP 工具 | `/admin/mcp` | 掛載遠端 MCP 伺服器（例如 LiteLLM 的網頁搜尋 webiq），金鑰存在伺服器、不再顯示（Python 版，見[在管理平台掛載](/guide/mcp#管理平台掛載)） |
-| 知識庫 | `/admin/knowledge` | 新增知識庫、上傳文件、試搜尋、檢索設定與維護者（Python 版，見[知識庫](#知識庫)） |
+| 知識庫 | `/admin/knowledge` | 新增知識庫、上傳文件、文件版本與生效日、題庫評測、試搜尋、檢索設定與維護者（Python 版，見[知識庫](#知識庫)） |
+| 資料分級 | `/admin/classification` | 替知識庫、工具組標上資料等級，指定每個模型能處理的等級；機密資料自動改用地端模型（Python 版，見[資料分級](/advanced/classification)） |
 | 成員 | `/admin/members` | 新增、刪除成員，改角色、調整所屬群組、停用、重設密碼（Python 版要登入時才有，見[帳號與成員](#帳號與成員)） |
 | 群組 | `/admin/groups` | 決定每位成員能用哪些 agent、工具組、知識庫、知識庫標籤與 skills（Python 版要登入時才有，見[存取群組](#存取群組)） |
 | 稽核紀錄 | `/admin/audit` | 登入、成員與群組變更、權限與模型設定、知識庫、公司 Agent 與 Skills、工具核准的紀錄，可以篩選、匯出、檢查有沒有被竄改（Python 版，見[稽核紀錄](#稽核紀錄)） |
@@ -274,8 +275,8 @@ API（都只能操作自己的 agent）：
 | 登入 | 登入成功、登入失敗（帳號不存在、密碼不對或停用、失敗太多次被暫停）、登出、修改自己的密碼 |
 | 成員 | 新增成員（含加入的群組）、修改成員（顯示名稱、角色、停用，記改之前與之後）、調整成員的群組（記改之前與之後的群組名稱）、重設密碼、刪除成員 |
 | 群組 | 新增、修改（只記真的改了的欄位，以及加入、移出了哪些成員）、刪除群組 |
-| 設定 | 權限設定、預設模型與 `maxTurns`、模型連線（供應商、網址、模型，只記有沒有換金鑰）、可選的模型 |
-| 知識庫 | 新增、修改（改了哪些設定、維護者）、拿掉知識庫，上傳、更新與刪除文件（記檔名）；使用者建立、修改、刪除[個人知識庫](#我的知識庫)與上傳、刪除其中的文件也會記下 |
+| 設定 | 權限設定、預設模型與 `maxTurns`、模型連線（供應商、網址、模型，只記有沒有換金鑰）、可選的模型、[資料分級](/advanced/classification) |
+| 知識庫 | 新增、修改（改了哪些設定、維護者）、拿掉知識庫，上傳、更新與刪除文件（記檔名），文件的版本資訊，題庫的新增、匯入與評測（自動評測的結果也會記一筆，記通過幾題、退步幾題）；使用者建立、修改、刪除[個人知識庫](#我的知識庫)與上傳、刪除其中的文件也會記下 |
 | 自建 Agent | 成員建立、修改、刪除自己的 agent（記名稱、模型、工具組、知識庫與技能，不記指示） |
 | 公司 Agent | 管理者在「管理平台 → Agent」新增、修改公司的 agent（記改了哪些欄位，不記指示全文） |
 | Skills | 管理者新增、修改（含啟用與預設開啟）、刪除、上傳公司 skill；使用者建立、修改、刪除、上傳個人 skill |
@@ -298,7 +299,9 @@ API（都只有管理者能用）：`GET /api/admin/audit?category=&actor=&since
 
 - **新增知識庫**：填識別碼（小寫英文、數字、`-`、`_`）、名稱與說明，也可以直接選「Embedding 模型」與「Reranker」（不選就沿用預設知識庫）。會寫進 `harness.yaml` 的 `knowledgeBases` 並建立 `knowledge/<識別碼>/` 資料夾。說明會交給 agent，讓它知道這個知識庫裡有什麼。
 - **文件**：上傳 `.md`、`.txt`、`.pdf`、`.docx`、`.pptx`、`.xlsx`，已有的文件按「更新」換成新版本，或刪除。列表下方顯示索引的檔案數、片段數，以及讀不了而被略過的檔案。讀得了卻沒有文字的文件（最常見的是掃描的 PDF，每頁都是圖片）會標成「搜尋不到」並說明原因，請改傳有文字的版本或先做 OCR。文件改了以後下一次搜尋就會重建索引。
-- **試搜尋**：輸入問題，看會找到哪些片段與分數，用來調整門檻。
+- **版本**：每份文件可以填版本、生效日、失效日與它取代的舊版，搜尋時只找得到今天有效的文件；列表標出「尚未生效」「已失效」「已被取代」（見[文件版本與生效日](/advanced/knowledge#文件版本與生效日)）。
+- **題庫評測**：寫下使用者會問的問題與應該找到的文件，按「執行評測」看通過率；上傳、刪除文件或改設定後會自動評測一次，退步的題目會標出來。題庫可以從 Excel／CSV 匯入、匯出（見[題庫回歸評測](/advanced/knowledge#題庫回歸評測)）。
+- **搜尋測試**：輸入問題，看會找到哪些片段與分數，用來調整門檻；可以選查詢日期，看那天有效的文件會找到什麼。
 - **設定**：名稱、說明、檢索設定（embedding 模型、切片長度、切片方式、reranker、門檻；空白時沿用 `knowledge` 區塊的設定）與維護者。「Embedding 模型」是下拉選單：第一個是「關鍵字（精確比對）」，再來是「演算法（BM25）」，然後是模型連線上能用的 embedding 模型；「Reranker」也是下拉選單，列出模型連線上的 rerank 模型。清單沒有的模型選「其他」自行輸入；模型網址上沒有 embedding 模型時，欄位下方會顯示提醒（見[檢索方式](/advanced/knowledge#檢索方式)）。放法規、內規的知識庫把「切片方式」設成「依條文」，一條（一點）一片，出處標到第幾條（見[依條文切片](/advanced/knowledge#依條文切片)）。
 - **拿掉知識庫**：只從 `harness.yaml` 拿掉，資料夾與文件都留著。預設知識庫不能拿掉；還有 agent 設定成要用它時，要先修改那個 agent。
 
@@ -319,7 +322,12 @@ API（`/api/knowledge`）：
 | `GET` | `/api/knowledge/models` | 管理者：模型連線上的 embedding 與 rerank 模型（設定的下拉選單用；`{"embedding", "rerank", "source", "error"?}`） |
 | `PATCH`、`DELETE` | `/api/knowledge/:id` | 管理者：修改設定、維護者，或拿掉知識庫 |
 | `GET`、`POST`、`DELETE` | `/api/knowledge/:id/documents` | 管理者與該知識庫的維護者：列出、上傳（`?dir=` 放進子資料夾、`?replace=` 換掉既有的檔案）、刪除文件（`?path=`） |
-| `POST` | `/api/knowledge/:id/search` | 管理者與該知識庫的維護者：試搜尋 |
+| `POST` | `/api/knowledge/:id/search` | 管理者與該知識庫的維護者：試搜尋（`asOf` 查詢日期、`allVersions` 包含舊版與失效文件） |
+| `PUT` | `/api/knowledge/:id/documents/info?path=` | 管理者與該知識庫的維護者：文件的版本、生效日、失效日、取代的舊版與備註 |
+| `GET` | `/api/knowledge/:id/eval` | 管理者與該知識庫的維護者：題庫與評測紀錄 |
+| `POST`、`PATCH`、`DELETE` | `/api/knowledge/:id/eval/questions[/:qid]` | 同上：新增、修改、刪除題目 |
+| `POST`、`GET` | `/api/knowledge/:id/eval/import`、`/eval/export` | 同上：從 CSV／Excel 匯入（`?replace=1` 換掉原本的題庫）、匯出 CSV |
+| `POST`、`GET` | `/api/knowledge/:id/eval/run`、`/eval/runs/:runId` | 同上：執行評測（`answerModel` 選填時也評測回答）、看某次評測的每一題結果 |
 | `GET` | `/api/knowledge/source?base=&path=` | 搜尋得到這份文件的人：出處的原文（`base` 是出處上的知識庫名稱或識別碼，只搜尋一個知識庫時可省略；`download=1` 下載） |
 | `GET` | `/api/knowledge/source/text?base=&path=` | 同上：這份文件讀出來的文字，依索引的片段排列（`{"path", "sections": [{"location", "text"}]}`），網頁用來標出引用的段落 |
 

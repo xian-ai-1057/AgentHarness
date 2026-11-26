@@ -34,11 +34,15 @@ export interface KnowledgeSource {
   page?: number;
   /** 片段內容。 */
   excerpt: string;
+  /** 文件的版本說明，例如「2026 年版，2026-01-01 起生效」；沒有時不寫。 */
+  version?: string;
 }
 
 export type CitationMap = ReadonlyMap<number, KnowledgeSource>;
 
 const HEADER = /^\[(\d+)\] 來源：(.+)$/;
+/** 出處下一行的版本說明（見 format_hits 的 VERSION_PREFIX）。 */
+const VERSION_PREFIX = "版本：";
 const PAGE = /第\s*(\d+)\s*頁/;
 const BASE_SEPARATOR = " / ";
 const LOCATION_SEPARATOR = " › ";
@@ -76,6 +80,15 @@ export function parseSearchResult(text: string): KnowledgeSource[] {
     const citation = (match[2] ?? "").trim();
     const { base, path, location } = parseCitation(citation);
     const page = PAGE.exec(location);
+    let body = newline < 0 ? "" : part.slice(newline + 1);
+    let version: string | undefined;
+    if (body.startsWith(VERSION_PREFIX)) {
+      const end = body.indexOf("\n");
+      version = (end < 0 ? body : body.slice(0, end))
+        .slice(VERSION_PREFIX.length)
+        .trim();
+      body = end < 0 ? "" : body.slice(end + 1);
+    }
     found.push({
       number: Number(match[1]),
       citation,
@@ -83,7 +96,8 @@ export function parseSearchResult(text: string): KnowledgeSource[] {
       path,
       location,
       page: page ? Number(page[1]) : undefined,
-      excerpt: newline < 0 ? "" : part.slice(newline + 1).trim(),
+      excerpt: body.trim(),
+      ...(version && { version }),
     });
   }
   return found;

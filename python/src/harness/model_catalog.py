@@ -297,6 +297,85 @@ async def _litellm_model_info(url: str, key: str) -> RetrievalModels | None:
     )
 
 
+# 端點 GET /models 的項目裡代表上下文上限的欄位：vLLM 是 max_model_len，
+# OpenRouter 等是 context_length。
+_WINDOW_FIELDS = ("max_model_len", "context_length", "context_window")
+
+
+async def context_windows() -> dict[str, int]:
+    """查詢目前連的 OpenAI 相容端點上，各模型的上下文上限（token）。
+
+    自架模型（vLLM、LiteLLM Proxy 後面的模型）的上限 litellm 查不到，
+    對話壓縮需要它才能在接近上限前先壓縮：
+
+    - LiteLLM Proxy 的 GET /model/info：model_info.max_input_tokens（Proxy
+      設定檔寫了，或 litellm 認得那個模型時才有）。
+    - GET /models：vLLM 的 max_model_len，其他端點的 context_length。
+
+    兩邊都有時以 /model/info 為準。沒有設定 HARNESS_BASE_URL、端點是
+    Anthropic，或查不到時回傳空的 dict，不會丟出例外。
+
+    Returns:
+        {模型名稱: token 數}，名稱是端點上的名稱。
+    """
+    url = _env(providers.BASE_URL_VAR).rstrip("/")
+    if not url or _is_anthropic(url):
+        return {}
+    key = _env(providers.API_KEY_VAR)
+    found: dict[str, int] = {}
+    try:
+        data = await _get_json(f"{url}/models", _bearer(key))
+    except CatalogError:
+        data = None
+    for item in _rows(data):
+        name = item.get("id")
+        window = next(
+            (
+                _positive(item.get(field))
+                for field in _WINDOW_FIELDS
+                if _positive(item.get(field))
+            ),
+            None,
+        )
+        if isinstance(name, str) and window:
+            found[name] = window
+    root = url.removesuffix("/v1")
+    try:
+        data = await _get_json(f"{root}/model/info", _bearer(key))
+    except CatalogError:
+        data = None
+    for item in _rows(data):
+        name = item.get("model_name")
+        info = item.get("model_info")
+        window = (
+            _positive(info.get("max_input_tokens"))
+            if isinstance(info, dict)
+            else None
+        )
+        if isinstance(name, str) and window:
+            found[name] = window
+    return found
+
+
+def _rows(data: Any) -> list[dict[str, Any]]:
+    """回應裡 data 的項目；格式不對時是空的清單。"""
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def _positive(value: Any) -> int | None:
+    """正整數（或可以轉成正整數的字串）；其他情況為 None。"""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
 _RERANK_NAME = re.compile(r"rerank", re.IGNORECASE)
 _EMBEDDING_NAME = re.compile(
     r"(embed|bge-|(?:^|[/_-])e5-|gte-|nomic|minilm|mpnet|voyage-|jina-)",

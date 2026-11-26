@@ -19,7 +19,7 @@ MCP 伺服器給它工具，再從命令列、網頁或自己的程式裡和它�
 git clone https://github.com/xian-ai-1057/AgentHarness.git
 cd AgentHarness
 docker compose up -d
-docker compose logs harness      # 看網址與自動產生的登入密碼
+docker compose exec harness cat /assistant/.harness/secrets/web-password  # 管理者 admin 自動產生的密碼
 ```
 
 用瀏覽器打開 `http://<這台電腦的位址>:4321`，登入後依畫面選模型供應商、
@@ -69,6 +69,11 @@ litellm 直接連各家供應商。換模型只要改設定，不用改程式。
 **進階能力（Python 版）。** 多個 agent 協作、知識庫（RAG）、ontology
 （業務物件與每次都要核准的動作）、skills、長期記憶、訊息防護、對話壓縮。
 
+**知識庫治理（Python 版）。** 文件可以記下版本與生效日，搜尋只找得到今天
+有效的版本；題庫回歸評測在文件或檢索設定改動後自動檢查，標出退步的題目；
+資料分級讓碰到機密知識庫的對話自動改用地端模型，沒有可以處理的模型就
+停下來，資料不會送出。
+
 **部署後就能用（Python 版）。** `docker compose up -d` 啟動後在網頁上
 填模型金鑰即可；agent 寫的 Python 程式在隔離的 Docker 沙盒裡執行，可以
 上傳 Excel、PDF 請它分析；有登入密碼，能架在伺服器上給團隊使用。
@@ -92,7 +97,7 @@ litellm 直接連各家供應商。換模型只要改設定，不用改程式。
 | Skills | 尚未支援 | [支援](python/README.md#skills) |
 | 長期記憶 | 尚未支援 | [支援](python/README.md#長期記憶) |
 | 訊息防護（個資遮蔽、提示注入） | 尚未支援 | [支援](python/README.md#訊息防護) |
-| 對話壓縮 | 讀得懂 Python 版的壓縮紀錄，本身不壓縮 | [支援](python/README.md#對話壓縮) |
+| 對話壓縮 | 讀得懂 Python 版的壓縮紀錄，本身不壓縮 | [支援](python/README.md#對話壓縮)（自動壓縮、網頁版 `/compact` 與上下文用量） |
 | 在沙盒（Docker）裡執行程式 | 尚未支援 | [支援](python/README.md#在沙盒裡執行程式) |
 | 架在伺服器上（登入密碼） | 尚未支援 | [支援](python/README.md#部署到伺服器) |
 | 網頁上傳檔案 | 尚未支援 | [支援](python/README.md#上傳檔案) |
@@ -157,7 +162,8 @@ npm install github:xian-ai-1057/AgentHarness
 ```
 
 開發這個框架本身：`npm test` 執行測試，`npm run lint` 檢查格式，
-`npm run typecheck` 檢查型別。
+`npm run typecheck` 檢查型別。想送 PR 的話，請先看
+[參與開發](CONTRIBUTING.md)（開發環境、要跑的檢查、程式風格與文件規則）。
 
 ## 設定模型
 
@@ -672,8 +678,11 @@ Python 版的 `pyharness web` 另外支援：
 [部署到伺服器](python/README.md#部署到伺服器)）。只在自己電腦上用（不必
 登入）時和以前一樣，和命令列共用 `.harness/sessions/` 與記憶；從單人版
 升級成多人帳號時，舊對話交給第一位管理者、放在只有他看得到的「舊資料
-（專案資料夾）」裡，舊的 `workspace/` 不會分享給其他成員，預設的「共用」
-資料夾換成新的 `shared/`。
+（專案資料夾）」裡，舊的 `workspace/` 不會分享給其他成員；共用資料夾要由
+管理者在 `harness.yaml` 的 `workspaces` 開放，預設沒有。要登入時所有人的
+`run_command`（管理者也是）都在沙盒執行，指令與 MCP 伺服器拿不到金鑰，
+用 Docker Compose 部署時平台容器不掛 Docker socket（改由沙盒服務啟動
+容器）。
 
 伺服器可以執行專案的工具，所以預設只接受本機連線，並拒絕其他網站
 送來的請求。TypeScript 版沒有登入機制，要讓別台電腦連線時，用
@@ -711,9 +720,9 @@ Node.js 可以打包，所以這份打包結果要一起提交。
 
 Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
 `tools.py`…），另外多了多個 agent 協作（`delegation.py`）、知識庫
-（`knowledge.py`）、對話壓縮（`compaction.py`）、沙盒（`sandbox.py`）、
-網頁上設定的模型金鑰（`credentials.py`、`providers.py`）等進階功能，
-可以在讀懂主迴圈之後再看。
+（`knowledge.py`）、對話壓縮（`compaction.py`）、沙盒與沙盒服務
+（`sandbox.py`、`sandbox_runner.py`）、網頁上設定的模型金鑰
+（`credentials.py`、`providers.py`）等進階功能，可以在讀懂主迴圈之後再看。
 
 ## 設計來源
 
@@ -770,3 +779,5 @@ Agent Harness 以 [Apache License 2.0](LICENSE) 授權，Copyright 2026
 - 第三方元件（改寫自 Anthropic 官方的 skills、字型、PDF.js、網頁版打包的
   JavaScript 套件）各自的授權列在 `NOTICE`，詳見說明文件的
   [授權](https://agent-harness-docs-ten.vercel.app/reference/license)。
+
+想參與開發（回報問題、送 PR）請見 [CONTRIBUTING.md](CONTRIBUTING.md)。

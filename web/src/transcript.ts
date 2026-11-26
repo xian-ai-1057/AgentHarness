@@ -18,6 +18,7 @@ import {
   type SessionDetail,
   type SubagentStep,
 } from "../../src/web/protocol.ts";
+import { formatTokens } from "./format.ts";
 
 /** denied：使用者拒絕了這次呼叫（不算工具錯誤）。 */
 export type StepStatus =
@@ -58,6 +59,7 @@ export type Block =
       messageIndex?: number;
     }
   | { kind: "notice"; key: string; text: string }
+  | { kind: "compaction"; key: string; title: string; summary: string }
   | { kind: "steps"; key: string; steps: Step[] };
 
 export interface Turn {
@@ -67,6 +69,11 @@ export interface Turn {
   /** 使用者訊息附上的檔案路徑。 */
   attachments: string[];
   blocks: Block[];
+  /**
+   * 回覆與回覆的動作之後才顯示的區塊：壓縮標記落在兩輪之間時放這裡，
+   * 不夾在回覆內文和它的複製、評價按鈕之間。
+   */
+  after?: Block[];
   files: FileChange[];
   /** 沙盒在這一輪產生的檔案（相對於專案根目錄），依出現順序、不重複。 */
   produced: string[];
@@ -97,7 +104,37 @@ export interface FileChange {
 }
 
 const ERROR_PREFIX = "[錯誤] ";
-const COMPACTED = "對話已壓縮：較早的內容濃縮成摘要，agent 之後看到的是摘要。";
+/** Python 版寫進紀錄的壓縮紀錄（role 為 harness、type 為 compaction）。 */
+interface CompactionRecord {
+  keep_from?: number;
+  summary?: string;
+  reason?: string;
+  summarized?: number;
+  tokens_before?: number;
+  tokens_after?: number;
+}
+
+const COMPACTION_REASONS: Record<string, string> = {
+  manual: "已壓縮對話",
+  threshold: "對話接近上下文上限，已自動壓縮",
+  overflow: "對話超過模型的上下文上限，已自動壓縮後重試",
+};
+
+/** 壓縮紀錄的標題，例如「已自動壓縮 · 較早的 12 則訊息 · 約 150k → 20k tokens」。 */
+export function compactionTitle(record: CompactionRecord): string {
+  const parts = [COMPACTION_REASONS[record.reason ?? ""] ?? "對話已壓縮"];
+  if (record.summarized) {
+    parts.push(`較早的 ${record.summarized} 則訊息濃縮成摘要`);
+  }
+  if (record.tokens_before && record.tokens_after) {
+    parts.push(
+      `約 ${formatTokens(record.tokens_before)} → ${formatTokens(
+        record.tokens_after,
+      )} tokens`,
+    );
+  }
+  return parts.join(" · ");
+}
 
 export function buildTurns(
   detail: SessionDetail,
@@ -126,19 +163,51 @@ export function buildTurns(
     return turn;
   };
 
+  // 壓縮紀錄寫在對話最後，但摘要取代的是 keep_from 之前的訊息，所以
+  // 標記顯示在 keep_from 那則訊息前面（原文保留的部分在標記之後）；
+  // 全部摘要時 keep_from 就是紀錄本身的位置。
+  const markers = new Map<
+    number,
+    { index: number; record: CompactionRecord }[]
+  >();
   detail.messages.forEach((message, index) => {
-    // Python 版會在紀錄裡寫入自己的紀錄（壓縮、修剪），role 是 harness。
-    const role: string = message.role;
-    if (role === "harness") {
-      if ((message as { type?: string }).type === "compaction") {
-        current().blocks.push({
-          kind: "notice",
-          key: `c${index}`,
-          text: COMPACTED,
-        });
+    const record = message as CompactionRecord & {
+      role: string;
+      type?: string;
+    };
+    if (record.role !== "harness" || record.type !== "compaction") return;
+    const at =
+      typeof record.keep_from === "number" && record.keep_from < index
+        ? record.keep_from
+        : index;
+    markers.set(at, [...(markers.get(at) ?? []), { index, record }]);
+  });
+  const pushMarkers = (at: number) => {
+    // 保留的第一則是使用者訊息，或全部摘要（落在紀錄本身）時，標記在
+    // 兩輪之間；保留的第一則是回覆時，標記在這一輪裡、那則回覆前面。
+    const between = detail.messages[at]?.role !== "assistant";
+    for (const { index, record } of markers.get(at) ?? []) {
+      const target = current();
+      const block: Block = {
+        kind: "compaction",
+        key: `c${index}`,
+        title: compactionTitle(record),
+        summary: record.summary ?? "",
+      };
+      if (between) {
+        target.after = [...(target.after ?? []), block];
+      } else {
+        target.blocks.push(block);
       }
-      return;
     }
+  };
+
+  detail.messages.forEach((message, index) => {
+    pushMarkers(index);
+    // Python 版會在紀錄裡寫入自己的紀錄（壓縮、修剪、用量），role 是
+    // harness，不顯示成訊息。
+    const role: string = message.role;
+    if (role === "harness") return;
     if (message.role === "user") {
       const { text, attachments } = splitAttachments(message.content ?? "");
       turn = {

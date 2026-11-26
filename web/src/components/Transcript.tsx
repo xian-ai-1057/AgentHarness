@@ -109,6 +109,9 @@ export function TurnView({
         />
       )}
       {reply?.text && <MessageActions {...reply} />}
+      {turn.after?.map((block) => (
+        <BlockView key={block.key} block={block} localFiles={canLoadFiles} />
+      ))}
     </>
   );
 }
@@ -173,6 +176,18 @@ function BlockView({
         <RetryIcon />
         {block.text}
       </div>
+    );
+  }
+  if (block.kind === "compaction") {
+    return (
+      <details className="ch-compaction anim-in">
+        <summary title="點一下查看摘要：agent 之後看到的是這份摘要，不是較早的原文">
+          {block.title}
+        </summary>
+        <div className="ch-compaction-body">
+          <Markdown text={block.summary} localFiles={localFiles} />
+        </div>
+      </details>
     );
   }
   return <StepGroup steps={block.steps} />;

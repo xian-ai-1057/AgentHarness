@@ -65,3 +65,5 @@ cd docs
 npm install
 npm run dev          # http://localhost:5173
 ```
+
+要送 PR 的話，請先看[參與開發](/reference/contributing)：開發環境、送出前要跑的檢查、程式風格與文件規則。

@@ -16,7 +16,8 @@ ENV PYTHONUNBUFFERED=1 \
 COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
 
 COPY python /tmp/harness
-RUN pip install "/tmp/harness[mcp,pdf,vectors]" && rm -rf /tmp/harness
+# tzdata：映像檔沒有系統時區資料，知識庫依 TZ 判斷文件今天是否生效。
+RUN pip install "/tmp/harness[mcp,pdf,vectors]" tzdata && rm -rf /tmp/harness
 
 # 用一般使用者執行；專案與所有資料放在 /assistant（掛載 volume）。
 RUN useradd --create-home --uid 1000 harness \

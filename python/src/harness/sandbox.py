@@ -30,15 +30,24 @@ pyharness 自己也跑在容器裡時（用 docker-compose.yml 部署），它�
 的話以 harness.yaml 為準。
 
 網頁版讓每段對話選自己的工作資料夾，所以每一輪都用 for_folder 複製一份
-只掛載那個資料夾的沙盒；成員的 run_command 也改在沙盒裡執行
-（command_tool），不會在伺服器上直接執行。
+只掛載那個資料夾的沙盒；run_command 也改在沙盒裡執行（command_tool），
+不會在伺服器上直接執行。
+
+能使用 Docker socket 等於擁有主機的 root 權限，所以 docker compose 部署時
+平台容器不掛 socket，改由另一個只做這件事的沙盒服務（sandbox_runner）啟動
+容器：設定環境變數 HARNESS_SANDBOX_RUNNER（服務的網址）後，沙盒把要執行的
+程式送給它，映像檔、使用者、資源上限與能掛載的位置都由服務決定，平台被
+攻破也只能在沙盒裡執行程式（見 sandbox_runner）。HARNESS_SANDBOX_RUNTIME
+可以指定容器的 runtime，例如 gVisor 的 runsc。
 """
 
 import asyncio
 import contextlib
 import dataclasses
+import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import time
@@ -60,6 +69,13 @@ CONTAINER_WORKDIR = "/workspace"
 IMAGE_ENV = "HARNESS_SANDBOX_IMAGE"
 NOTES_ENV = "HARNESS_SANDBOX_NOTES"
 VOLUME_ENV = "HARNESS_SANDBOX_VOLUME"
+RUNNER_ENV = "HARNESS_SANDBOX_RUNNER"
+TOKEN_FILE_ENV = "HARNESS_SANDBOX_TOKEN_FILE"
+RUNTIME_ENV = "HARNESS_SANDBOX_RUNTIME"
+NAME_PREFIX = "harness-sandbox-"
+NAME_PATTERN = re.compile(r"^harness-sandbox-[0-9a-f]{12}$")
+# 等沙盒服務回覆時，在指令本身的逾時之外多等多久（啟動容器、停掉容器）。
+_RUNNER_GRACE_SECONDS = 60
 NO_OUTPUT = "（程式執行完畢，沒有輸出。要看的結果請用 print 印出來）"
 # 和 src/web/protocol.ts 的 PRODUCED_MARKER 相同，兩邊要一起改。
 PRODUCED_MARKER = "[產生的檔案] "
@@ -77,7 +93,7 @@ _LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Locks]" = (
 
 # 專案裡會被 harness 讀取或執行的位置；掛進容器的話，容器裡的程式可以
 # 改寫它們，進而在主機上執行程式。
-_PROTECTED = (
+PROTECTED = (
     "harness.yaml",
     "AGENTS.md",
     "agents",
@@ -92,12 +108,17 @@ _AVAILABLE_TIMEOUT = 10
 def available(command: str = "docker") -> bool:
     """確認這台機器現在能不能用 Docker 執行容器。
 
+    設定了沙盒服務（HARNESS_SANDBOX_RUNNER）時一律視為可以：服務可能
+    比平台晚一點啟動，執行時連不上會再說明。
+
     Args:
         command: 容器工具的指令，docker 或 podman。
 
     Returns:
         指令存在，而且連得上 Docker 時為 True。
     """
+    if os.environ.get(RUNNER_ENV):
+        return True
     if shutil.which(command) is None:
         return False
     try:
@@ -151,6 +172,12 @@ class Sandbox:
             容器裡時使用，None 表示直接掛載主機上的資料夾。
         volume_subpath: workspace 在 volume 裡的相對路徑。
         read_only: True 時唯讀掛載，容器裡的程式不能寫入 workspace。
+        runtime: 容器的 runtime（docker run --runtime），例如 gVisor 的
+            runsc；None 表示 Docker 的預設值。
+        user: 容器裡的使用者（uid:gid）；None 表示和目前的使用者相同。
+        runner: 沙盒服務的網址（見 sandbox_runner）；設定時不自己執行
+            docker，改請服務執行，只支援 volume 掛載。
+        runner_token_file: 沙盒服務的通行碼檔案。
     """
 
     workspace: pathlib.Path
@@ -165,6 +192,10 @@ class Sandbox:
     volume: str | None = None
     volume_subpath: str = ""
     read_only: bool = False
+    runtime: str | None = None
+    user: str | None = None
+    runner: str | None = None
+    runner_token_file: str | None = None
 
     def __post_init__(self) -> None:
         self.workspace = pathlib.Path(self.workspace).resolve()
@@ -244,7 +275,11 @@ class Sandbox:
         ]
         if not self.network:
             args += ["--network", "none"]
-        if hasattr(os, "getuid"):
+        if self.runtime:
+            args += ["--runtime", self.runtime]
+        if self.user:
+            args += ["--user", self.user]
+        elif hasattr(os, "getuid"):
             # 用目前的使用者執行：不是 root，寫出的檔案也屬於這個使用者。
             args += ["--user", f"{os.getuid()}:{os.getgid()}"]
         args += [
@@ -321,7 +356,34 @@ class Sandbox:
     ) -> Result:
         """在新的容器裡執行 argv，逾時或中斷時停掉容器。"""
         self.workspace.mkdir(parents=True, exist_ok=True)
-        name = f"harness-sandbox-{uuid.uuid4().hex[:12]}"
+        name = f"{NAME_PREFIX}{uuid.uuid4().hex[:12]}"
+        if self.runner:
+            return await self._remote(name, argv, stdin, workdir, timeout)
+        return await self.run_container(name, argv, stdin, workdir, timeout)
+
+    async def run_container(
+        self,
+        name: str,
+        argv: tuple[str, ...],
+        stdin: str,
+        workdir: str,
+        timeout: float,
+    ) -> Result:
+        """用 docker 指令執行一個容器（沙盒服務也用它）。
+
+        Args:
+            name: 容器名稱，逾時或中斷時用它停止容器。
+            argv: 在容器裡執行的指令。
+            stdin: 交給指令的標準輸入。
+            workdir: 容器裡的工作目錄。
+            timeout: 逾時秒數。
+
+        Returns:
+            執行結果。
+
+        Raises:
+            RuntimeError: 找不到 docker 指令。
+        """
         try:
             process = await asyncio.create_subprocess_exec(
                 *self.docker_args(name, argv, workdir),
@@ -349,6 +411,90 @@ class Sandbox:
             self._shorten(stdout.decode(errors="replace")),
             self._shorten(stderr.decode(errors="replace")),
         )
+
+    async def _remote(
+        self,
+        name: str,
+        argv: tuple[str, ...],
+        stdin: str,
+        workdir: str,
+        timeout: float,
+    ) -> Result:
+        """請沙盒服務執行；中斷這一輪時請它停掉容器。"""
+        # aiohttp 只有用到沙盒服務時才載入（命令列版不一定需要）。
+        import aiohttp
+
+        if self.volume is None:
+            raise RuntimeError(
+                "沙盒服務只能掛載 Docker volume 裡的資料夾，請同時設定 "
+                f"{VOLUME_ENV}"
+            )
+        body = {
+            "name": name,
+            "argv": list(argv),
+            "stdin": stdin,
+            "workdir": workdir,
+            "timeout": timeout,
+            "subpath": self.volume_subpath,
+            "readOnly": self.read_only,
+            "memory": self.memory,
+            "cpus": self.cpus,
+            "network": self.network,
+        }
+        base = self.runner.rstrip("/")
+        headers = {"Authorization": f"Bearer {self._runner_token()}"}
+        limit = aiohttp.ClientTimeout(total=timeout + _RUNNER_GRACE_SECONDS)
+        try:
+            async with aiohttp.ClientSession(timeout=limit) as session:
+                try:
+                    async with session.post(
+                        f"{base}/run", json=body, headers=headers
+                    ) as response:
+                        data = await _runner_reply(response)
+                except asyncio.CancelledError:
+                    # 使用者中斷這一輪：容器不會自己停，請服務停掉。
+                    await asyncio.shield(
+                        self._remote_kill(session, base, headers, name)
+                    )
+                    raise
+        except (aiohttp.ClientError, TimeoutError) as error:
+            raise RuntimeError(
+                f"連不上沙盒服務（{base}）：{error or type(error).__name__}。"
+                "請確認 sandbox-runner 容器有在執行（docker compose ps）"
+            ) from error
+        if data.get("timedOut"):
+            return Result(None, "", "", timed_out=True)
+        return Result(
+            data.get("exitCode"),
+            self._shorten(str(data.get("stdout", ""))),
+            self._shorten(str(data.get("stderr", ""))),
+        )
+
+    async def _remote_kill(
+        self,
+        session: Any,
+        base: str,
+        headers: dict[str, str],
+        name: str,
+    ) -> None:
+        with contextlib.suppress(Exception):
+            async with session.post(
+                f"{base}/kill", json={"name": name}, headers=headers
+            ):
+                pass
+
+    def _runner_token(self) -> str:
+        """讀取沙盒服務的通行碼；服務每次啟動都會換一組。"""
+        if not self.runner_token_file:
+            return ""
+        try:
+            path = pathlib.Path(self.runner_token_file)
+            return path.read_text(encoding="utf-8").strip()
+        except OSError as error:
+            raise RuntimeError(
+                "讀不到沙盒服務的通行碼（"
+                f"{self.runner_token_file}），沙盒服務可能還沒啟動完成"
+            ) from error
 
     def tools(self) -> list[tools_lib.Tool]:
         """包成 agent 可以使用的工具（run_python）。"""
@@ -517,6 +663,20 @@ def format_output(result: Result) -> str:
     if result.stderr.strip():
         parts.append(f"--- stderr ---\n{result.stderr.rstrip()}")
     return "\n\n".join(parts) or NO_OUTPUT
+
+
+async def _runner_reply(response: Any) -> dict[str, Any]:
+    """讀取沙盒服務的回覆，失敗時把服務的說明轉成 RuntimeError。"""
+    try:
+        data = await response.json(content_type=None)
+    except (ValueError, json.JSONDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        raise RuntimeError(f"沙盒服務回覆了看不懂的內容（{response.status}）")
+    if response.status != 200:
+        message = data.get("error") or f"HTTP {response.status}"
+        raise RuntimeError(f"沙盒服務拒絕執行：{message}")
+    return data
 
 
 Snapshot = dict[str, tuple[int, int]]
@@ -704,9 +864,18 @@ def from_config(root: pathlib.Path, config: Any) -> Sandbox | None:
         root, str(options.pop("workspace", DEFAULT_WORKSPACE))
     )
     # 部署環境提供的預設值；harness.yaml 有寫的話以它為準。
-    for field, variable in (("image", IMAGE_ENV), ("notes", NOTES_ENV)):
+    for field, variable in (
+        ("image", IMAGE_ENV),
+        ("notes", NOTES_ENV),
+        ("runtime", RUNTIME_ENV),
+    ):
         if field not in options and os.environ.get(variable):
             options[field] = os.environ[variable]
+    # 沙盒服務（見 sandbox_runner）：映像檔與 runtime 由服務決定。
+    runner = os.environ.get(RUNNER_ENV)
+    if runner:
+        options["runner"] = runner
+        options["runner_token_file"] = os.environ.get(TOKEN_FILE_ENV) or None
     volume = os.environ.get(VOLUME_ENV)
     if volume:
         # 專案根目錄就是 volume 的根目錄，所以相對路徑相同。
@@ -726,6 +895,7 @@ _FIELDS = {
     "network": "network",
     "command": "command",
     "notes": "notes",
+    "runtime": "runtime",
 }
 
 
@@ -740,7 +910,7 @@ def _workspace(root: pathlib.Path, path: str) -> pathlib.Path:
             "sandbox.workspace 不能是專案根目錄：容器裡的程式可以改寫 tools/ "
             f"與 harness.yaml。請改用專用的資料夾，例如 {DEFAULT_WORKSPACE}"
         )
-    for name in _PROTECTED:
+    for name in PROTECTED:
         protected = root / name
         if target == protected or target.is_relative_to(protected):
             raise ValueError(

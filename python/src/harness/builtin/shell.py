@@ -3,6 +3,10 @@
 設計參考 Claude Code 的 Bash 與 Codex 的 shell：在專案資料夾裡執行一個
 不需要互動的指令，回傳結束代碼與輸出，讓 agent 能跑測試、建置、git 等
 命令列工具。指令可以做任何事，所以預設需要使用者同意。
+
+指令拿不到 harness 的金鑰：環境變數裡名稱像金鑰的（含 KEY、SECRET、
+TOKEN、PASSWORD 等字）都會拿掉，要保留的寫在 HARNESS_SHELL_KEEP_ENV
+（逗號分隔，例如 GH_TOKEN），見 credentials.child_environment。
 """
 
 import asyncio
@@ -91,10 +95,15 @@ async def execute(command: str, cwd: str, timeout: float) -> CommandResult:
     Raises:
         ToolError: 無法啟動指令（例如資料夾不存在）。
     """
+    # 延後載入：credentials 會載入 project，而 project 會載入這個模組。
+    from harness import credentials
+
     try:
         process = await asyncio.create_subprocess_shell(
             command,
             cwd=cwd,
+            # 指令是模型寫的，拿不到 harness 的金鑰。
+            env=credentials.child_environment(),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -13,6 +13,7 @@ export interface StepSentence {
 }
 
 const SUBAGENT_PREFIX = "ask_";
+const HANDOFF_PREFIX = "transfer_to_";
 const TARGET_LIMIT = 80;
 
 /** 只看路徑的工具：動詞與預設路徑。 */
@@ -73,6 +74,12 @@ export function describeStep(step: {
           .join(" "),
         "plain",
       );
+    case "search_knowledge":
+      return withTarget("搜尋知識庫", args.query, "quote");
+    case "remember":
+      return withTarget("記住", firstLine(args.content), "quote");
+    case "forget":
+      return { verb: "刪除一則記憶" };
     case "search_documents":
       return withTarget("搜尋文件", args.query, "quote");
     case "get_metric":
@@ -80,16 +87,8 @@ export function describeStep(step: {
     case "run_action":
       return withTarget("執行動作", args.action, "code");
   }
-  if (
-    name.startsWith(SUBAGENT_PREFIX) &&
-    name.length > SUBAGENT_PREFIX.length
-  ) {
-    return {
-      verb: "交給",
-      target: name.slice(SUBAGENT_PREFIX.length),
-      style: "plain",
-    };
-  }
+  const delegated = delegation(name);
+  if (delegated) return { ...delegated, style: "plain" };
   const summary = shortArgs(args);
   return summary
     ? { verb: name, target: summary, style: "code" }
@@ -117,16 +116,29 @@ const TOOL_LABELS: Record<string, string> = {
   search_documents: "搜尋文件",
   get_metric: "查詢指標",
   run_action: "執行動作",
+  search_knowledge: "搜尋知識庫",
+  remember: "記住一件事",
+  forget: "刪除一則記憶",
 };
 
 export function toolLabel(name: string): string | undefined {
   const label = TOOL_LABELS[name];
   if (label) return label;
-  if (
-    name.startsWith(SUBAGENT_PREFIX) &&
-    name.length > SUBAGENT_PREFIX.length
-  ) {
-    return `交給 ${name.slice(SUBAGENT_PREFIX.length)}`;
+  const delegated = delegation(name);
+  return delegated ? `${delegated.verb} ${delegated.target}` : undefined;
+}
+
+/** ask_researcher 是交給 subagent，transfer_to_billing 是把對話轉交出去。 */
+function delegation(
+  name: string,
+): { verb: string; target: string } | undefined {
+  for (const [prefix, verb] of [
+    [SUBAGENT_PREFIX, "交給"],
+    [HANDOFF_PREFIX, "轉交給"],
+  ] as const) {
+    if (name.startsWith(prefix) && name.length > prefix.length) {
+      return { verb, target: name.slice(prefix.length) };
+    }
   }
   return undefined;
 }

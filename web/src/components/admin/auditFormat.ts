@@ -24,6 +24,13 @@ const ONTOLOGY_STATUS: Record<string, string> = {
   rejected: "參數不對，沒有執行",
 };
 
+/** 題庫題目的操作。 */
+const EVAL_OPS: Record<string, string> = {
+  add: "新增題目",
+  update: "修改題目",
+  delete: "刪除題目",
+};
+
 const FAILURE_LABELS: Record<string, string> = {
   wrong_password_or_disabled: "密碼不對，或帳號已停用",
   unknown_username: "沒有這個帳號",
@@ -156,6 +163,56 @@ export function describeDetail(entry: AuditEntry): string {
     case "knowledge.document_delete":
     case "knowledge.personal_document_delete":
       return String(detail.path ?? "");
+    case "knowledge.delete":
+      return detail.filesDeleted ? "一併刪除了文件與索引" : "";
+    case "knowledge.document_info": {
+      const parts = [
+        String(detail.path ?? ""),
+        detail.version ? `版本：${String(detail.version)}` : "",
+        detail.effective ? `${String(detail.effective)} 起生效` : "",
+        detail.expires ? `${String(detail.expires)} 失效` : "",
+        nameList(detail.supersedes)
+          ? `取代 ${nameList(detail.supersedes)}`
+          : "",
+      ];
+      return parts.filter(Boolean).join(" · ");
+    }
+    case "knowledge.eval_question": {
+      const op = EVAL_OPS[String(detail.op)] ?? "";
+      return [op, String(detail.question ?? "")].filter(Boolean).join(" · ");
+    }
+    case "knowledge.eval_import":
+      return `${String(detail.file ?? "")} · 加入 ${String(detail.added ?? 0)} 題${
+        detail.replace ? "（換掉原本的題庫）" : ""
+      }`;
+    case "knowledge.eval_run":
+      return detail.answerModel
+        ? `檢索與回答（${String(detail.answerModel)}）`
+        : "只評測檢索";
+    case "knowledge.eval_done": {
+      if (detail.status === "error") {
+        return `評測失敗：${String(detail.error ?? "")}`;
+      }
+      const parts = [
+        String(detail.trigger ?? ""),
+        `通過 ${String(detail.passed ?? 0)}/${String(detail.total ?? 0)}`,
+        Number(detail.regressions) > 0
+          ? `退步 ${String(detail.regressions)} 題`
+          : "",
+      ];
+      return parts.filter(Boolean).join(" · ");
+    }
+    case "settings.classification": {
+      if (!detail.enabled) return "停用資料分級";
+      const bases = detail.knowledgeBases;
+      const count =
+        bases && typeof bases === "object" ? Object.keys(bases).length : 0;
+      const parts = [
+        detail.routeTo ? `自動改用：${String(detail.routeTo)}` : "",
+        count ? `${count} 個知識庫有分級` : "",
+      ];
+      return parts.filter(Boolean).join(" · ") || "啟用資料分級";
+    }
     case "approval.decide": {
       const decision =
         DECISION_LABELS[String(detail.decision)] ?? String(detail.decision);
@@ -190,6 +247,23 @@ export function describeDetail(entry: AuditEntry): string {
     }
     case "settings.models":
       return Array.isArray(detail.models) ? detail.models.join("、") : "";
+    case "settings.compaction": {
+      const parts = [
+        detail.auto === false ? "自動壓縮：關閉" : "自動壓縮：開啟",
+      ];
+      if (typeof detail.thresholdRatio === "number") {
+        parts.push(`門檻 ${Math.round(detail.thresholdRatio * 100)}%`);
+      }
+      const windows = Object.entries(
+        (detail.contextWindows ?? {}) as Record<string, unknown>,
+      ).filter(([, value]) => value != null);
+      if (windows.length > 0) {
+        parts.push(
+          windows.map(([name, value]) => `${name}=${String(value)}`).join("、"),
+        );
+      }
+      return parts.join(" · ");
+    }
     case "audit.export":
       return `格式：${String(detail.format ?? "").toUpperCase()}`;
     default:

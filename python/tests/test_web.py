@@ -947,7 +947,9 @@ class TestServerDeployment:
         password = served[0]["password"]
         assert len(password) >= 20
         out = capsys.readouterr().out
-        assert password in out
+        # 密碼不印在 log，只說存在哪裡。
+        assert password not in out
+        assert credentials.PASSWORD_FILE in out
         assert "管理者帳號 admin" in out
         # 重新啟動後還是同一組，使用者不用重新登入。
         assert served[1]["password"] == password
@@ -1652,6 +1654,9 @@ class TestProjectChoices:
             "agentAdmin": True,
             # 個人 skill 只在帳號模式（本機模式用公司 skill）。
             "personalSkills": False,
+            # 知識庫的文件版本、題庫評測，以及管理平台的資料分級頁。
+            "knowledgeGovernance": True,
+            "classification": True,
         }
         assert info["auth"] == {
             "mode": "local",

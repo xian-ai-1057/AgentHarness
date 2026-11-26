@@ -59,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return _command_new(args)
     if args.command == "user":
         return _command_user(args)
+    if args.command == "sandbox-runner":
+        return _command_sandbox_runner(args)
     commands = {
         "memory": _command_memory,
         "knowledge": _command_knowledge,
@@ -175,6 +177,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     sandbox.add_argument("-p", "--project", default=".", help="專案資料夾")
 
+    runner = commands.add_parser(
+        "sandbox-runner",
+        help="啟動沙盒服務：替網頁版啟動沙盒容器（平台就不必掛 Docker socket）",
+    )
+    runner.add_argument("--host", default="0.0.0.0", help="監聽的位址")
+    runner.add_argument(
+        "--port", type=int, default=4322, help="監聽的埠號（預設 4322）"
+    )
+
     knowledge = commands.add_parser("knowledge", help="檢查知識庫")
     knowledge.add_argument("-p", "--project", default=".", help="專案資料夾")
     knowledge.add_argument("query", nargs="?", help="要試著搜尋的內容")
@@ -290,11 +301,18 @@ def _web_password(
         password = credentials.stored_web_password(loaded.root)
     else:
         password, _ = credentials.web_password(loaded.root)
-    stored = credentials.SECRETS_DIR / credentials.PASSWORD_FILE
+    # 不把密碼印在 log：看得到 log（docker compose logs、systemd 日誌）的
+    # 人不一定該是管理者。只說密碼存在哪裡，讀檔要有那台機器的權限。
+    stored = (
+        credentials.secrets_dir(loaded.root) / credentials.PASSWORD_FILE
+    ).resolve()
     return password, (
-        f"密碼：{password}\n"
-        f"（自動產生，存在 {stored}；要用自己的密碼請設定環境變數 "
-        f"{WEB_PASSWORD_ENV}，或登入後在網頁上修改）"
+        f"密碼是自動產生的，存在 {stored}"
+        "（只有執行 pyharness 的使用者能讀）。\n"
+        f"查看：cat {stored}"
+        f"（Docker：docker compose exec harness cat {stored}）\n"
+        f"要用自己的密碼請設定環境變數 {WEB_PASSWORD_ENV}，"
+        "或登入後在網頁上修改。"
     )
 
 
@@ -318,6 +336,8 @@ def _command_web(args: argparse.Namespace, loaded: project_lib.Project) -> int:
     # aiohttp 只有網頁版用得到，延後到這裡才載入。
     from harness import web
     from harness.web import accounts
+    from harness.web import config
+    from harness.web import folders
     from harness.web import server
 
     password, password_note = _web_password(args, loaded)
@@ -329,6 +349,10 @@ def _command_web(args: argparse.Namespace, loaded: project_lib.Project) -> int:
         allowed_hosts=args.allowed_host or [],
     )
 
+    if mode == "accounts":
+        # 金鑰在這個行程的環境變數裡：別讓同一個使用者的其他程式讀到。
+        credentials.protect_process()
+
     proxies = [
         *(args.trusted_proxy or []),
         os.environ.get(server.TRUSTED_PROXIES_ENV, ""),
@@ -338,6 +362,11 @@ def _command_web(args: argparse.Namespace, loaded: project_lib.Project) -> int:
         print(f"{loaded.name} 的網頁版已啟動：{url}")
         if mode == "accounts":
             print(_login_note(loaded.root, password, password_note))
+            notice = folders.legacy_shared_notice(
+                loaded.root, config.read_config(loaded.root)
+            )
+            if notice:
+                print(notice)
         agent = loaded.agents[loaded.default_agent]
         if not providers.is_ready(agent.model or llm.default_model()):
             print(
@@ -439,6 +468,18 @@ def _list_users(store) -> int:
     return 0
 
 
+def _command_sandbox_runner(args: argparse.Namespace) -> int:
+    """啟動沙盒服務（見 sandbox_runner），直到被停止。"""
+    from harness import sandbox_runner
+
+    try:
+        sandbox_runner.serve(args.host, args.port)
+    except ValueError as error:
+        print(f"錯誤：{error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _command_sandbox(
     args: argparse.Namespace, loaded: project_lib.Project
 ) -> int:
@@ -451,7 +492,12 @@ def _command_sandbox(
         )
         return 1
     network = "允許" if box.network else "關閉"
-    print(f"映像檔：{box.image}")
+    if box.runner:
+        print(f"沙盒服務：{box.runner}（映像檔與 runtime 由服務決定）")
+    else:
+        print(f"映像檔：{box.image}")
+        if box.runtime:
+            print(f"runtime：{box.runtime}")
     print(f"掛載：{box.workspace} → {sandbox_lib.CONTAINER_WORKDIR}")
     print(
         f"限制：{box.timeout_seconds:g} 秒、記憶體 {box.memory}、"

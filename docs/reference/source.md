@@ -13,7 +13,7 @@
 | 7 | `mcp.ts`、`project.ts` | 連接 MCP 伺服器、載入專案資料夾 |
 | 8 | `builtin/` | 內建工具：檔案、搜尋、指令、計畫、網頁 |
 
-Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、`tools.py`…），另外多了多個 agent 協作（`delegation.py`）、知識庫（`knowledge.py`）、對話壓縮（`compaction.py`）、沙盒（`sandbox.py`）、網頁上設定的模型金鑰（`credentials.py`、`providers.py`）等進階功能，可以在讀懂主迴圈之後再看。
+Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、`tools.py`…），另外多了多個 agent 協作（`delegation.py`）、知識庫（`knowledge.py`）、對話壓縮（`compaction.py`）、沙盒與沙盒服務（`sandbox.py`、`sandbox_runner.py`）、網頁上設定的模型金鑰（`credentials.py`、`providers.py`）等進階功能，可以在讀懂主迴圈之後再看。
 
 ## 設計來源
 

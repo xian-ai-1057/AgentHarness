@@ -137,8 +137,8 @@ def word_count(text: str) -> dict[str, int]:
     return {"characters": len(text), "lines": len(text.splitlines())}
 '''
 
-# private/ 與 shared/ 是網頁版多人使用時每個人的「我的檔案」與預設的
-# 「共用」資料夾。
+# private/ 是網頁版多人使用時每個人的「我的檔案」；shared/ 是舊版預設的
+# 「共用」資料夾（現在要在 harness.yaml 的 workspaces 開放）。
 _GITIGNORE = """\
 .harness/
 __pycache__/

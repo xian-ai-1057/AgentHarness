@@ -32,7 +32,8 @@ def _long_history(session, turns=4, size=400):
 
 
 def _is_summary_request(request):
-    return request["messages"][-1]["content"] == compaction.SUMMARY_INSTRUCTION
+    content = request["messages"][-1]["content"]
+    return content.startswith(compaction.SUMMARY_INSTRUCTION)
 
 
 class OverflowError(Exception):
@@ -170,13 +171,96 @@ class TestEstimateTokens:
         assert without > 4
         assert compaction.estimate_tokens([message], tools) > without
 
-    def test_measured_usage_is_used_as_baseline(self):
-        compactor = compaction.Compactor(compaction.Compaction(), None)
-        history = [{"role": "user", "content": "嗨"}]
-        compactor.record_usage(history, harness.Usage(1000, 50))
-        history.append({"role": "user", "content": "字" * 10})
 
-        assert compactor.estimate("", history, []) == 1050 + 14
+class TestMeasuredUsage:
+    """以模型回報的實際用量校正估算。"""
+
+    def _measured_session(self, tokens=270):
+        session = sessions.Session()
+        session.append({"role": "user", "content": "字" * 100})
+        session.append({"role": "assistant", "content": "答" * 100})
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+        compactor.record_usage(session, harness.Usage(tokens - 20, 20))
+        return session
+
+    def test_usage_is_written_into_the_session(self):
+        session = self._measured_session()
+
+        record = session.messages[-1]
+        assert record["role"] == "harness"
+        assert record["type"] == "usage"
+        assert record["tokens"] == 270
+        assert record["estimate"] == 208
+        assert (
+            compaction.model_history(session.messages) == session.messages[:2]
+        )
+
+    def test_measured_usage_is_the_baseline_for_new_messages(self):
+        session = self._measured_session()
+        session.append({"role": "user", "content": "字" * 10})
+        # 新的 Compactor（例如下一次 run）也讀得到對話紀錄裡的量測。
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+
+        ratio = 270 / 208
+        assert compactor.estimate("", session.messages, []) == 270 + round(
+            ratio * 14
+        )
+
+    def test_ratio_corrects_the_estimate_after_compaction(self):
+        session = self._measured_session()
+        session.append(
+            {
+                "role": "harness",
+                "type": "compaction",
+                "keep_from": 1,
+                "summary": "摘要",
+            }
+        )
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+
+        history = compaction.model_history(session.messages)
+        expected = round(270 / 208 * compaction.estimate_tokens(history))
+        assert compactor.estimate("", session.messages, []) == expected
+
+    def test_implausible_usage_is_ignored(self):
+        session = self._measured_session(tokens=21)
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+
+        assert compactor.estimate("", session.messages, []) == 208
+
+    async def test_next_run_compacts_from_the_measured_usage(self, fake_model):
+        # 字元估算還在門檻以下，但上一輪模型回報的實際用量已經超過。
+        session = sessions.Session()
+        _long_history(session, turns=2, size=300)
+        reply = conftest.text_response("好")
+        reply.usage = harness.Usage(input_tokens=1900, output_tokens=10)
+        model = fake_model(
+            [reply, _summary_response(), conftest.text_response("好")]
+        )
+        settings = harness.Compaction(context_window=2400)
+
+        await harness.run(
+            harness.Agent(name="a"),
+            "第一題",
+            session=session,
+            compaction=settings,
+            model_fn=model,
+        )
+        assert not any(m.get("type") == "compaction" for m in session.messages)
+        await harness.run(
+            harness.Agent(name="a"),
+            "第二題",
+            session=session,
+            compaction=settings,
+            model_fn=model,
+        )
+
+        assert _is_summary_request(model.requests[1])
+        [record] = [
+            m for m in session.messages if m.get("type") == "compaction"
+        ]
+        assert record["reason"] == "threshold"
+        assert record["tokens_before"] > 1910
 
 
 class TestSettings:
@@ -377,7 +461,7 @@ class TestAutoCompaction:
         [failed] = [e for e in events if e.type == "compaction_failed"]
         assert "沒有回傳任何文字" in failed.data["error"]
         assert events[-1].data["result"].output == "好"
-        assert not any(compaction.is_record(m) for m in session.messages)
+        assert not any(m.get("type") == "compaction" for m in session.messages)
 
     async def test_summary_longer_than_original_is_rejected(self, fake_model):
         session = sessions.Session()
@@ -543,14 +627,152 @@ class TestOverflowRecovery:
             ("This model's maximum context length is 8192 tokens", True),
             ("prompt is too long: 210000 tokens > 200000 maximum", True),
             ("Rate limit reached for tokens per min", False),
+            (
+                "The decoder prompt (length 200000) is longer than the "
+                "maximum model length of 196608.",
+                True,
+            ),
+            (
+                "Input prompt (200000 tokens) is too long and exceeds limit "
+                "of 196608",
+                True,
+            ),
+            ("litellm.ContextWindowExceededError: BadRequest", True),
         ],
     )
     def test_is_context_overflow_reads_messages(self, message, expected):
         assert llm.is_context_overflow(RuntimeError(message)) is expected
 
 
+class TestContextWindow:
+    """各模型的上下文上限與用量事件。"""
+
+    def test_per_model_setting_wins(self):
+        settings = harness.Compaction(
+            context_window=100_000, context_windows={"gemma": 196_608}
+        )
+
+        assert compaction.context_window_source(settings, "gemma") == (
+            196_608,
+            "model",
+        )
+        assert compaction.context_window_source(settings, "other") == (
+            100_000,
+            "default",
+        )
+
+    def test_proxy_prefix_matches_endpoint_name(self):
+        settings = harness.Compaction(context_windows={"gemma": 196_608})
+
+        assert compaction.context_window(settings, "litellm_proxy/gemma") == (
+            196_608
+        )
+
+    def test_window_follows_the_model_actually_used(self):
+        settings = harness.Compaction(
+            context_windows={"cloud": 1_000_000, "local": 196_608},
+            resolve_model=lambda model: "local",
+        )
+
+        assert compaction.context_window(settings, "cloud") == 196_608
+        assert settings == harness.Compaction(
+            context_windows={"cloud": 1_000_000, "local": 196_608}
+        )
+
+    def test_unknown_model_has_no_window(self):
+        settings = harness.Compaction()
+
+        assert compaction.context_window_source(
+            settings, "my-own-model-xyz"
+        ) == (None, None)
+
+    def test_threshold_reserves_reply_tokens(self):
+        settings = harness.Compaction(context_windows={"m": 100_000})
+
+        assert compaction.threshold(settings, "m", {"max_tokens": 4000}) == (
+            76_000
+        )
+
+    def test_invalid_per_model_window_is_rejected(self):
+        with pytest.raises(ValueError, match="正整數"):
+            harness.Compaction(context_windows={"m": 0})
+
+    async def test_run_reports_context_usage(self, fake_model):
+        model = fake_model([conftest.text_response("好")])
+        events = []
+
+        async for event in harness.run_stream(
+            harness.Agent(name="a", model="m"),
+            "嗨",
+            compaction=harness.Compaction(context_windows={"m": 100_000}),
+            model_fn=model,
+        ):
+            events.append(event)
+
+        [usage] = [e for e in events if e.type == "context_usage"]
+        assert usage.data["window"] == 100_000
+        assert usage.data["threshold"] == 80_000
+        assert usage.data["tokens"] > 0
+        assert usage.data["auto"] is True
+
+    async def test_compaction_start_comes_before_summary(self, fake_model):
+        session = sessions.Session()
+        _long_history(session)
+        model = fake_model([_summary_response(), conftest.text_response("好")])
+        types = []
+
+        async for event in harness.run_stream(
+            harness.Agent(name="a"),
+            "新問題",
+            session=session,
+            compaction=harness.Compaction(context_window=2000),
+            model_fn=model,
+        ):
+            types.append(event.type)
+
+        start = types.index("compaction_start")
+        assert types[start + 1] == "compaction"
+        assert types[start + 2] == "context_usage"
+
+    async def test_record_keeps_numbers_for_display(self, fake_model):
+        session = sessions.Session()
+        _long_history(session)
+        model = fake_model([_summary_response(), conftest.text_response("好")])
+
+        await harness.run(
+            harness.Agent(name="a"),
+            "新問題",
+            session=session,
+            compaction=harness.Compaction(context_window=2000),
+            model_fn=model,
+        )
+
+        [record] = [
+            m for m in session.messages if m.get("type") == "compaction"
+        ]
+        assert record["summarized"] == 8
+        assert record["tokens_after"] < record["tokens_before"]
+
+
 class TestManualCompaction:
     """harness.compact。"""
+
+    async def test_instructions_are_added_to_summary_request(self, fake_model):
+        session = sessions.Session()
+        _long_history(session, turns=2, size=50)
+        session.append({"role": "user", "content": "最新"})
+        model = fake_model([_summary_response()])
+
+        await harness.compact(
+            harness.Agent(name="a"),
+            session,
+            model_fn=model,
+            instructions="保留報表的欄位名稱",
+        )
+
+        prompt = model.requests[0]["messages"][-1]["content"]
+        assert prompt.startswith(compaction.SUMMARY_INSTRUCTION)
+        assert "保留報表的欄位名稱" in prompt
 
     async def test_compact_summarizes_even_below_threshold(self, fake_model):
         session = sessions.Session()
@@ -568,6 +790,39 @@ class TestManualCompaction:
         assert result.reason == "manual"
         assert result.summarized > 0
         assert _is_summary_request(model.requests[0])
+
+    async def test_finished_conversation_is_summarized_entirely(
+        self, fake_model
+    ):
+        # 停在完整的回覆時全部摘要，不會留下一則摘要說「還沒做」的回覆。
+        session = sessions.Session()
+        _long_history(session, turns=2, size=50)
+        model = fake_model([_summary_response()])
+
+        result = await harness.compact(
+            harness.Agent(name="a"), session, model_fn=model
+        )
+
+        assert result.summarized == 4
+        record = session.messages[-1]
+        assert record["keep_from"] == len(session.messages) - 1
+        [checkpoint] = compaction.model_history(session.messages)
+        assert "<compacted-summary>" in checkpoint["content"]
+        prompt = model.requests[0]["messages"][-1]["content"]
+        assert prompt == compaction.SUMMARY_INSTRUCTION
+
+    async def test_kept_messages_are_mentioned_in_the_request(self, fake_model):
+        session = sessions.Session()
+        _long_history(session, turns=2, size=50)
+        session.append({"role": "user", "content": "最新"})
+        model = fake_model([_summary_response()])
+
+        await harness.compact(harness.Agent(name="a"), session, model_fn=model)
+
+        prompt = model.requests[0]["messages"][-1]["content"]
+        assert compaction.TAIL_INSTRUCTION.format(count=1) in prompt
+        history = compaction.model_history(session.messages)
+        assert [m["content"] for m in history[1:]] == ["最新"]
 
     async def test_compact_returns_none_for_short_conversation(
         self, fake_model
@@ -627,6 +882,22 @@ class TestProjectConfig:
 
         assert settings.context_window == 32000
         assert settings.retain_ratio == 0.2
+
+    def test_per_model_windows_are_mapped(self, project_dir):
+        self._append(
+            project_dir,
+            "compaction:\n  contextWindows:\n    gemma-4-31b: 196608\n",
+        )
+
+        settings = harness.load_project(project_dir).compaction
+
+        assert settings.context_windows == {"gemma-4-31b": 196608}
+
+    def test_per_model_windows_must_be_a_mapping(self, project_dir):
+        self._append(project_dir, "compaction:\n  contextWindows: 5\n")
+
+        with pytest.raises(ValueError, match="contextWindows"):
+            harness.load_project(project_dir)
 
     def test_unknown_setting_is_an_error(self, project_dir):
         self._append(project_dir, "compaction:\n  window: 1\n")

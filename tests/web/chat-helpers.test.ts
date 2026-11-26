@@ -18,6 +18,7 @@ import {
 import {
   describeStep,
   sentenceText,
+  toolLabel,
 } from "../../web/src/components/chat/steps.ts";
 import { splitAttachments } from "../../web/src/transcript.ts";
 
@@ -62,6 +63,23 @@ describe("describeStep", () => {
 
   it("ask_ 開頭的工具是交給 subagent", () => {
     expect(step("ask_researcher", { question: "x" })).toBe("交給 researcher");
+  });
+
+  it("transfer_to_ 開頭的工具是把對話轉交出去", () => {
+    expect(step("transfer_to_billing")).toBe("轉交給 billing");
+    expect(toolLabel("transfer_to_billing")).toBe("轉交給 billing");
+  });
+
+  it("知識庫與記憶的工具寫成中文，不顯示工具名稱", () => {
+    expect(step("search_knowledge", { query: "請假規定" })).toBe(
+      "搜尋知識庫「請假規定」",
+    );
+    expect(step("search_knowledge")).toBe("搜尋知識庫");
+    expect(toolLabel("search_knowledge")).toBe("搜尋知識庫");
+    expect(step("remember", { content: "喜歡簡短的回答\n第二行" })).toBe(
+      "記住「喜歡簡短的回答 …」",
+    );
+    expect(step("forget", { memory_id: "m1" })).toBe("刪除一則記憶");
   });
 
   it("沒有參數的工具只有動詞", () => {

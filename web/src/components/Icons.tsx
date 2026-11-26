@@ -292,3 +292,19 @@ export const AgentIcon = (p: IconProps) => (
     <path d="M2 13v3M22 13v3" />
   </Svg>
 );
+
+export const DownloadIcon = (p: IconProps) => (
+  <Svg size={14} {...p}>
+    <path d="M12 4v11" />
+    <path d="M7 10l5 5 5-5" />
+    <path d="M5 20h14" />
+  </Svg>
+);
+
+/** 資料分級（一把鎖）。 */
+export const LockIcon = (p: IconProps) => (
+  <Svg size={14} {...p}>
+    <rect x="5" y="11" width="14" height="9" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </Svg>
+);

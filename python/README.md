@@ -45,13 +45,13 @@ Python 版的特點：
 git clone https://github.com/xian-ai-1057/AgentHarness.git
 cd AgentHarness
 docker compose up -d             # 第一次會建置映像檔，需要幾分鐘
-docker compose logs harness      # 看管理者 admin 自動產生的密碼
+docker compose exec harness cat /assistant/.harness/secrets/web-password  # 管理者 admin 自動產生的密碼
 ```
 
 接著：
 
 1. 用瀏覽器打開 `http://<這台電腦的位址>:4321`，用帳號 `admin` 登入（密碼
-   在上面的 log 裡），再從帳號選單打開「管理平台 → 成員」幫其他人建立帳號。
+   用上面的 `cat` 指令查看，不會印在 log 裡），再從帳號選單打開「管理平台 → 成員」幫其他人建立帳號。
 2. 第一次會看到「還沒有連接模型」：按「前往管理平台」，選供應商、貼上金鑰，
    按「測試連線並儲存」。
 3. 開始對話。可以直接上傳 Excel、PDF、CSV 請它分析。
@@ -96,13 +96,20 @@ docker compose restart harness   # 改了 harness.yaml 或 agent 之後重新載
 
 **安全上要知道的事**
 
-- **`docker-compose.yml` 把主機的 Docker socket 掛進容器**，沙盒才能啟動
-  容器來執行程式。能使用這個 socket 等於擁有主機的 root 權限，所以請放在
-  專用的機器或虛擬機上。不需要分析檔案時，把 `docker-compose.yml` 裡
-  `/var/run/docker.sock` 那一行刪掉再啟動（自動建立的助手就不會開啟
+- **只有沙盒服務 `sandbox-runner` 掛載主機的 Docker socket**，平台容器
+  沒有：平台只能請它「在沙盒裡執行這段程式」，映像檔、使用者、資源上限
+  與能掛載的位置由服務決定，網路一律關閉（見 `pyharness sandbox-runner`
+  與文件網站的「快速部署 → 沙盒服務」）。沙盒服務本身等於擁有主機的 root
+  權限，請放在專用的機器或虛擬機上。主機裝了 gVisor 時，在 `.env` 寫
+  `HARNESS_SANDBOX_RUNTIME=runsc`。不需要分析檔案時，把 `sandbox-runner`
+  服務與 `HARNESS_SANDBOX_RUNNER` 一起刪掉（自動建立的助手就不會開啟
   沙盒）。
-- **admin 的密碼會印在 log 裡**，看得到 `docker compose logs` 的人就能
-  以管理者登入。第一次登入後請在帳號選單改掉。
+- **金鑰只給平台自己用**：agent 執行的指令與 stdio MCP 伺服器拿到的環境
+  變數會拿掉名稱像金鑰的變數（含 `KEY`、`SECRET`、`TOKEN`、`PASSWORD`
+  等字）與網頁上填的金鑰。
+- **admin 自動產生的密碼存在 volume 的 `.harness/secrets/web-password`**，
+  不會印在 log 裡；能執行 `docker compose exec` 的人就讀得到，第一次登入後
+  請在帳號選單改掉。
 - **這個設定是 http，沒有加密。** 只在內網或 VPN 裡使用；要從網際網路
   連線，請在前面加上 HTTPS 的反向代理（見
   [部署到伺服器](#部署到伺服器)的 nginx 設定）。
@@ -130,6 +137,8 @@ cd AgentHarness/python
 pip install -e ".[dev]"
 pytest
 ```
+
+要送 PR 的話，請先看根目錄的 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 指令名稱是 `pyharness`（TypeScript 版是 `harness`，兩者可以同時安裝）。
 也可以用 `python -m harness` 執行。
@@ -690,6 +699,14 @@ agent 會得到 `search_knowledge` 工具，搜尋結果附上來源檔案與所
 網頁版回覆裡的 `[1]` 可以點，在右側打開原文（PDF 跳到那一頁）；對不到
 搜尋結果的編號會標成「可能不正確」。
 
+規章改版時，可以在知識庫資料夾的 `documents.yaml` 記下每份文件的版本、
+生效日、失效日與取代的舊版，搜尋只找得到今天有效的文件（`as_of` 可以查
+過去的規定）；題庫回歸評測在文件或設定改動後自動檢查答不答得出來；
+`dataClassification` 替知識庫與工具組分級，機密資料只交給核可的模型（見
+[文件版本與生效日](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#文件版本與生效日)、
+[題庫回歸評測](https://agent-harness-docs-ten.vercel.app/advanced/knowledge#題庫回歸評測)、
+[資料分級](https://agent-harness-docs-ten.vercel.app/advanced/classification)）。
+
 - **檢索方式。** 有三種，用 `searchMode` 選（見[檢索方式](#檢索方式)）：
   - **關鍵字**（`keyword`）：精確比對，只看查詢的字詞有沒有出現、出現
     幾次，不需要任何模型。適合查表單編號、專有名詞。
@@ -1221,17 +1238,21 @@ guardrails.detect_injection("忽略之前的指示")  # True
 compaction：
 
 1. **每次呼叫模型前估算請求大小**，超過上限的 80% 時開始壓縮。估算
-   以模型上一次回報的實際用量為基準，只有之後新增的訊息用字數估計。
+   以模型上一次回報的實際用量為基準，只有之後新增的訊息用字數估計，
+   並依實際用量與字數估計的比例校正（中文用字數估計常少算兩到三成）。
+   實際用量寫在對話紀錄裡，所以使用者下一則訊息一開始就用得到。
 2. **先修剪超大的工具結果**：超過 8192 字的工具結果只留開頭 4096 字與
    結尾 1024 字，中間換成 `[... 工具結果中間已省略 ...]`。這一步不呼叫
    模型，常常修剪完就夠了。模型還沒看過的工具結果（剛回傳的）不修剪。
 3. **還是太長時才摘要**：把較舊的歷史交給模型，濃縮成固定結構的檢查點
    （使用者的需求、重要決定、資料與檔案、錯誤與修正、未完成的工作、
    目前進度、下一步），最近約 15% 的對話原文保留。
-4. **模型回報超過上下文上限時**，盡量壓縮後重試一次。
+4. **模型回報超過上下文上限時**，盡量壓縮後重試一次（認得 litellm 的
+   `ContextWindowExceededError`，以及 OpenAI、Anthropic、vLLM 等常見的
+   錯誤訊息）。
 
-**對話紀錄不會被改寫。** 壓縮與修剪都以額外的紀錄（`role: harness`）
-附加在 JSONL 裡，原始訊息完整保留，模型看到的歷史是從紀錄推算出來的。
+**對話紀錄不會被改寫。** 壓縮、修剪與實際用量都以額外的紀錄
+（`role: harness`，`type` 為 `compaction`、`prune`、`usage`）附加在 JSONL 裡，原始訊息完整保留，模型看到的歷史是從紀錄推算出來的。
 TypeScript 版與網頁介面也讀得懂這些紀錄，同一段對話仍然可以在兩個版本
 間接續（TypeScript 版本身不會主動壓縮）。
 
@@ -1241,7 +1262,9 @@ TypeScript 版與網頁介面也讀得懂這些紀錄，同一段對話仍然可
 
 ```yaml
 compaction:
-  contextWindow: 128000    # 模型的上下文上限；省略時從 litellm 的模型資料查
+  contextWindow: 128000    # 所有模型共用的上下文上限；省略時從 litellm 的模型資料查
+  contextWindows:          # 個別模型的上限，優先於 contextWindow
+    gemma-4-31b: 196608
   thresholdRatio: 0.8      # 超過上限的這個比例時開始壓縮
   retainRatio: 0.15        # 原文保留的近期對話，佔上限的比例
   summaryModel: openai/gpt-5-mini   # 負責摘要的模型，省略時用 agent 的模型
@@ -1255,9 +1278,14 @@ compaction:
 
 不要壓縮的話寫 `compaction: false`。
 
-- **自架端點、LiteLLM Proxy 的模型名稱 litellm 查不到上限**，這時要寫
-  `contextWindow`，否則不會主動壓縮（模型回報超過上限時仍會壓縮後
-  重試）。
+- **上限的查法**依序是：`contextWindows` 裡這個模型的設定、網頁版從
+  端點查到的值（vLLM 的 `max_model_len`、LiteLLM Proxy `/model/info` 的
+  `max_input_tokens`）、`contextWindow`、litellm 的模型資料。自架模型
+  （vLLM、LiteLLM Proxy 後面的模型）litellm 查不到，網頁版會自動向端點
+  查；CLI 或端點查不到時要寫 `contextWindows`，否則不會主動壓縮（模型
+  回報超過上限時仍會壓縮後重試）。
+- 上限依**實際送出的模型**查：網頁版的資料分級把對話改送地端模型時，
+  用地端模型的上限（程式裡用 `Compaction(resolve_model=...)` 指定）。
 - 預留給回覆的 `modelParams.max_tokens` 會從門檻扣掉。
 - 摘要多一次模型呼叫，它的用量會算進 `RunResult.usage`。
 - 摘要失敗（模型出錯、沒有回傳文字、摘要沒有比原文短）時，對話照常
@@ -1267,8 +1295,13 @@ compaction:
 
 ### 手動壓縮
 
-聊天時輸入 `/compact`，會把最近一段之外的對話都交給摘要。也可以用
-`pyharness run -c /compact` 壓縮最新的對話。
+聊天時輸入 `/compact`，會盡量壓縮：對話停在一則完整的回覆時全部交給
+摘要；否則最近一段（最後一則使用者訊息或回覆，與它的工具結果）原文
+保留，其餘交給摘要。只摘要較早一段時，摘要請求會說明後面還有原文保留，
+避免摘要把接下來已經完成的事寫成「尚未完成」。也可以用
+`pyharness run -c /compact` 壓縮最新的對話。網頁版的輸入框也可以打
+`/compact`，後面可以接摘要時要特別保留的重點（例如
+`/compact 保留報表欄位名稱`）；見[網頁介面](https://agent-harness-docs-ten.vercel.app/guide/web#對話壓縮)。
 
 ### 在程式裡使用
 
@@ -1278,12 +1311,24 @@ settings = harness.Compaction(context_window=128_000)
 await harness.run(agent, text, session=session, compaction=settings)
 
 result = await harness.compact(agent, session, settings=settings)  # 手動壓縮
+result = await harness.compact(
+    agent, session, settings=settings, instructions="保留報表欄位名稱"
+)  # 指定摘要時要保留的重點
 ```
 
 `run` 不傳 `compaction` 時不壓縮（`load_project` 載入的專案設定在
-`project.compaction`）。串流時會收到 `compaction` 事件
-（`{"result": CompactionResult}`），自動壓縮失敗時是 `compaction_failed`
-（`{"error": str}`）。
+`project.compaction`）。串流時的事件：
+
+| 事件 | 內容 | 什麼時候 |
+|---|---|---|
+| `compaction_start` | `{"reason": "threshold" \| "overflow"}` | 開始壓縮（摘要要多呼叫一次模型，介面可以先顯示「正在壓縮」） |
+| `compaction` | `{"result": CompactionResult}` | 壓縮完成 |
+| `compaction_failed` | `{"error": str}` | 自動壓縮失敗，對話照常繼續 |
+| `context_usage` | `{"tokens", "window", "threshold", "auto"}` | 每次模型回應與壓縮後的上下文用量（不知道上限時 `window`、`threshold` 是 `None`） |
+
+壓縮紀錄另外記著 `summarized`（被摘要的訊息數）、`tokens_before`、
+`tokens_after`（和 `context_usage` 同樣以實際用量校正），給介面顯示用。
+全部摘要時 `keep_from` 是壓縮紀錄本身的位置。
 
 `session.messages` 與 `RunResult.messages` 是完整紀錄（含壓縮紀錄）；
 模型實際看到的歷史用 `harness.compaction.model_history(messages)` 取得。
@@ -1409,7 +1454,7 @@ permissions:
 | 模式 | 行為 |
 |---|---|
 | `ask`（預設） | 需要同意的工具，執行前先問使用者 |
-| `bypass` | 全部直接執行 |
+| `bypass` | 全部直接執行（網頁版要登入時只對管理者有效，成員照樣要確認） |
 | `dontAsk` | 不詢問；需要同意的工具一律拒絕，適合無人值守的排程 |
 
 「需要同意的工具」是標記 `needs_approval=True` 的工具，以及名稱符合
@@ -1631,8 +1676,9 @@ Python 版另外會處理：
   縮放。
 - **減少確認**：權限確認可以選「這段對話都允許」（只記在這段對話，
   不寫進 `harness.yaml`）；同一段對話裡同意過、參數完全相同的呼叫
-  不再重複問。成員選「以後都允許」只記在自己的資料、只適用於自己在
-  同一個資料夾的對話。`edit_file` 也會顯示修改前後的差異。
+  不再重複問。要登入時選「以後都允許」（管理者也一樣）只記在自己的
+  資料、只適用於自己在同一個資料夾的對話；全站規則到管理平台的「權限」
+  設定。`edit_file` 也會顯示修改前後的差異。
 - **中斷後接著做**：伺服器在一輪跑到一半時重新啟動，那段對話會顯示
   被中斷，按重試接著做，中斷的工具呼叫不會被當成拒絕。
 - **網頁版說明**：從網頁執行時，agent 的指示後面會多一段說明（使用者
@@ -1687,7 +1733,7 @@ Python 版另外會處理：
   agent、工具與知識庫搜尋都只剩開放的部分，直接呼叫 API 也一樣（見
   [說明文件的「存取群組」](https://agent-harness-docs-ten.vercel.app/guide/web#存取群組)）。
 - 成員只看得到自己的對話、「我的檔案」與被開放的共用資料夾，不能修改
-  模型連線、全站權限與成員，也不能讓對話「全部直接執行」（bypass）。
+  模型連線、全站權限與成員，也不能讓對話「全部直接執行」（bypass）；專案設成 bypass 時成員照樣要確認。
   成員的 `run_command` 一律在沙盒裡執行，沒有沙盒時不提供；管理者在
   共用資料夾裡的 `run_command` 也在沙盒執行。
 - 登入用 HttpOnly、SameSite=Strict 的 cookie，12 小時沒有使用就要重新
@@ -1705,8 +1751,8 @@ Python 版另外會處理：
 與記憶交給第一位管理者，只搬一次、不覆蓋任何檔案。檔案不搬：舊對話都
 放在只有這位管理者看得到的「舊資料（專案資料夾）」裡，它就是專案根目錄，
 所以舊對話的附件與檔案卡片照原本的路徑打得開；它碰不到 `.harness/`、
-`private/` 與以點開頭的檔案，也不能執行程式或指令。預設的「共用」資料夾
-換成新的 `shared/`，舊的 `workspace/` 不會再自動分享給所有成員。
+`private/` 與以點開頭的檔案，也不能執行程式或指令。舊的 `workspace/`
+不會再自動分享給所有成員；要分享請在 `workspaces` 開放共用資料夾。
 
 ### 工作資料夾
 
@@ -1723,8 +1769,11 @@ workspaces:
     writable: true            # false 時 agent 不能寫入（沙盒唯讀掛載），也不能上傳
 ```
 
-沒有寫 `workspaces` 時，有一個所有人都能用的「共用」資料夾：`shared/`
-（第一次使用時建立）。共用資料夾不能和 `.harness/`、
+沒有寫 `workspaces` 時**沒有共用資料夾**，每個人只有自己的「我的檔案」：
+所有人都能寫入的資料夾，任何人放的檔案都會被別人的 agent 讀到，所以要由
+管理者明確開放。之前的版本預設有「共用」資料夾（`shared/`），要繼續使用
+時在 `workspaces` 寫上 `{name: 共用, path: shared, members: all}`；`shared/`
+裡有檔案卻沒有寫 `workspaces` 時，啟動時會提醒。共用資料夾不能和 `.harness/`、
 `private/`、`harness.yaml`、`AGENTS.md`、`agents/`、`tools/`、`skills/`
 重疊，彼此也不能互相包含，寫錯時啟動就會報錯。
 
@@ -1840,9 +1889,10 @@ export HARNESS_MODEL=claude
 ```
 
 - **讓其他電腦連線時一定要登入。** 第一次啟動時自動建立管理者帳號
-  `admin`，密碼是 `HARNESS_WEB_PASSWORD`；沒有設定時自動產生一組並印在
-  啟動訊息裡，存在專案的 `.harness/secrets/web-password`。之後每次啟動
-  都會再顯示，直到 admin 自己改了密碼。從舊版（只有一組密碼）升級時，
+  `admin`，密碼是 `HARNESS_WEB_PASSWORD`；沒有設定時自動產生一組，存在
+  專案的 `.harness/secrets/web-password`（只有執行 pyharness 的使用者能讀）。
+  啟動訊息只印出這個檔案的位置，不印密碼本身，因為看得到 log 的人不一定
+  該是管理者。從舊版（只有一組密碼）升級時，
   原本的密碼就是 admin 的密碼。
 - 環境變數只在建立 admin 時使用一次；之後改密碼請在網頁的帳號選單，
   或用 `pyharness user passwd admin`。
@@ -1923,13 +1973,15 @@ sudo systemctl enable --now harness
   一層裡；身分（`AccountStore`）與資料夾權限（`Folders`）各自包成一個小
   介面，之後的企業版可以換成 OIDC 單一登入與 PostgreSQL。
 - **成員看不到別人的對話與「我的檔案」**，也不能修改模型連線、全站權限
-  與成員；他們「以後都允許」的工具只適用於自己。成員的 `run_command`
-  一律在沙盒裡執行（沒有網路、只掛載工作資料夾），沒有沙盒時不提供，
-  指令不會在伺服器上替成員執行。
-- **管理者的 `run_command` 在自己的「我的檔案」裡仍然在伺服器上執行**
-  （`cwd` 限制在工作資料夾，但指令本身可以做任何事，讀得到金鑰與其他人
-  的資料）；在共用資料夾裡改在沙盒執行。不需要時別讓 agent 使用
-  `shell`；企業版會把管理者也全部移進沙盒。
+  與成員；他們「以後都允許」的工具只適用於自己。
+- **`run_command` 一律在沙盒裡執行，管理者也一樣**（沒有網路、只掛載
+  工作資料夾），沒有沙盒時不提供。確實需要在伺服器上執行時，在
+  `harness.yaml` 寫 `web: {hostCommands: true}`：只有管理者在自己的
+  「我的檔案」裡才在伺服器上執行（指令本身可以做任何事）；共用資料夾裡
+  仍然在沙盒執行。
+- **指令與 stdio MCP 伺服器拿不到金鑰**：環境變數裡名稱像金鑰的都會拿掉，
+  需要的請寫在 `HARNESS_SHELL_KEEP_ENV` 或 MCP 伺服器的 `env`；平台行程
+  設成不可 dump，同一個使用者的程式讀不到它的環境變數。
 - **共用資料夾裡的檔案，所有能使用它的人都拿得到**（agent 可以讀裡面的
   任何檔案），上傳的檔案也不會自動刪除。敏感文件請放在自己的「我的
   檔案」，分析完自行清理。

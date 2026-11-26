@@ -13,6 +13,8 @@ import type {
   BulkRequest,
   BulkResult,
   ChatCategory,
+  ClassificationSettings,
+  CompactionSettings,
   ConnectionSettings,
   CurrentUser,
   Feedback,
@@ -20,7 +22,12 @@ import type {
   GroupList,
   IssuedPassword,
   KnowledgeAdminList,
+  KnowledgeDocumentStatus,
   KnowledgeDocuments,
+  KnowledgeDocumentVersion,
+  KnowledgeEval,
+  KnowledgeEvalQuestion,
+  KnowledgeEvalRun,
   KnowledgeHit,
   KnowledgeModelChoices,
   KnowledgeSettings,
@@ -130,6 +137,11 @@ export const api = {
   },
   retry: (id: string) =>
     request<SessionSummary>("POST", `/sessions/${id}/retry`, {}),
+  /** 壓縮對話（聊天中輸入 /compact）；instructions 是摘要時要保留的重點。 */
+  compact: (id: string, instructions: string) =>
+    request<SessionSummary>("POST", `/sessions/${id}/compact`, {
+      instructions,
+    }),
   stop: (id: string) => request("POST", `/sessions/${id}/stop`, {}),
   setMode: (id: string, mode: PermissionMode | null) =>
     request("PUT", `/sessions/${id}/mode`, { mode }),
@@ -144,6 +156,13 @@ export const api = {
   saveConnection: (settings: ConnectionSettings) =>
     request("PUT", "/settings/connection", settings),
   testModel: () => request<ModelTestResult>("POST", "/settings/model/test", {}),
+  compactionSettings: () =>
+    request<CompactionSettings>("GET", "/settings/compaction"),
+  saveCompactionSettings: (settings: {
+    auto: boolean;
+    thresholdRatio: number;
+    contextWindows: Record<string, number | null>;
+  }) => request<{ ok: true }>("PUT", "/settings/compaction", settings),
   discoverModels: (settings: Omit<ConnectionSettings, "model">) =>
     request<{ models: ModelChoice[] }>(
       "POST",
@@ -260,7 +279,11 @@ export const api = {
     id: string,
     changes: KnowledgeSettings & { maintainers?: string[] },
   ) => request<{ id: string }>("PATCH", `/knowledge/${id}`, changes),
-  deleteKnowledge: (id: string) => request("DELETE", `/knowledge/${id}`),
+  deleteKnowledge: (id: string, deleteFiles = false) =>
+    request<{ ok: boolean; filesDeleted: boolean }>(
+      "DELETE",
+      `/knowledge/${id}${deleteFiles ? "?files=1" : ""}`,
+    ),
   knowledgeDocuments: (id: string) =>
     request<KnowledgeDocuments>("GET", `/knowledge/${id}/documents`),
   /** replace 是要換掉的文件路徑；沒有時新增（同名的已經存在時失敗）。 */
@@ -283,11 +306,68 @@ export const api = {
       "DELETE",
       `/knowledge/${id}/documents?path=${encodeURIComponent(path)}`,
     ),
-  searchKnowledge: (id: string, query: string, topK = 5) =>
+  searchKnowledge: (
+    id: string,
+    query: string,
+    options: { topK?: number; asOf?: string; allVersions?: boolean } = {},
+  ) =>
     request<{ hits: KnowledgeHit[] }>("POST", `/knowledge/${id}/search`, {
       query,
-      topK,
+      topK: options.topK ?? 5,
+      ...(options.asOf && { asOf: options.asOf }),
+      ...(options.allVersions && { allVersions: true }),
     }),
+  /** 文件的版本、生效日、失效日與取代的舊版（features.knowledgeGovernance）。 */
+  setDocumentVersion: (
+    id: string,
+    path: string,
+    version: KnowledgeDocumentVersion,
+  ) =>
+    request<{
+      path: string;
+      version: KnowledgeDocumentVersion;
+      status: KnowledgeDocumentStatus;
+    }>(
+      "PUT",
+      `/knowledge/${id}/documents/info?path=${encodeURIComponent(path)}`,
+      version,
+    ),
+  // 題庫回歸評測（features.knowledgeGovernance）。
+  knowledgeEval: (id: string) =>
+    request<KnowledgeEval>("GET", `/knowledge/${id}/eval`),
+  addEvalQuestion: (id: string, question: Omit<KnowledgeEvalQuestion, "id">) =>
+    request<KnowledgeEvalQuestion>(
+      "POST",
+      `/knowledge/${id}/eval/questions`,
+      question,
+    ),
+  updateEvalQuestion: (
+    id: string,
+    questionId: string,
+    question: Omit<KnowledgeEvalQuestion, "id">,
+  ) =>
+    request<KnowledgeEvalQuestion>(
+      "PATCH",
+      `/knowledge/${id}/eval/questions/${questionId}`,
+      question,
+    ),
+  deleteEvalQuestion: (id: string, questionId: string) =>
+    request("DELETE", `/knowledge/${id}/eval/questions/${questionId}`),
+  importEvalQuestions: (id: string, file: File, replace: boolean) =>
+    sendZip<{ added: number }>(
+      `/knowledge/${id}/eval/import${replace ? "?replace=1" : ""}`,
+      file,
+    ),
+  evalExportUrl: (id: string) => `/api/knowledge/${id}/eval/export`,
+  runEval: (id: string, options: { answerModel?: string; topK?: number }) =>
+    request<{ id: string }>("POST", `/knowledge/${id}/eval/run`, options),
+  evalRun: (id: string, runId: string) =>
+    request<KnowledgeEvalRun>("GET", `/knowledge/${id}/eval/runs/${runId}`),
+  // 資料分級（features.classification，管理者）。
+  classification: () =>
+    request<ClassificationSettings>("GET", "/admin/classification"),
+  saveClassification: (settings: ClassificationSettings) =>
+    request<ClassificationSettings>("PUT", "/admin/classification", settings),
   /** 出處文件的文字，網頁用來標出引用的片段（features.knowledgeSources）。 */
   knowledgeSourceText: (base: string, path: string) =>
     request<KnowledgeSourceText>(
@@ -393,7 +473,7 @@ async function sendFile<T>(path: string, file: File): Promise<T[]> {
   return (data as { files?: T[] }).files ?? [];
 }
 
-/** 上傳 skill 的 zip，回傳伺服器的回應（SkillDetail）。 */
+/** 上傳一個檔案（skill 的 zip、題庫），回傳伺服器的回應。 */
 async function sendZip<T>(path: string, file: File): Promise<T> {
   const form = new FormData();
   form.append("file", file, file.name);

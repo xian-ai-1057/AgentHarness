@@ -114,3 +114,82 @@ async def test_file_tools_can_still_read_other_harness_data(context):
     )
 
     assert output == "[]"
+
+
+class TestChildEnvironment:
+    """harness 啟動的程式拿不到金鑰。"""
+
+    def test_secret_looking_names_are_removed(self, monkeypatch):
+        monkeypatch.setenv("DEMO_API_KEY", "sk-1")
+        monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-2")
+        monkeypatch.setenv("SOME_SECRET", "s")
+        monkeypatch.setenv("GH_TOKEN", "t")
+        monkeypatch.setenv("DB_PASSWORD", "p")
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy:3128")
+        monkeypatch.setenv("PLAIN_SETTING", "ok")
+
+        env = credentials.child_environment()
+
+        for name in (
+            "DEMO_API_KEY",
+            "LITELLM_MASTER_KEY",
+            "SOME_SECRET",
+            "GH_TOKEN",
+            "DB_PASSWORD",
+        ):
+            assert name not in env
+        assert env["HTTPS_PROXY"] == "http://proxy:3128"
+        assert env["PLAIN_SETTING"] == "ok"
+        assert "PATH" in env
+        # 不影響 harness 自己的環境變數。
+        assert os.environ["DEMO_API_KEY"] == "sk-1"
+
+    def test_values_saved_on_the_web_are_removed(self, tmp_path, monkeypatch):
+        credentials.update(tmp_path, {"HARNESS_BASE_URL": "http://gw"})
+
+        assert "HARNESS_BASE_URL" in credentials.child_environment()
+        assert "HARNESS_BASE_URL" not in credentials.child_environment(tmp_path)
+
+    def test_keep_list(self, monkeypatch):
+        monkeypatch.setenv("GH_TOKEN", "t")
+        monkeypatch.setenv("NPM_TOKEN", "n")
+        monkeypatch.setenv(credentials.KEEP_ENV, "GH_TOKEN, ")
+
+        env = credentials.child_environment(keep=("NPM_TOKEN",))
+
+        assert env["GH_TOKEN"] == "t"
+        assert env["NPM_TOKEN"] == "n"
+
+    async def test_run_command_does_not_see_keys(self, tmp_path, monkeypatch):
+        from harness import datatypes
+        from harness.builtin import shell
+
+        monkeypatch.setenv("DEMO_API_KEY", "sk-should-not-leak")
+        context = datatypes.RunContext("t", tmp_path, "s")
+
+        output = await tools.invoke(
+            shell.run_command, {"command": "env"}, context
+        )
+
+        assert "sk-should-not-leak" not in output
+        assert "PATH=" in output
+
+    def test_protect_process_on_linux(self):
+        import subprocess
+        import sys
+
+        if not sys.platform.startswith("linux"):
+            pytest.skip("只在 Linux 上有效")
+        # 在子行程裡設定，不影響跑測試的行程。
+        code = (
+            "from harness import credentials; "
+            "print(credentials.protect_process()); "
+            "print(open('/proc/self/status').read().count('\\n') > 0)"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout.split() == ["True", "True"]

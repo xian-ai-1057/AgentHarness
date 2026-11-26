@@ -10,6 +10,7 @@ import {
   type Feedback,
   INTERRUPTED_STOP_REASON,
   type PermissionMode,
+  type SessionClassification,
   type SessionDetail,
   type SessionOptions,
 } from "../../../src/web/protocol.ts";
@@ -38,6 +39,7 @@ import {
 import { ApprovalCard } from "./ApprovalCard.tsx";
 import "./chat/chat.css";
 import { Composer } from "./Composer.tsx";
+import { ContextMeter } from "./chat/ContextMeter.tsx";
 import type { KnowledgeSource } from "./chat/citations.ts";
 import { FolderContext } from "./chat/folder.ts";
 import {
@@ -73,6 +75,15 @@ import { AttachmentChip, TurnView } from "./Transcript.tsx";
 
 type Pending = PendingMessage & { sent: boolean };
 
+/** 聊天中輸入 /compact（後面可以接摘要時要保留的重點）壓縮對話。 */
+const COMPACT_COMMAND = /^\/compact(?:\s+([\s\S]*))?$/;
+const CHAT_COMMANDS = [
+  {
+    name: "/compact",
+    hint: "壓縮對話：把較早的內容濃縮成摘要，後面可以寫要特別保留的重點",
+  },
+];
+
 /** App 以對話 id 當 key，換對話時整個重新建立，暫存的狀態不會帶過去。 */
 export function Conversation({ id }: { id: string }) {
   const stored = useStore((s) => s.details[id]);
@@ -100,6 +111,10 @@ export function Conversation({ id }: { id: string }) {
   // 新對話頁選的資料夾，對話內容讀回來之前先用它。
   const [handedFolder] = useState(() => peekHandoff(id)?.folder);
   const [sendError, setSendError] = useState<string>();
+  // 點了上下文用量時，在輸入框填入 /compact。
+  const [composerDraft, setComposerDraft] = useState<{ text: string }>();
+  // 壓縮對話是 Python 版的功能。
+  const canCompact = project?.runtime === "python";
   const [optionsOverride, setOptionsOverride] = useState<SessionOptions>();
   const [optionsError, setOptionsError] = useState<string>();
   const [runModel, setRunModel] = useState<string>();
@@ -232,6 +247,9 @@ export function Conversation({ id }: { id: string }) {
   };
 
   const send = async (text: string, files: string[]) => {
+    const command =
+      canCompact && files.length === 0 ? COMPACT_COMMAND.exec(text) : null;
+    if (command) return compact(command[1] ?? "");
     setSendError(undefined);
     stickToBottom.current = true;
     setPending({
@@ -247,6 +265,18 @@ export function Conversation({ id }: { id: string }) {
     } catch (error) {
       setPending(undefined);
       setSendError(`訊息沒有送出：${(error as Error).message}`);
+      return false;
+    }
+  };
+
+  const compact = async (instructions: string) => {
+    setSendError(undefined);
+    stickToBottom.current = true;
+    try {
+      upsertSummary(await api.compact(id, instructions.trim()));
+      return true;
+    } catch (error) {
+      setSendError(`沒有壓縮：${(error as Error).message}`);
       return false;
     }
   };
@@ -318,8 +348,11 @@ export function Conversation({ id }: { id: string }) {
     summary.notice !== lastReply?.content
       ? summary.notice
       : undefined;
+  const compacting =
+    summary.status === "running" && summary.activity?.kind === "compacting";
   const showThinking =
     Boolean(pendingShown) ||
+    compacting ||
     (summary.status === "running" &&
       (summary.activity === undefined ||
         summary.activity.kind === "thinking") &&
@@ -417,7 +450,15 @@ export function Conversation({ id }: { id: string }) {
                 onOpenPath={canLoadFiles ? openPath : undefined}
               />
             )}
-            {showThinking && <Thinking />}
+            {showThinking && (
+              <Thinking
+                label={
+                  compacting && !pendingShown
+                    ? "正在壓縮對話：把較早的內容濃縮成摘要…"
+                    : undefined
+                }
+              />
+            )}
             {summary.status === "error" && !pendingShown && (
               <ErrorCard
                 id={id}
@@ -459,6 +500,9 @@ export function Conversation({ id }: { id: string }) {
         <div className="composer-wrap ch-composer-wrap">
           <div className="composer-inner">
             {plan && <PlanChecklist items={plan} />}
+            {summary.classification && (
+              <ClassificationNotice info={summary.classification} />
+            )}
             {approval && (
               <ApprovalCard
                 key={approval.id}
@@ -484,8 +528,14 @@ export function Conversation({ id }: { id: string }) {
               </div>
             ) : (
               <Composer
-                placeholder="接著問，或請它修改"
+                placeholder={
+                  canCompact
+                    ? "接著問，或請它修改（輸入 /compact 壓縮對話）"
+                    : "接著問，或請它修改"
+                }
                 busy={busy}
+                draft={composerDraft}
+                commands={canCompact ? CHAT_COMMANDS : undefined}
                 onSubmit={send}
                 onStop={() => void api.stop(id)}
                 onUpload={
@@ -508,6 +558,14 @@ export function Conversation({ id }: { id: string }) {
                     {!composerOptions && (
                       <span className="select-chip">agent：{agentName}</span>
                     )}
+                    <ContextMeter
+                      usage={summary.context}
+                      onCompact={
+                        canCompact && !busy
+                          ? () => setComposerDraft({ text: "/compact " })
+                          : undefined
+                      }
+                    />
                     <label className="select-chip">
                       <ShieldIcon />
                       <span className="ch-hide-narrow">{modeLabel}</span>
@@ -681,5 +739,23 @@ function ErrorCard({
         )}
       </div>
     </section>
+  );
+}
+
+/** 對話用到分級資料時的提示：等級、來源，以及因此改用的模型。 */
+function ClassificationNotice({ info }: { info: SessionClassification }) {
+  const from = info.sources.length > 0 ? `（${info.sources.join("、")}）` : "";
+  return (
+    <div className="notice ch-classified" role="status">
+      <span className="ch-classified-icon" aria-hidden="true">
+        <ShieldIcon />
+      </span>
+      <span>
+        這段對話用到「{info.name}」等級的資料{from}
+        {info.model
+          ? `，已改由可以處理的模型 ${info.model} 回覆，之後也會繼續用它。`
+          : "。"}
+      </span>
+    </div>
   );
 }

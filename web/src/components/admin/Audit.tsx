@@ -279,7 +279,8 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
             {formatTime(entry.at)}
           </time>
           {" · "}
-          {entry.actor.username || "（未登入）"}
+          {entry.actor.username ||
+            (entry.action.startsWith("auth.") ? "（未登入）" : "系統（自動）")}
           {entry.address && ` · ${entry.address}`}
           {` · #${entry.seq}`}
         </span>

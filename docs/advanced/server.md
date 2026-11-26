@@ -34,9 +34,10 @@ export HARNESS_MODEL=claude
 ```
 
 - **讓其他電腦連線時一定要登入。** 第一次啟動時自動建立管理者帳號
-  `admin`，密碼是 `HARNESS_WEB_PASSWORD`；沒有設定時自動產生一組並印在
-  啟動訊息裡，存在專案的 `.harness/secrets/web-password`。之後每次啟動
-  都會再顯示，直到 admin 自己改了密碼。從舊版（只有一組密碼）升級時，
+  `admin`，密碼是 `HARNESS_WEB_PASSWORD`；沒有設定時自動產生一組，存在
+  專案的 `.harness/secrets/web-password`（只有執行 pyharness 的使用者能讀）。
+  啟動訊息只印出這個檔案的位置，不印密碼本身，因為看得到 log 的人不一定
+  該是管理者。從舊版（只有一組密碼）升級時，
   原本的密碼就是 admin 的密碼。
 - 環境變數只在建立 admin 時使用一次；之後改密碼請在網頁的帳號選單，
   或用 `pyharness user passwd admin`。
@@ -123,30 +124,49 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now harness
 ```
 
+## 正式上線前的安全設定 {#正式上線前的安全設定}
+
+給多人使用（要登入）時，下面幾件事預設就是比較安全的做法，不必另外設定：
+
+| 項目 | 預設 | 要放寬時 |
+|---|---|---|
+| 執行指令（`run_command`） | 所有人（含管理者）都在沙盒裡執行，沒有沙盒時不提供 | `harness.yaml` 寫 `web: {hostCommands: true}`：只有管理者在自己的「我的檔案」裡才在伺服器上執行 |
+| Docker socket | 用 [Docker Compose 部署](/guide/deploy#沙盒服務)時只有沙盒服務 `sandbox-runner` 掛載，平台容器沒有 | 不建議 |
+| 金鑰 | 只給平台自己用；指令與 stdio MCP 伺服器拿到的環境變數會拿掉金鑰，平台行程設成不可 dump（同一個使用者的程式讀不到它的 `/proc/<pid>/environ`） | 指令需要的變數寫在 `HARNESS_SHELL_KEEP_ENV`；MCP 伺服器需要的寫在它的 `env` |
+| 「以後都允許」 | 只對按下的人、在同一個工作資料夾裡有效（管理者也一樣） | 全站規則到管理平台的「權限」設定 |
+| 權限模式「全部直接執行」（bypass） | 只對管理者有效；專案設成 bypass 時成員照樣要確認 | 不能放寬 |
+| 共用資料夾 | 沒有；每個人只有「我的檔案」 | 在 `harness.yaml` 的 `workspaces` 開放，並用 `members` 限定誰能用 |
+| 沙盒的 runtime | Docker 預設的 runc | 主機裝了 gVisor 時設定 `HARNESS_SANDBOX_RUNTIME=runsc` |
+
 ## 安全上要知道的事
 
 - **能使用 docker 指令，等於擁有主機的 root 權限。** 請用專用帳號執行
   pyharness，不要在這個帳號放其他服務。要更嚴格的話可以改用 rootless
-  Docker 或 Podman（`sandbox.command: podman`）。
+  Docker 或 Podman（`sandbox.command: podman`），或像 Docker Compose 部署
+  一樣把 Docker 交給另一個帳號執行的沙盒服務（`pyharness sandbox-runner`，
+  見[在沙盒裡執行程式](/advanced/sandbox)），pyharness 只設定
+  `HARNESS_SANDBOX_RUNNER`。
 - **這是單機模式**：帳號存在專案的 `.harness/harness.db`（SQLite，密碼用
   scrypt 加上各自的 salt，登入 token 只存雜湊），資料放在本機的檔案系統。
   每個動作都記得是誰做的、每段對話都有擁有者，存取檢查集中在伺服器的
   一層裡；身分（`AccountStore`）與資料夾權限（`Folders`）各自包成一個小
   介面，之後的企業版可以換成 OIDC 單一登入與 PostgreSQL。
 - **成員看不到別人的對話與「我的檔案」**，也不能修改模型連線、全站權限
-  與成員；他們「以後都允許」的工具只適用於自己。成員的 `run_command`
-  一律在沙盒裡執行（沒有網路、只掛載工作資料夾），沒有沙盒時不提供，
-  指令不會在伺服器上替成員執行。
-- **管理者的 `run_command` 在自己的「我的檔案」裡仍然在伺服器上執行**
-  （`cwd` 限制在工作資料夾，但指令本身可以做任何事，讀得到金鑰與其他人
-  的資料）。在共用資料夾裡改在沙盒執行，因為成員可以在那裡放檔案，
-  誘使看似無害的指令執行成員的程式。不需要時別讓 agent 使用 `shell`；
-  企業版會把管理者也全部移進沙盒。
+  與成員；他們「以後都允許」的工具只適用於自己。`run_command` 一律在
+  沙盒裡執行（沒有網路、只掛載工作資料夾），沒有沙盒時不提供，指令不會
+  在伺服器上替成員執行。
+- **管理者的 `run_command` 也在沙盒裡執行。** 伺服器上有金鑰、所有人的
+  資料與設定，模型被提示注入時，看似無害的指令就能動到它們。確實需要在
+  伺服器上執行（例如自己維護專案）時，在 `harness.yaml` 寫
+  `web: {hostCommands: true}`：只有管理者在自己的「我的檔案」裡才在伺服器
+  上執行（`cwd` 限制在工作資料夾，但指令本身可以做任何事）；在共用資料夾
+  裡仍然在沙盒執行，因為成員可以在那裡放檔案，誘使看似無害的指令執行
+  成員的程式。
 - **共用資料夾裡的檔案，所有能使用它的人都拿得到**（agent 可以讀裡面的
   任何檔案），上傳的檔案也不會自動刪除。敏感文件請放在自己的「我的
-  檔案」，分析完自行清理。預設的「共用」資料夾是 `shared/`；從單人版
-  升級時，舊的 `workspace/` 只有第一位管理者能在「舊資料（專案資料夾）」
-  裡看到（見[從舊版升級](/guide/web#帳號與成員)）。
+  檔案」，分析完自行清理。預設沒有共用資料夾，要由管理者在 `workspaces`
+  開放；從單人版升級時，舊的 `workspace/` 只有第一位管理者能在「舊資料
+  （專案資料夾）」裡看到（見[從舊版升級](/guide/web#帳號與成員)）。
 - **沙盒裡的程式可以在工作資料夾裡建立捷徑（symlink）**，所以伺服器存取
   工作資料夾時一律不跟著捷徑走：檔案工具、檔案面板與上傳都從資料夾
   開始一層一層用 `O_NOFOLLOW` 打開，路徑上有捷徑就拒絕。

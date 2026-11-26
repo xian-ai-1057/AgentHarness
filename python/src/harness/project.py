@@ -45,6 +45,7 @@ import yaml
 
 from harness import agents
 from harness import builtin
+from harness import classification as classification_lib
 from harness import compaction as compaction_lib
 from harness import guardrails
 from harness import hooks as hooks_lib
@@ -101,6 +102,8 @@ class Project:
             工具，以 toolset 名稱為鍵。
         ontology: 語意層（ontology/ 資料夾，見 ontology 模組），沒有時為
             None。
+        classification: 資料分級（harness.yaml 的 dataClassification，見
+            classification 模組），沒有設定時為 None。
     """
 
     name: str
@@ -130,6 +133,7 @@ class Project:
         default_factory=dict
     )
     ontology: ontology_lib.Ontology | None = None
+    classification: classification_lib.Policy | None = None
 
     def __enter__(self) -> "Project":
         return self
@@ -264,11 +268,14 @@ def _assemble(
         if config.get("memory")
         else None,
         hooks=_load_guardrails(config.get("guardrails") or {}),
-        compaction=_load_compaction(config.get("compaction")),
+        compaction=load_compaction(config.get("compaction")),
         sandbox=sandbox,
         mcp_connections=connections,
         toolsets=toolsets,
         ontology=ontology,
+        classification=classification_lib.load_policy(
+            config.get(classification_lib.CONFIG_KEY)
+        ),
     )
 
 
@@ -807,6 +814,9 @@ def load_knowledge_bases(
             "name": settings.get("name") or base_id,
         }
 
+    policy = classification_lib.load_policy(
+        config.get(classification_lib.CONFIG_KEY)
+    )
     paths: dict[str, pathlib.Path] = {}
     for base_id, spec in specs.items():
         path = (root / str(spec["path"])).resolve()
@@ -829,6 +839,9 @@ def load_knowledge_bases(
             id=base_id,
             name=str(spec["name"]),
             description=str(spec.get("description") or ""),
+            classification=classification_lib.check_level(
+                policy, spec.get("classification"), f"知識庫 {base_id}"
+            ),
             knowledge=knowledge_lib.Knowledge(
                 path,
                 **retrieval_options(spec, f"知識庫 {base_id}"),
@@ -907,11 +920,18 @@ _RETRIEVAL_FIELDS = {
     "minSimilarity",
     "minRerankScore",
 }
-_KNOWLEDGE_FIELDS = {"path", "name", "description", *_RETRIEVAL_FIELDS}
+_KNOWLEDGE_FIELDS = {
+    "path",
+    "name",
+    "description",
+    "classification",
+    *_RETRIEVAL_FIELDS,
+}
 
 
 _COMPACTION_FIELDS = {
     "contextWindow": "context_window",
+    "contextWindows": "context_windows",
     "thresholdRatio": "threshold_ratio",
     "retainRatio": "retain_ratio",
     "summaryModel": "summary_model",
@@ -924,8 +944,18 @@ _COMPACTION_FIELDS = {
 }
 
 
-def _load_compaction(config: Any) -> compaction_lib.Compaction | None:
-    """依 harness.yaml 的 compaction 區塊建立設定；沒寫時使用預設值。"""
+def load_compaction(config: Any) -> compaction_lib.Compaction | None:
+    """依 harness.yaml 的 compaction 區塊建立設定；沒寫時使用預設值。
+
+    Args:
+        config: compaction 的值（None、true、false 或設定區塊）。
+
+    Returns:
+        壓縮設定；寫 false 時為 None。
+
+    Raises:
+        ValueError: 寫法不對或設定值不合理。
+    """
     if config is False:
         return None
     if config is None or config is True:
@@ -938,9 +968,15 @@ def _load_compaction(config: Any) -> compaction_lib.Compaction | None:
             f"compaction 有不認得的設定：{unknown}，"
             f"可用的有：{sorted(_COMPACTION_FIELDS)}"
         )
-    return compaction_lib.Compaction(
-        **{_COMPACTION_FIELDS[key]: value for key, value in config.items()}
-    )
+    windows = config.get("contextWindows")
+    if windows is not None and not isinstance(windows, dict):
+        raise ValueError(
+            "compaction.contextWindows 必須是 {模型名稱: token 數} 的設定"
+        )
+    values = {_COMPACTION_FIELDS[key]: value for key, value in config.items()}
+    if windows is not None:
+        values["context_windows"] = {str(k): v for k, v in windows.items()}
+    return compaction_lib.Compaction(**values)
 
 
 def _load_guardrails(config: dict[str, Any]) -> hooks_lib.Hooks:

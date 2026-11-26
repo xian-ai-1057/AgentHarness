@@ -82,6 +82,7 @@ export default defineConfig({
         items: [
           { text: "多個 agent 協作", link: "/advanced/multi-agent" },
           { text: "知識庫（RAG）", link: "/advanced/knowledge" },
+          { text: "資料分級", link: "/advanced/classification" },
           { text: "Ontology（業務物件）", link: "/advanced/ontology" },
           { text: "Skills", link: "/advanced/skills" },
           { text: "長期記憶", link: "/advanced/memory" },
@@ -98,6 +99,7 @@ export default defineConfig({
           { text: "閱讀原始碼", link: "/reference/source" },
           { text: "目前的限制", link: "/reference/limits" },
           { text: "授權", link: "/reference/license" },
+          { text: "參與開發", link: "/reference/contributing" },
         ],
       },
     ],

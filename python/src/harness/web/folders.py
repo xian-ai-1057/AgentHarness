@@ -13,9 +13,11 @@
         members: all              # 或使用者名稱的清單；管理者都看得到
         writable: true            # false 時 agent 只能讀
 
-沒有寫 workspaces 時，有一個所有人共用的「共用」資料夾：專案的
-shared/（第一次使用時建立）。舊版單人網頁版的 workspace/ 不會自動
-分享給所有人。
+沒有寫 workspaces 時沒有共用資料夾，每個人只有自己的「我的檔案」：
+所有人都能寫入的資料夾，任何人放的檔案都會被其他人的 agent 讀到（也
+可能被拿來提示注入），所以要由管理者明確開放、決定誰能用。舊版預設的
+「共用」資料夾（shared/）要繼續使用時，在 workspaces 寫上它（見
+legacy_shared_notice）。舊版單人網頁版的 workspace/ 不會自動分享給所有人。
 
 另外兩種特別的資料夾，路徑都是專案根目錄（project_root）：
 
@@ -251,7 +253,7 @@ def ensure(folder: Folder) -> pathlib.Path:
 def load_shared(root: pathlib.Path, config: dict[str, Any]) -> list[Folder]:
     """依 harness.yaml 的 workspaces 建立共用資料夾。
 
-    沒有寫 workspaces 時是一個所有人共用的「共用」資料夾（shared/）。
+    沒有寫 workspaces 時沒有共用資料夾。
 
     Args:
         root: 專案根目錄。
@@ -266,7 +268,7 @@ def load_shared(root: pathlib.Path, config: dict[str, Any]) -> list[Folder]:
     root = root.resolve()
     entries = config.get(CONFIG_KEY)
     if entries is None:
-        entries = [{"name": DEFAULT_SHARED_NAME, "path": DEFAULT_SHARED_DIR}]
+        entries = []
     if not isinstance(entries, list):
         raise ValueError(f"{CONFIG_KEY} 必須是清單")
     folders: list[Folder] = []
@@ -285,6 +287,38 @@ def load_shared(root: pathlib.Path, config: dict[str, Any]) -> list[Folder]:
                 )
         folders.append(folder)
     return folders
+
+
+def legacy_shared_notice(root: pathlib.Path, config: dict[str, Any]) -> str:
+    """舊版預設的「共用」資料夾裡還有檔案、卻不再開放時的提醒。
+
+    舊版沒有寫 workspaces 時，所有人共用 shared/。現在預設不開放，裡面的
+    檔案原封不動，只是網頁上看不到；用過它的對話會請使用者開始新的對話。
+
+    Args:
+        root: 專案根目錄。
+        config: harness.yaml 的內容。
+
+    Returns:
+        給管理者看的說明；不需要提醒時為空字串。
+    """
+    if config.get(CONFIG_KEY) is not None:
+        return ""
+    folder = root / DEFAULT_SHARED_DIR
+    try:
+        has_files = any(folder.iterdir())
+    except OSError:
+        return ""
+    if not has_files:
+        return ""
+    return (
+        f"注意：{DEFAULT_SHARED_DIR}/ 裡有檔案，但現在預設不開放所有人共用的"
+        "資料夾。要繼續使用的話，在 harness.yaml 加上：\n"
+        f"  {CONFIG_KEY}:\n"
+        f"    - name: {DEFAULT_SHARED_NAME}\n"
+        f"      path: {DEFAULT_SHARED_DIR}\n"
+        "      members: all    # 或只列出需要的人"
+    )
 
 
 def _folder(root: pathlib.Path, entry: Any, index: int) -> Folder:

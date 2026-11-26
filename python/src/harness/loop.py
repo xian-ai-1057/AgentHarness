@@ -223,6 +223,13 @@ async def _run_loop(
         turns += 1
         response = None
         if compactor is not None and compactor.settings.auto:
+            if compactor.needs_compaction(
+                agent, session, _system_prompt(agent, options), toolbox.schemas
+            ):
+                # 摘要要多呼叫一次模型，可能要一段時間，先讓介面知道。
+                yield datatypes.Event(
+                    "compaction_start", {"reason": "threshold"}
+                )
             event = await _auto_compact(
                 agent, session, toolbox, options, compactor, usage
             )
@@ -231,6 +238,11 @@ async def _run_loop(
             if event is not None and event.type == "compaction":
                 # 壓縮可能讓已載入的 skill 離開模型看得到的歷史。
                 toolbox = _build_toolbox(agent, session, options, usage)
+                usage_event = _context_event(
+                    agent, session, toolbox, options, compactor
+                )
+                if usage_event is not None:
+                    yield usage_event
         steps = _request_model(
             agent, session, toolbox, options, compactor, usage, hold_text
         )
@@ -247,9 +259,19 @@ async def _run_loop(
             if text:
                 yield datatypes.Event("text_delta", {"text": text})
         session.append(response.message)
-        if compactor is not None:
-            compactor.record_usage(session.messages, response.usage)
         yield datatypes.Event("message", {"message": response.message})
+        if compactor is not None:
+            compactor.record_usage(
+                session,
+                response.usage,
+                _system_prompt(agent, options),
+                toolbox.schemas,
+            )
+            usage_event = _context_event(
+                agent, session, toolbox, options, compactor
+            )
+            if usage_event is not None:
+                yield usage_event
 
         if blocked_reason is not None:
             output = blocked_reason
@@ -342,6 +364,7 @@ async def _request_model(
             if not can_retry:
                 raise
             retries += 1
+            yield datatypes.Event("compaction_start", {"reason": "overflow"})
             try:
                 result = await compactor.compact(
                     agent, session, system, toolbox.schemas, "overflow"
@@ -357,6 +380,22 @@ async def _request_model(
             raise RuntimeError("模型函式沒有回傳 ModelResponse")
         yield response
         return
+
+
+def _context_event(
+    agent: agents.Agent,
+    session: sessions.Session,
+    toolbox: _Toolbox,
+    options: _RunOptions,
+    compactor: compaction_lib.Compactor,
+) -> datatypes.Event | None:
+    """目前上下文用量的事件（只給直接和使用者對話的 agent）。"""
+    if not options.user_facing:
+        return None
+    info = compactor.context_usage(
+        agent, _system_prompt(agent, options), session.messages, toolbox.schemas
+    )
+    return datatypes.Event("context_usage", info)
 
 
 async def _auto_compact(
@@ -388,6 +427,7 @@ async def compact(
     settings: compaction_lib.Compaction | None = None,
     model_fn: llm.ModelFn | None = None,
     memory: memory_lib.MemoryStore | None = None,
+    instructions: str = "",
 ) -> compaction_lib.CompactionResult | None:
     """立刻壓縮一段對話，不管有沒有超過門檻（例如聊天中的 /compact）。
 
@@ -400,6 +440,7 @@ async def compact(
         settings: 壓縮設定，預設使用 Compaction()。
         model_fn: 模型函式，預設透過 litellm 呼叫。
         memory: 使用者的長期記憶（讓摘要時的 system prompt 與平常一致）。
+        instructions: 摘要時特別要保留的重點（/compact 後面的文字）。
 
     Returns:
         壓縮結果；對話太短、沒有東西可以壓縮時為 None。
@@ -425,6 +466,7 @@ async def compact(
         _system_prompt(current, options),
         toolbox.schemas,
         "manual",
+        instructions,
     )
 
 

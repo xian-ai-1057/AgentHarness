@@ -417,9 +417,9 @@ def _check_inside(base: knowledge_lib.KnowledgeBase, target: pathlib.Path):
     """目標在知識庫資料夾裡，而且不在其他知識庫的子資料夾裡。"""
     root = _root(base)
     relative = target.relative_to(root)
-    if relative.as_posix() == knowledge_lib.LABELS_FILE:
+    if relative.as_posix() in knowledge_lib.CONFIG_FILES:
         raise KnowledgeAdminError(
-            f"{knowledge_lib.LABELS_FILE} 是標籤設定，不能當成文件上傳"
+            f"{relative.as_posix()} 是知識庫的設定檔，不能當成文件上傳"
         )
     for current in [root, *(root / p for p in relative.parents[-2::-1])]:
         if current.is_symlink():

@@ -61,7 +61,29 @@
     GET    /api/knowledge/source/text?base=&path=
                                          同一份文件讀出來的文字，依片段
                                          排列（網頁用來標出引用的段落）
-    POST   /api/knowledge/{id}/search    搜尋測試，{"query", "topK"?}
+    POST   /api/knowledge/{id}/search    搜尋測試，{"query", "topK"?,
+                                         "asOf"?, "allVersions"?}
+    PUT    /api/knowledge/{id}/documents/info?path=
+                                         文件的版本、生效日、失效日與取代
+                                         的舊版（寫進 documents.yaml）
+    GET    /api/knowledge/{id}/eval      題庫、評測紀錄與是否執行中
+    POST   /api/knowledge/{id}/eval/questions
+                                         新增一題，{"question", "sources"?,
+                                         "keywords"?, "answer"?}
+    PATCH  /api/knowledge/{id}/eval/questions/{qid}
+                                         修改一題
+    DELETE /api/knowledge/{id}/eval/questions/{qid}
+                                         刪除一題
+    POST   /api/knowledge/{id}/eval/import
+                                         匯入題庫（multipart CSV 或 .xlsx；
+                                         ?replace=1 取代原本的）
+    GET    /api/knowledge/{id}/eval/export
+                                         匯出題庫（CSV）
+    POST   /api/knowledge/{id}/eval/run  開始評測，{"answerModel"?, "topK"?}
+    GET    /api/knowledge/{id}/eval/runs/{runId}
+                                         一次評測的完整結果
+    GET    /api/admin/classification     資料分級設定（管理者）
+    PUT    /api/admin/classification     儲存資料分級設定（管理者）
     GET    /api/my/knowledge             知識庫頁：可以用的公司知識庫與自己的
                                          個人知識庫、上限與已用空間
     POST   /api/my/knowledge             建立個人知識庫，{"name",
@@ -139,6 +161,7 @@ from harness.web import files as files_lib
 from harness.web import folders as folders_lib
 from harness.web import groups as groups_lib
 from harness.web import knowledge_admin
+from harness.web import knowledge_eval as knowledge_eval_web
 from harness.web import mcp_admin
 from harness.web import office as office_lib
 from harness.web import skill_admin
@@ -157,7 +180,9 @@ UPLOAD_PATH = "/api/uploads"
 # 腳本因此無法借用使用者的登入狀態上傳檔案。
 UPLOAD_HEADER = "X-Harness-Upload"
 # 上傳文件到知識庫也是 multipart（和 UPLOAD_PATH 一樣的檢查）。
-_KNOWLEDGE_UPLOAD = re.compile(r"^/api/(my/)?knowledge/[\w-]+/documents$")
+_KNOWLEDGE_UPLOAD = re.compile(
+    r"^/api/(my/)?knowledge/[\w-]+/(documents|eval/import)$"
+)
 # 上傳 skill 資料夾的 zip 也是。
 _SKILL_UPLOAD = re.compile(r"^/api/(admin|my)/skills/upload$")
 _UPLOAD_CHUNK = 256 * 1024
@@ -392,6 +417,7 @@ def create_app(
     app[_AUDIT] = audit_lib.AuditLog.for_project(project.root)
     if project.ontology is not None:
         project.ontology.on_action = _ontology_auditor(app[_AUDIT])
+    workspace.on_eval_finished = _eval_auditor(app[_AUDIT])
     # 本機模式（只有自己）可以用這台電腦的 LibreOffice；要登入時一律在
     # 沙盒裡轉換，別人上傳的檔案不在伺服器上解析。
     app[_OFFICE] = office_lib.OfficeConverter(
@@ -562,6 +588,17 @@ def _session_routes(routes: web.RouteTableDef) -> None:
     async def retry(request: web.Request) -> web.Response:
         await _body(request)
         summary = _ws(request).retry(_user(request), _id(request))
+        return _json(summary, status=202)
+
+    @routes.post(f"/api/sessions/{session_id}/compact")
+    async def compact(request: web.Request) -> web.Response:
+        body = await _body(request)
+        instructions = body.get("instructions") or ""
+        if not isinstance(instructions, str):
+            raise workspace_lib.WebError(400, "instructions 必須是文字")
+        summary = _ws(request).compact(
+            _user(request), _id(request), instructions
+        )
         return _json(summary, status=202)
 
     @routes.post(f"/api/sessions/{session_id}/stop")
@@ -1320,9 +1357,16 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
     async def delete_knowledge(request: web.Request) -> web.Response:
         _require_admin(request)
         base_id = request.match_info["base_id"]
-        _ws(request).delete_knowledge(base_id)
-        _audit(request, "knowledge.delete", target=base_id)
-        return _json({"ok": True})
+        removed = _ws(request).delete_knowledge(
+            base_id, request.query.get("files") == "1"
+        )
+        _audit(
+            request,
+            "knowledge.delete",
+            target=base_id,
+            detail={"filesDeleted": removed},
+        )
+        return _json({"ok": True, "filesDeleted": removed})
 
     @routes.get(f"{base}/documents")
     async def list_documents(request: web.Request) -> web.Response:
@@ -1399,6 +1443,145 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
         return _json(
             await _ws(request).try_knowledge(
                 _user(request), request.match_info["base_id"], body
+            )
+        )
+
+    @routes.put(f"{base}/documents/info")
+    async def document_info(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        path = request.query.get("path", "")
+        body = await _body(request)
+        saved = _ws(request).set_document_info(
+            _user(request), base_id, path, body
+        )
+        _audit(
+            request,
+            "knowledge.document_info",
+            target=base_id,
+            detail={"path": path, **saved["version"]},
+        )
+        return _json(saved)
+
+    _knowledge_eval_routes(routes, base)
+
+
+def _knowledge_eval_routes(routes: web.RouteTableDef, base: str) -> None:
+    """知識庫的題庫回歸評測（管理者或該知識庫的維護者）。"""
+    question = f"{base}/eval/questions/{{question_id:[0-9a-f]+}}"
+
+    @routes.get(f"{base}/eval")
+    async def eval_overview(request: web.Request) -> web.Response:
+        return _json(
+            _ws(request).eval_overview(
+                _user(request), request.match_info["base_id"]
+            )
+        )
+
+    @routes.post(f"{base}/eval/questions")
+    async def add_question(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        added = _ws(request).add_eval_question(
+            _user(request), base_id, await _body(request)
+        )
+        _audit(
+            request,
+            "knowledge.eval_question",
+            target=base_id,
+            detail={"op": "add", "question": added["question"][:200]},
+        )
+        return _json(added, status=201)
+
+    @routes.patch(question)
+    async def update_question(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        updated = _ws(request).update_eval_question(
+            _user(request),
+            base_id,
+            request.match_info["question_id"],
+            await _body(request),
+        )
+        _audit(
+            request,
+            "knowledge.eval_question",
+            target=base_id,
+            detail={"op": "update", "question": updated["question"][:200]},
+        )
+        return _json(updated)
+
+    @routes.delete(question)
+    async def delete_question(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        question_id = request.match_info["question_id"]
+        _ws(request).delete_eval_question(_user(request), base_id, question_id)
+        _audit(
+            request,
+            "knowledge.eval_question",
+            target=base_id,
+            detail={"op": "delete", "id": question_id},
+        )
+        return _json({"ok": True})
+
+    @routes.post(f"{base}/eval/import")
+    async def import_questions(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        workspace = _ws(request)
+        user = _user(request)
+        # 先確認權限，再讀檔案。
+        workspace.eval_overview(user, base_id)
+        found = None
+        async for filename, chunks in _iter_files(request):
+            data = bytearray()
+            async for chunk in chunks:
+                data += chunk
+                if len(data) > knowledge_eval_web.IMPORT_LIMIT:
+                    raise workspace_lib.WebError(413, "檔案太大")
+            found = (filename, bytes(data))
+            break
+        if found is None:
+            raise workspace_lib.WebError(400, "沒有收到檔案")
+        replace = request.query.get("replace") == "1"
+        result = workspace.import_eval_questions(
+            user, base_id, found[0], found[1], replace=replace
+        )
+        _audit(
+            request,
+            "knowledge.eval_import",
+            target=base_id,
+            detail={"file": found[0], "replace": replace, **result},
+        )
+        return _json(result, status=201)
+
+    @routes.get(f"{base}/eval/export")
+    async def export_questions(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        text = _ws(request).export_eval_questions(_user(request), base_id)
+        headers = files_lib.response_headers(f"{base_id}-題庫.csv", True)
+        headers["Content-Type"] = "text/csv; charset=utf-8"
+        return web.Response(body=text.encode("utf-8"), headers=headers)
+
+    @routes.post(f"{base}/eval/run")
+    async def run_eval(request: web.Request) -> web.Response:
+        base_id = request.match_info["base_id"]
+        body = await _body(request)
+        started = _ws(request).start_eval(_user(request), base_id, body)
+        _audit(
+            request,
+            "knowledge.eval_run",
+            target=base_id,
+            detail={
+                "answerModel": body.get("answerModel"),
+                "topK": body.get("topK"),
+            },
+        )
+        return _json(started, status=201)
+
+    @routes.get(f"{base}/eval/runs/{{run_id:[0-9a-f]+}}")
+    async def eval_run(request: web.Request) -> web.Response:
+        return _json(
+            _ws(request).eval_run(
+                _user(request),
+                request.match_info["base_id"],
+                request.match_info["run_id"],
             )
         )
 
@@ -1505,6 +1688,35 @@ def _personal_knowledge_routes(routes: web.RouteTableDef) -> None:
 def _settings_routes(routes: web.RouteTableDef) -> None:
     """模型連線與全站權限：只有管理者能改。"""
 
+    @routes.get("/api/admin/classification")
+    async def get_classification(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(_ws(request).classification_settings())
+
+    @routes.put("/api/admin/classification")
+    async def save_classification(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        saved = _ws(request).update_classification(body)
+        _audit(
+            request,
+            "settings.classification",
+            detail={
+                key: body.get(key)
+                for key in (
+                    "enabled",
+                    "levels",
+                    "defaultClearance",
+                    "models",
+                    "routeTo",
+                    "personalKnowledge",
+                    "toolsets",
+                    "knowledgeBases",
+                )
+            },
+        )
+        return _json(saved)
+
     @routes.put("/api/settings/permissions")
     async def save_permissions(request: web.Request) -> web.Response:
         _require_admin(request)
@@ -1570,6 +1782,26 @@ def _settings_routes(routes: web.RouteTableDef) -> None:
             raise workspace_lib.WebError(400, "models 必須是字串的陣列")
         _ws(request).update_model_choices(names)
         _audit(request, "settings.models", detail={"models": names})
+        return _json({"ok": True})
+
+    @routes.get("/api/settings/compaction")
+    async def get_compaction(request: web.Request) -> web.Response:
+        _require_admin(request)
+        return _json(await _ws(request).compaction_settings())
+
+    @routes.put("/api/settings/compaction")
+    async def save_compaction(request: web.Request) -> web.Response:
+        _require_admin(request)
+        body = await _body(request)
+        _ws(request).update_compaction_settings(body)
+        _audit(
+            request,
+            "settings.compaction",
+            detail={
+                key: body.get(key)
+                for key in ("auto", "thresholdRatio", "contextWindows")
+            },
+        )
         return _json({"ok": True})
 
     @routes.post("/api/settings/model/test")
@@ -1643,6 +1875,31 @@ def _audit_routes(routes: web.RouteTableDef) -> None:
             await response.write("".join(lines[start : start + 500]).encode())
         await response.write_eof()
         return response
+
+
+def _eval_auditor(
+    log: audit_lib.AuditLog,
+) -> Callable[[str, dict[str, Any]], None]:
+    """知識庫評測結束後寫一筆稽核紀錄：通過率與退步的題數。"""
+
+    def record(base_id: str, run: dict[str, Any]) -> None:
+        summary = run.get("summary") or {}
+        log.record(
+            "knowledge.eval_done",
+            actor=None,
+            target=base_id,
+            detail={
+                "trigger": run.get("trigger"),
+                "mode": run.get("mode"),
+                "status": run.get("status"),
+                "passed": summary.get("passed"),
+                "total": summary.get("total"),
+                "regressions": len(run.get("regressions") or []),
+                "error": run.get("error"),
+            },
+        )
+
+    return record
 
 
 def _ontology_auditor(

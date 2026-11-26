@@ -12,7 +12,7 @@ mcpServers:
   github:                   # 伺服器名稱，也是這組工具的 toolset 名稱
     command: npx            # 本機程式，透過 stdio 溝通
     args: ["-y", "@modelcontextprotocol/server-github"]
-    env: {LOG_LEVEL: info}  # 選用，加在目前的環境變數之上
+    env: {LOG_LEVEL: info}  # 選用，加在目前的環境變數之上（金鑰除外，見下方）
     timeoutSeconds: 120     # 選用，單次工具呼叫最多等幾秒，預設 300
   search:
     url: https://example.com/mcp           # 遠端伺服器（Streamable HTTP）
@@ -20,7 +20,9 @@ mcpServers:
       Authorization: Bearer ${SEARCH_API_KEY}
 ```
 
-`args`、`env`、`url`、`headers` 裡可以寫 `${環境變數名稱}`，載入時換成環境變數的值，**金鑰就不必寫進 `harness.yaml`**。`${NAME:-預設值}` 在環境變數沒有設定時使用預設值；沒有設定也沒有預設值時，載入會失敗並指出缺少哪個環境變數。
+`args`、`env`、`url`、`headers` 裡可以寫 `${環境變數名稱}`，載入時換成環境變數的值，**金鑰就不必寫進 `harness.yaml`**。
+
+本機程式（`command`）拿到的環境變數會**拿掉名稱像金鑰的變數**（含 `KEY`、`SECRET`、`TOKEN`、`PASSWORD` 等字）與網頁上填的金鑰，避免每個 MCP 伺服器都拿到模型供應商的金鑰。伺服器需要哪把金鑰，就在 `env` 明確寫出來，例如 `env: {GITHUB_TOKEN: "${GITHUB_TOKEN}"}`。`${NAME:-預設值}` 在環境變數沒有設定時使用預設值；沒有設定也沒有預設值時，載入會失敗並指出缺少哪個環境變數。
 
 從 Claude Code、Cursor 等工具複製過來的設定可以直接用，裡面的 `type`（`stdio`、`http`）會被接受；舊的 `sse` 傳輸不支援，請改用伺服器的 Streamable HTTP 端點（通常是 `/mcp`）。
 

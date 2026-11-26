@@ -20,6 +20,8 @@ import { createPortal } from "react-dom";
 import type {
   KnowledgeAdminBase,
   KnowledgeAdminList,
+  KnowledgeDocument,
+  KnowledgeDocumentStatus,
   KnowledgeDocuments,
   KnowledgeHit,
   MemberInfo,
@@ -39,6 +41,11 @@ import { ConfirmDialog, Modal } from "../shell/Dialog.tsx";
 import { Field } from "../shell/Field.tsx";
 import { showToast } from "../shell/toast.tsx";
 import {
+  KnowledgeEvalSection,
+  percent,
+  SEARCH_LABELS,
+} from "./KnowledgeEval.tsx";
+import {
   describeSearch,
   draftDirty,
   type SettingsDraft,
@@ -50,12 +57,6 @@ import {
   RerankerSelect,
   useKnowledgeModels,
 } from "./RetrievalSelects.tsx";
-
-const SEARCH_LABELS = {
-  keyword: "關鍵字（精確比對）",
-  bm25: "演算法（BM25）",
-  hybrid: "BM25 + 語意（embedding）",
-} as const;
 
 /** 其他知識庫沒設定時沿用的值：預設知識庫實際生效的檢索設定。 */
 function inheritedRetrieval(list: KnowledgeAdminList) {
@@ -174,6 +175,12 @@ export function Knowledge() {
                     {base.builtin && (
                       <span className="badge badge-muted">預設</span>
                     )}
+                    {base.classificationName && (
+                      <span className="badge badge-warn">
+                        {base.classificationName}
+                      </span>
+                    )}
+                    <EvalBadge base={base} />
                   </span>
                   <span className="member-meta">
                     {base.documents} 份文件 ·{" "}
@@ -336,6 +343,77 @@ function AddKnowledgeDialog({
   );
 }
 
+type EditorTab = "documents" | "eval" | "search" | "settings";
+
+const EDITOR_TABS: [EditorTab, string][] = [
+  ["documents", "文件"],
+  ["eval", "題庫評測"],
+  ["search", "搜尋測試"],
+  ["settings", "設定"],
+];
+
+/** 知識庫清單上的評測概況：通過率與退步的題數。 */
+function EvalBadge({ base }: { base: KnowledgeAdminBase }) {
+  const evaluation = base.evaluation;
+  if (!evaluation || evaluation.questions === 0) return null;
+  if (evaluation.running) {
+    return <span className="badge badge-muted">評測中…</span>;
+  }
+  const latest = evaluation.latest;
+  if (!latest?.summary) {
+    return (
+      <span className="badge badge-muted">{evaluation.questions} 題未評測</span>
+    );
+  }
+  return (
+    <>
+      <span
+        className={`badge ${
+          latest.summary.passed === latest.summary.total
+            ? "badge-ok"
+            : "badge-muted"
+        }`}
+      >
+        評測 {percent(latest.summary.passRate)}
+      </span>
+      {latest.regressions > 0 && (
+        <span className="badge badge-warn">退步 {latest.regressions} 題</span>
+      )}
+    </>
+  );
+}
+
+const STATUS_LABELS: Record<KnowledgeDocumentStatus, string> = {
+  active: "生效中",
+  pending: "尚未生效",
+  expired: "已失效",
+  superseded: "已被取代",
+};
+
+/** 文件旁邊的版本與狀態。 */
+function VersionBadges({ doc }: { doc: KnowledgeDocument }) {
+  const version = doc.version ?? {};
+  const status = doc.status ?? "active";
+  return (
+    <>
+      {version.version && (
+        <span className="badge badge-muted">{version.version}</span>
+      )}
+      {status === "pending" && (
+        <span className="badge badge-warn">{version.effective} 起生效</span>
+      )}
+      {status === "expired" && (
+        <span className="badge badge-danger">已失效</span>
+      )}
+      {status === "superseded" && (
+        <span className="badge badge-danger">
+          已被 {(doc.supersededBy ?? []).join("、")} 取代
+        </span>
+      )}
+    </>
+  );
+}
+
 function KnowledgeEditor({
   base,
   list,
@@ -353,6 +431,9 @@ function KnowledgeEditor({
 }) {
   const admin = list.canCreate;
   const [deleting, setDeleting] = useState(false);
+  const [deleteFiles, setDeleteFiles] = useState(true);
+  const [tab, setTab] = useState<EditorTab>("documents");
+  const tabs = EDITOR_TABS.filter(([id]) => admin || id !== "settings");
   return (
     <section aria-labelledby="h-kb" className="settings-body">
       <div>
@@ -371,9 +452,28 @@ function KnowledgeEditor({
         </p>
       </div>
 
-      <Documents base={base} formats={list.formats} onChanged={onChanged} />
-      <SearchTest base={base} />
-      {admin && (
+      <div className="tabs kb-tabs" role="tablist" aria-label="知識庫">
+        {tabs.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            className="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "documents" && (
+        <Documents base={base} formats={list.formats} onChanged={onChanged} />
+      )}
+      {tab === "eval" && (
+        <KnowledgeEvalSection base={base} onChanged={onChanged} />
+      )}
+      {tab === "search" && <SearchTest base={base} />}
+      {tab === "settings" && admin && (
         <SettingsForm
           base={base}
           inherited={inheritedRetrieval(list)}
@@ -403,15 +503,34 @@ function KnowledgeEditor({
             danger
             disabled={base.agents.length > 0}
             onConfirm={async () => {
-              await api.deleteKnowledge(base.id);
-              showToast("已拿掉知識庫");
+              const result = await api.deleteKnowledge(base.id, deleteFiles);
+              showToast(
+                result.filesDeleted
+                  ? "已拿掉知識庫並刪除文件"
+                  : deleteFiles
+                    ? `已拿掉知識庫；${base.path}/ 和其他知識庫共用或不在 knowledge/ 裡，文件沒有刪除`
+                    : "已拿掉知識庫，文件留著",
+              );
               onDeleted();
             }}
             onClose={() => setDeleting(false)}
           >
-            {base.agents.length > 0
-              ? `agent ${base.agents.join("、")} 預設會搜尋這個知識庫，請先修改它的 knowledge 設定。`
-              : `從 harness.yaml 拿掉這個知識庫，對話就搜尋不到它。文件不會刪除，${base.path}/ 資料夾會留著。`}
+            {base.agents.length > 0 ? (
+              `agent ${base.agents.join("、")} 預設會搜尋這個知識庫，請先修改它的 knowledge 設定。`
+            ) : (
+              <>
+                從 harness.yaml
+                拿掉這個知識庫，對話就搜尋不到它，題庫與評測紀錄也會清掉。
+                <label className="kb-check kb-delete-files">
+                  <input
+                    type="checkbox"
+                    checked={deleteFiles}
+                    onChange={(event) => setDeleteFiles(event.target.checked)}
+                  />
+                  一併刪除 {base.path}/ 裡的文件與索引（無法復原）
+                </label>
+              </>
+            )}
           </ConfirmDialog>,
           document.body,
         )}
@@ -432,6 +551,7 @@ function Documents({
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<string>();
+  const [versioning, setVersioning] = useState<KnowledgeDocument>();
   const input = useRef<HTMLInputElement>(null);
   const replaceInput = useRef<HTMLInputElement>(null);
   const replacing = useRef<string>(undefined);
@@ -573,13 +693,32 @@ function Documents({
                   {doc.note && (
                     <span className="badge badge-warn">搜尋不到</span>
                   )}
+                  <VersionBadges doc={doc} />
                 </span>
                 <span className="member-meta">
                   {formatBytes(doc.size)} · {doc.chunks} 個片段 ·{" "}
                   {new Date(doc.modifiedAt * 1000).toLocaleString()}
                 </span>
                 {doc.note && <span className="kb-note">{doc.note}</span>}
+                {(doc.version?.effective || doc.version?.expires) && (
+                  <span className="member-meta">
+                    {doc.version.effective && `${doc.version.effective} 起生效`}
+                    {doc.version.effective && doc.version.expires && "，"}
+                    {doc.version.expires && `${doc.version.expires} 失效`}
+                    {doc.version.supersedes?.length
+                      ? ` · 取代 ${doc.version.supersedes.join("、")}`
+                      : ""}
+                  </span>
+                )}
               </span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={busy}
+                onClick={() => setVersioning(doc)}
+              >
+                版本
+              </button>
               <button
                 type="button"
                 className="btn btn-ghost"
@@ -622,12 +761,164 @@ function Documents({
           </ConfirmDialog>,
           document.body,
         )}
+      {versioning &&
+        data &&
+        createPortal(
+          <VersionDialog
+            baseId={base.id}
+            doc={versioning}
+            others={data.documents
+              .map((item) => item.path)
+              .filter((path) => path !== versioning.path)}
+            onClose={() => setVersioning(undefined)}
+            onSaved={async () => {
+              setVersioning(undefined);
+              showToast("已儲存版本資訊");
+              await load();
+              await onChanged();
+            }}
+          />,
+          document.body,
+        )}
     </section>
+  );
+}
+
+/** 設定一份文件的版本、生效日、失效日與取代的舊版。 */
+function VersionDialog({
+  baseId,
+  doc,
+  others,
+  onClose,
+  onSaved,
+}: {
+  baseId: string;
+  doc: KnowledgeDocument;
+  others: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const titleId = useId();
+  const first = useRef<HTMLInputElement>(null);
+  const current = doc.version ?? {};
+  const [version, setVersion] = useState(current.version ?? "");
+  const [effective, setEffective] = useState(current.effective ?? "");
+  const [expires, setExpires] = useState(current.expires ?? "");
+  const [supersedes, setSupersedes] = useState<string[]>(
+    current.supersedes ?? [],
+  );
+  const [note, setNote] = useState(current.note ?? "");
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await api.setDocumentVersion(baseId, doc.path, {
+        version: version.trim(),
+        effective,
+        expires,
+        supersedes,
+        note: note.trim(),
+      });
+      onSaved();
+    } catch (failure) {
+      setError((failure as Error).message);
+      setBusy(false);
+    }
+  };
+
+  const toggle = (path: string) =>
+    setSupersedes((items) =>
+      items.includes(path)
+        ? items.filter((item) => item !== path)
+        : [...items, path],
+    );
+
+  return (
+    <Modal
+      onClose={onClose}
+      className="confirm-dialog form-dialog"
+      labelledBy={titleId}
+      initialFocus={first}
+    >
+      <form onSubmit={submit} noValidate>
+        <h2 id={titleId} className="dialog-title">
+          版本與生效期間
+        </h2>
+        <p className="help mono">{doc.path}</p>
+        <div className="dialog-fields">
+          <Field
+            ref={first}
+            label="版本"
+            placeholder="例如：2026 年版、v3（選填）"
+            value={version}
+            onChange={(event) => setVersion(event.target.value)}
+          />
+          <Field
+            label="生效日"
+            type="date"
+            hint="這天起對話才搜尋得到；留空表示一直有效。"
+            value={effective}
+            onChange={(event) => setEffective(event.target.value)}
+          />
+          <Field
+            label="失效日"
+            type="date"
+            hint="這天起不再被搜尋到（選填）。"
+            value={expires}
+            onChange={(event) => setExpires(event.target.value)}
+          />
+          {others.length > 0 && (
+            <fieldset className="form-row kb-version-field">
+              <legend className="label">取代的舊版文件</legend>
+              <div className="kb-version-list">
+                {others.map((path) => (
+                  <label key={path} className="kb-check mono">
+                    <input
+                      type="checkbox"
+                      checked={supersedes.includes(path)}
+                      onChange={() => toggle(path)}
+                    />
+                    {path}
+                  </label>
+                ))}
+              </div>
+              <div className="help">
+                這份文件生效後，勾選的舊版就不會再被搜尋到。檔案會保留，查詢過去日期時仍查得到。
+              </div>
+            </fieldset>
+          )}
+          <Field
+            label="備註"
+            placeholder="例如：修訂第 5 條特休天數（選填）"
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+          />
+          {error && (
+            <div className="inline-error" role="alert">
+              {error}
+            </div>
+          )}
+        </div>
+        <div className="dialog-actions">
+          <button type="button" className="btn btn-outline" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="btn btn-accent" disabled={busy}>
+            儲存
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 
 function SearchTest({ base }: { base: KnowledgeAdminBase }) {
   const [query, setQuery] = useState("");
+  const [asOf, setAsOf] = useState("");
+  const [allVersions, setAllVersions] = useState(false);
   const [hits, setHits] = useState<KnowledgeHit[]>();
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -638,7 +929,14 @@ function SearchTest({ base }: { base: KnowledgeAdminBase }) {
     setBusy(true);
     setError(undefined);
     try {
-      setHits((await api.searchKnowledge(base.id, query.trim())).hits);
+      setHits(
+        (
+          await api.searchKnowledge(base.id, query.trim(), {
+            asOf,
+            allVersions,
+          })
+        ).hits,
+      );
     } catch (failure) {
       setError((failure as Error).message);
     }
@@ -667,6 +965,26 @@ function SearchTest({ base }: { base: KnowledgeAdminBase }) {
           搜尋
         </button>
       </form>
+      <div className="kb-search-options">
+        <label className="kb-check">
+          查詢日期
+          <input
+            className="field"
+            type="date"
+            value={asOf}
+            disabled={allVersions}
+            onChange={(event) => setAsOf(event.target.value)}
+          />
+        </label>
+        <label className="kb-check">
+          <input
+            type="checkbox"
+            checked={allVersions}
+            onChange={(event) => setAllVersions(event.target.checked)}
+          />
+          包含舊版、失效與還沒生效的文件
+        </label>
+      </div>
       {error && (
         <div className="inline-error" role="alert">
           {error}
@@ -691,6 +1009,12 @@ function SearchTest({ base }: { base: KnowledgeAdminBase }) {
                   ` · 相似度 ${hit.similarity.toFixed(3)}`}
                 {hit.rerankScore !== null &&
                   ` · rerank ${hit.rerankScore.toFixed(3)}`}
+                {hit.version && ` · ${hit.version}`}
+                {hit.status && hit.status !== "active" && (
+                  <span className="badge badge-warn kb-hit-status">
+                    {STATUS_LABELS[hit.status]}
+                  </span>
+                )}
               </div>
               <p className="kb-hit-text">{hit.text}</p>
             </li>
@@ -850,8 +1174,7 @@ function SettingsForm({
         <fieldset className="model-choices access-field">
           <legend>維護者</legend>
           <div className="help">
-            維護者可以在管理平台上傳、更新、刪除這個知識庫的文件並試搜尋，
-            不能改設定。管理者不必設定就能管理。
+            維護者可以在管理平台上傳、更新、刪除這個知識庫的文件並試搜尋，不能改設定。管理者不必設定就能管理。
           </div>
           <ul className="model-choices-list">
             {members

@@ -1275,6 +1275,8 @@ compaction:
   （vLLM、LiteLLM Proxy 後面的模型）litellm 查不到，網頁版會自動向端點
   查；CLI 或端點查不到時要寫 `contextWindows`，否則不會主動壓縮（模型
   回報超過上限時仍會壓縮後重試）。
+- 上限依**實際送出的模型**查：網頁版的資料分級把對話改送地端模型時，
+  用地端模型的上限（程式裡用 `Compaction(resolve_model=...)` 指定）。
 - 預留給回覆的 `modelParams.max_tokens` 會從門檻扣掉。
 - 摘要多一次模型呼叫，它的用量會算進 `RunResult.usage`。
 - 摘要失敗（模型出錯、沒有回傳文字、摘要沒有比原文短）時，對話照常

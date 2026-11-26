@@ -19,6 +19,7 @@
 import dataclasses
 import functools
 import json
+from collections.abc import Callable
 from typing import Any
 
 from harness import agents
@@ -125,6 +126,9 @@ class Compaction:
         auto: 是否自動壓縮（含超過上限時的重試）；False 時只能手動壓縮。
         max_overflow_retries: 模型回報超過上下文上限時，壓縮後最多重試
             幾次；0 表示不重試。
+        resolve_model: 把 agent 設定的模型換成實際會送出的模型（例如資料
+            分級把機密對話改送地端模型時），上下文上限依實際的模型查。
+            None 表示就是 agent 的模型。不寫進 harness.yaml。
     """
 
     context_window: int | None = None
@@ -138,6 +142,9 @@ class Compaction:
     prune_tail: int = 1024
     auto: bool = True
     max_overflow_retries: int = 1
+    resolve_model: Callable[[str], str] | None = dataclasses.field(
+        default=None, compare=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         """檢查設定值。"""
@@ -277,6 +284,8 @@ def context_window_source(
         (token 數, 來源)；來源是 model（context_windows）、default
         （context_window）或 litellm。都查不到時為 (None, None)。
     """
+    if settings.resolve_model is not None:
+        model = settings.resolve_model(model)
     # litellm_proxy/ 開頭是 litellm 連 LiteLLM Proxy 的寫法，Proxy 上的名稱
     # 沒有這一段。
     window = settings.context_windows.get(

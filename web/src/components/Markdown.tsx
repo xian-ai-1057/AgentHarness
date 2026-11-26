@@ -2,9 +2,11 @@
  * 顯示 agent 的回覆。react-markdown 預設不會執行內容裡的 HTML，
  * 模型或工具輸出的文字不會變成可以執行的程式。
  *
- * 程式碼區塊會上色並加上「複製」按鈕；只有 $$…$$ 用 KaTeX 排版。
- * 單一個 $ 不算數學式：回覆裡常有 NT$1,000 到 NT$2,000 這種金額，
- * 兩個 $ 之間的文字不能被當成數學式。
+ * 程式碼區塊會上色並加上「複製」按鈕；$$…$$ 用 KaTeX 排版。
+ * 單一個 $ 只有內容看起來是 LaTeX（$\rightarrow$、$x^2$）才算數學式：
+ * 回覆裡常有 NT$1,000 到 NT$2,000 這種金額，兩個 $ 之間的文字不能被
+ * 當成數學式（見 chat/math.ts）。粗體旁邊是中文標點（**「重點」**）
+ * 也要能顯示成粗體（見 chat/remark.ts）。
  *
  * KaTeX 與上色的程式比較大，內容裡真的有 $$ 或程式碼區塊時才載入。
  * 還在串流的回覆每來一段字就重畫一次，所以先不排版、不上色，等回覆
@@ -30,8 +32,6 @@ import {
   useState,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
 import { fileUrl } from "../api.ts";
 import "./chat/chat.css";
 import { CodeBlock } from "./chat/CodeBlock.tsx";
@@ -42,16 +42,12 @@ import {
 } from "./chat/citations.ts";
 import { externalImageHost, projectPath } from "./chat/filetype.ts";
 import { useFolder } from "./chat/folder.ts";
-import { displayMath } from "./chat/math.ts";
+import { prepareMath } from "./chat/math.ts";
+import { remarkPlugins } from "./chat/remark.ts";
 
 type Plugins = NonNullable<
   Parameters<typeof ReactMarkdown>[0]["rehypePlugins"]
 >;
-
-const remarkPlugins = [
-  remarkGfm,
-  [remarkMath, { singleDollarTextMath: false }],
-] as NonNullable<Parameters<typeof ReactMarkdown>[0]["remarkPlugins"]>;
 
 const CITE_PREFIX = "#cite-";
 
@@ -331,11 +327,11 @@ export const Markdown = memo(function Markdown({
   /** 點了出處（打開原文）。 */
   onOpenCitation?: (source: KnowledgeSource) => void;
 }) {
-  const rehypePlugins = useRehypePlugins(text, streaming);
   const source = useMemo(
-    () => (streaming ? text : displayMath(text)),
+    () => (streaming ? text : prepareMath(text)),
     [text, streaming],
   );
+  const rehypePlugins = useRehypePlugins(source, streaming);
   const state = useMemo(
     () => (citations ? { citations, onOpen: onOpenCitation } : undefined),
     [citations, onOpenCitation],

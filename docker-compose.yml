@@ -36,9 +36,12 @@ services:
     environment:
       # 執行時（呼叫模型、讀取網頁）使用的 proxy，大小寫兩種寫法都設定。
       <<: *proxy-args
-      # 沙盒：agent 寫的程式（與成員執行的指令）在另一個容器裡執行，只看得到
-      # harness-data 裡這段對話的工作資料夾（private/<識別碼>/ 或共用的 shared/）。
-      HARNESS_SANDBOX_IMAGE: harness-sandbox
+      # 沙盒：agent 寫的程式與執行的指令（管理者也一樣）在另一個容器裡執行，
+      # 只看得到 harness-data 裡這段對話的工作資料夾（private/<識別碼>/ 或
+      # 管理者開放的共用資料夾）。容器由下面的 sandbox-runner 啟動，平台
+      # 本身碰不到 Docker。
+      HARNESS_SANDBOX_RUNNER: http://sandbox-runner:4322
+      HARNESS_SANDBOX_TOKEN_FILE: /run/harness-runner/token
       HARNESS_SANDBOX_VOLUME: harness-data
       HARNESS_SANDBOX_NOTES: >-
         已安裝 pandas、numpy、openpyxl、pdfplumber、pypdf、reportlab、
@@ -56,9 +59,36 @@ services:
     volumes:
       # 專案、帳號、每個人的對話紀錄、上傳的檔案與金鑰都在這個 volume 裡。
       - harness-data:/assistant
-      # 讓沙盒用主機的 Docker 啟動容器。能使用這個 socket 等於擁有主機的
-      # root 權限；不需要沙盒（分析上傳的檔案）時，把這一行刪掉。
+      # 沙盒服務每次啟動產生的通行碼（唯讀）。
+      - sandbox-token:/run/harness-runner:ro
+    networks:
+      - default
+      - sandbox
+    depends_on:
+      - sandbox-runner
+
+  # 沙盒服務：唯一掛載 Docker socket 的容器。能使用 socket 等於擁有主機的
+  # root 權限，所以只交給這個只做一件事的服務：它只接受「在沙盒裡執行
+  # 這段程式」，映像檔、使用者、資源上限與網路都照下面的設定，只能掛載
+  # harness-data 裡的工作資料夾。它只在內部網路 sandbox 上，連不到外面，
+  # 也沒有開放埠號給主機。不需要沙盒（分析上傳的檔案）時，把這個服務和
+  # 上面的 HARNESS_SANDBOX_RUNNER 一起刪掉。
+  sandbox-runner:
+    image: agent-harness
+    restart: unless-stopped
+    command: ["pyharness", "sandbox-runner"]
+    environment:
+      HARNESS_SANDBOX_IMAGE: harness-sandbox
+      HARNESS_SANDBOX_VOLUME: harness-data
+      HARNESS_SANDBOX_TOKEN_FILE: /run/harness-runner/token
+      # 主機裝了 gVisor 時，改成 runsc 讓沙盒多一層核心隔離（見文件
+      # 「快速部署」的「沙盒」）。
+      HARNESS_SANDBOX_RUNTIME: ${HARNESS_SANDBOX_RUNTIME:-}
+    volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-token:/run/harness-runner
+    networks:
+      - sandbox
 
   # 只用來建置沙盒的映像檔，本身不會持續執行。
   sandbox-image:
@@ -73,7 +103,13 @@ services:
     restart: "no"
     network_mode: none
 
+networks:
+  # 平台與沙盒服務之間的內部網路，不能連到外面。
+  sandbox:
+    internal: true
+
 volumes:
   harness-data:
     # 固定名稱：沙盒要用這個名稱掛載工作資料夾。
     name: harness-data
+  sandbox-token:

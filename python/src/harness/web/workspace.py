@@ -17,8 +17,10 @@ skills 與工作資料夾，以及對回覆按讚或倒讚。這些資料存在�
 .harness/users/<識別碼>/sessions/，每個公開方法的第一個參數都是發出請求
 的人，別人的對話一律當成不存在（WebError 404），事件也只送給對話的
 擁有者。每一輪都在對話選的工作資料夾裡執行（見 folders 模組）：檔案
-工具、執行指令與沙盒都只看得到那個資料夾；成員的 run_command 改在沙盒
-裡執行，沒有沙盒時不提供。工作資料夾在對話開始後就固定，不能再換。
+工具、執行指令與沙盒都只看得到那個資料夾；run_command 一律改在沙盒裡
+執行（管理者也是），沒有沙盒時不提供。只有 harness.yaml 明確寫了
+web: {hostCommands: true}，管理者在自己的「我的檔案」裡才在伺服器上執行
+（見 _host_commands）。工作資料夾在對話開始後就固定，不能再換。
 
 權限判斷每次都向帳號資料庫讀最新的角色（users），不用這一輪開始時的
 快照；管理者停用成員或改變角色時，伺服器呼叫 stop_runs_of 停掉那個人
@@ -2400,8 +2402,10 @@ class Workspace:
     ) -> dict[str, Any]:
         """回覆一個等待中的確認。
 
-        「以後都允許」：管理者寫進 harness.yaml（所有人都適用）；成員只
-        記在自己的資料裡，只適用於他在同一個工作資料夾裡的對話。
+        「以後都允許」：本機模式寫進 harness.yaml；帳號模式不分管理者或
+        成員，都只記在自己的資料裡，只適用於他在同一個工作資料夾裡的
+        對話。管理者按一下就改掉所有人的規則太容易誤觸，加上提示注入時
+        指令會不經確認執行；全站規則請到管理平台的「權限」明確設定。
 
         Returns:
             被回覆的確認：{"tool", "arguments", "folder"}（稽核紀錄用）。
@@ -2418,7 +2422,7 @@ class Workspace:
         approval = pending.approval
         if approval.get("onceOnly") and decision in ("session", "always"):
             raise WebError(400, "這個動作每次都要核准，只能允許這一次或拒絕")
-        if decision == "always" and user.is_admin:
+        if decision == "always" and self.auth_mode == "local":
             self._allow_always(approval["tool"])
         elif decision == "always":
             folder = state.run_folder
@@ -2816,8 +2820,8 @@ class Workspace:
 
         規則永遠讀專案目前的值，所以在管理平台或「以後都允許」改過的
         規則，執行中的對話也會立刻套用。是不是管理者也每次向帳號資料庫
-        確認（被降級的管理者不能再用 bypass）。成員另外加上自己在這個
-        工作資料夾「以後都允許」的工具。
+        確認（被降級的管理者不能再用 bypass）。帳號模式另外加上這個人
+        自己在這個工作資料夾「以後都允許」的工具（管理者也一樣）。
         """
         user = state.run_user or accounts_lib.LOCAL_USER
         folder = state.run_folder
@@ -2826,7 +2830,7 @@ class Workspace:
             return self._live_admin(user)
 
         def extra_allow() -> list[str]:
-            if folder is None or is_admin():
+            if folder is None or self.auth_mode == "local":
                 return []
             return self._member_allow(user.id).get(folder.id, [])
 
@@ -3152,12 +3156,13 @@ class Workspace:
     ) -> set[int]:
         """用不到的工具（以 id() 表示）。
 
-        - 沒有沙盒時成員不能用 run_command。
+        - 沒有沙盒、也不能在伺服器上執行指令（見 _host_commands）時，
+          不能用 run_command。
         - 所屬群組沒有開放的工具組裡的工具（同一個工具也在開放的工具組
           裡時照樣能用）。
         """
         hidden: set[int] = set()
-        if not user.is_admin and self.project.sandbox is None:
+        if self.project.sandbox is None and not self._host_commands(user):
             hidden.add(id(shell.run_command))
         access = access or self._access(user)
         if access.toolsets is not None:
@@ -3959,9 +3964,9 @@ class Workspace:
         """把 agent（含 skills、subagents 與轉交對象）的工具換成這一輪的版本。
 
         - run_python：只掛載這段對話的工作資料夾（唯讀的資料夾唯讀掛載）。
-        - run_command：成員改在沙盒裡執行；沒有沙盒時拿掉，指令絕不在
-          伺服器上替成員執行。管理者維持原樣（在伺服器上、工作資料夾裡
-          執行）。
+        - run_command：改在沙盒裡執行；沒有沙盒時拿掉。只有本機模式，或
+          harness.yaml 寫了 web: {hostCommands: true} 時管理者在自己的
+          「我的檔案」裡，才維持原樣在伺服器上執行（見 _host_commands）。
         - write_file、edit_file：唯讀的資料夾一律拒絕。
         - 「舊資料」資料夾（專案根目錄）：拿掉 run_python 與 run_command，
           並在指示裡說明原因。
@@ -3983,10 +3988,10 @@ class Workspace:
             except ValueError as error:
                 box_error = str(error)
         made: dict[str, tools_lib.Tool] = {}
-        # 指令在沙盒裡執行：成員一律如此；管理者在共用資料夾也是，因為
-        # 成員可以在那裡放檔案（例如 .git/config、同名的 Python 模組），
-        # 讓管理者看似無害的指令在伺服器上執行成員寫的程式。
-        sandboxed = not user.is_admin or (
+        # 指令一律在沙盒裡執行，除非明確開放管理者在伺服器上執行；即使
+        # 開放，共用資料夾也不行：成員可以在那裡放檔案（例如 .git/config、
+        # 同名的 Python 模組），讓看似無害的指令在伺服器上執行成員的程式。
+        sandboxed = not self._host_commands(user) or (
             self.auth_mode != "local" and folder.kind != "private"
         )
         # 存取群組：沒開放的工具組拿掉（知識庫在 _knowledge_converter）。
@@ -4032,6 +4037,22 @@ class Workspace:
                 part for part in (scoped.instructions, LEGACY_NOTE) if part
             )
         return scoped
+
+    def _host_commands(self, user: accounts_lib.User) -> bool:
+        """這個人的 run_command 能不能在伺服器上（平台容器裡）執行。
+
+        本機模式（只有自己一個人）可以。帳號模式預設一律不行，管理者也
+        一樣：伺服器上有金鑰、所有人的資料與設定，模型被提示注入時，
+        看似無害的指令就能動到它們。確實需要時在 harness.yaml 寫
+        web: {hostCommands: true}，只開放給管理者在自己的「我的檔案」裡
+        （見 _scoped_agent）。
+        """
+        if self.auth_mode == "local":
+            return True
+        if not self._live_admin(user):
+            return False
+        web = config_lib.read_config(self.project.root).get("web")
+        return isinstance(web, dict) and web.get("hostCommands") is True
 
     def _blocks_private_networks(self, user: accounts_lib.User) -> bool:
         """web_fetch 要不要擋內部網路：帳號模式一律擋，除非管理者在

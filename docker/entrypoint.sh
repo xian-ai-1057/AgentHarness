@@ -8,6 +8,11 @@ fi
 
 # 掛載進來的資料夾可能屬於 root，讓 harness 可以寫入。
 chown harness:harness /assistant
+# 沙盒服務的通行碼資料夾（docker-compose.yml 的 sandbox-token）：服務要能
+# 寫入；平台唯讀掛載，改不了也沒關係。
+if [ -d /run/harness-runner ] && [ -w /run/harness-runner ]; then
+    chown harness:harness /run/harness-runner
+fi
 export HOME=/home/harness
 
 # 有掛載主機的 Docker socket 時，把 harness 加進擁有它的群組，沙盒才能

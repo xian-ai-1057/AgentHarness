@@ -51,6 +51,8 @@ tools:
 """
 
 SANDBOX_AGENT = AGENT.replace("  - shell\n", "  - shell\n  - sandbox\n")
+# 舊版預設的「共用」資料夾；現在要在 workspaces 明確開放。
+SHARED = "workspaces:\n  - name: 共用\n    path: shared\n"
 
 
 @pytest.fixture(autouse=True)
@@ -1312,6 +1314,51 @@ class TestIsolation:
         assert saved == {"allow": {"private": ["write_file"]}}
         await bob.api("POST", f"/sessions/{other['id']}/stop", {})
 
+    async def test_admin_always_is_personal_too(self, site):
+        # 管理者按「以後都允許」不會改掉所有人的規則（全站規則要到管理
+        # 平台的「權限」明確設定）。
+        script = [
+            conftest.tool_response(WRITE),
+            conftest.text_response("好"),
+            conftest.tool_response(
+                ("write_file", {"path": "b.md", "content": "b"})
+            ),
+            conftest.text_response("好"),
+            conftest.tool_response(
+                ("write_file", {"path": "c.md", "content": "c"})
+            ),
+        ]
+        s = await site(script)
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        await boss.listen()
+        await alice.listen()
+        config = (s.root / "harness.yaml").read_text("utf-8")
+
+        _, first = await boss.api("POST", "/sessions", {"text": "寫"})
+        approval = (await boss.wait_for("approval"))["approval"]
+        await boss.api(
+            "POST",
+            f"/sessions/{first['id']}/approvals/{approval['id']}",
+            {"decision": "always"},
+        )
+        await boss.wait_idle(first["id"])
+        _, second = await boss.api("POST", "/sessions", {"text": "再寫"})
+        await boss.wait_idle(second["id"])
+        _, other = await alice.api("POST", "/sessions", {"text": "寫"})
+        await alice.wait_for("approval")
+
+        assert [e["type"] for e in boss.events].count("approval") == 1
+        assert (s.root / "harness.yaml").read_text("utf-8") == config
+        saved = json.loads(
+            (
+                migration.user_dir(s.root, user_id(s.root, "boss"))
+                / "permissions.json"
+            ).read_text("utf-8")
+        )
+        assert saved == {"allow": {"private": ["write_file"]}}
+        await alice.api("POST", f"/sessions/{other['id']}/stop", {})
+
 
 class TestFolders:
     """對話的工作資料夾：工具、上傳與沙盒都只在這裡面。"""
@@ -1350,7 +1397,7 @@ class TestFolders:
         assert bob_sessions == []
 
     async def test_folder_is_fixed_once_the_conversation_starts(self, site):
-        s = await site([conftest.text_response("好")])
+        s = await site([conftest.text_response("好")], extra=SHARED)
         alice = await s.login("alice", password_of("alice"))
         _, created = await alice.api("POST", "/sessions", {"text": "嗨"})
         await alice.wait_idle(created["id"])
@@ -1437,7 +1484,7 @@ class TestFolders:
 
     async def test_uploads_land_in_the_folder(self, site):
         s = await site(
-            [conftest.text_response("收到")], extra="sandbox: true\n"
+            [conftest.text_response("收到")], extra="sandbox: true\n" + SHARED
         )
         alice = await s.login("alice", password_of("alice"))
         bob = await s.login("bob", password_of("bob"))
@@ -1586,8 +1633,58 @@ class TestMemberCommands:
         assert "hello" in tool["content"]
         assert "結束代碼：0" in tool["content"]
 
-    async def test_without_sandbox_members_lose_run_command(self, site):
+    async def test_without_sandbox_nobody_gets_run_command(self, site):
         s = await site([conftest.text_response("好")] * 2)
+        boss = await s.login("boss", password_of("boss"))
+        _, created = await boss.api("POST", "/sessions", {"text": "嗨"})
+        await boss.wait_idle(created["id"])
+        _, info = await boss.api("GET", "/project")
+
+        names = [t["function"]["name"] for t in s.model.requests[0]["tools"]]
+        # 管理者也一樣：沒有沙盒就不能執行指令，除非明確開放。
+        assert "run_command" not in info["agents"][0]["tools"]
+        assert "run_command" not in names
+
+    async def test_admin_commands_run_in_the_sandbox_by_default(
+        self, site, monkeypatch
+    ):
+        runs = []
+
+        async def fake_execute(self, argv, stdin, workdir, timeout):
+            runs.append(self.workspace)
+            return sandbox_lib.Result(0, "ok\n", "")
+
+        async def never(*args, **kwargs):
+            raise AssertionError("沒有開放 hostCommands 時不能在伺服器上執行")
+
+        monkeypatch.setattr(sandbox_lib.Sandbox, "_execute", fake_execute)
+        monkeypatch.setattr(shell, "execute", never)
+        call = ("run_command", {"command": "ls"})
+        s = await site(
+            [conftest.tool_response(call), conftest.text_response("好")],
+            extra="sandbox: true\n",
+            agent=SANDBOX_AGENT,
+        )
+        boss = await s.login("boss", password_of("boss"))
+        await boss.listen()
+
+        _, created = await boss.api("POST", "/sessions", {"text": "跑"})
+        approval = (await boss.wait_for("approval"))["approval"]
+        await boss.api(
+            "POST",
+            f"/sessions/{created['id']}/approvals/{approval['id']}",
+            {"decision": "once"},
+        )
+        await boss.wait_idle(created["id"])
+
+        boss_id = user_id(s.root, "boss")
+        assert runs == [private(s.root, boss_id).resolve()]
+
+    async def test_host_commands_must_be_turned_on_explicitly(self, site):
+        s = await site(
+            [conftest.text_response("好")] * 2,
+            extra="web:\n  hostCommands: true\n",
+        )
         alice = await s.login("alice", password_of("alice"))
         boss = await s.login("boss", password_of("boss"))
 
@@ -1633,7 +1730,7 @@ class TestMemberCommands:
         call = ("run_command", {"command": "git status"})
         s = await site(
             [conftest.tool_response(call), conftest.text_response("好")],
-            extra="sandbox: true\n",
+            extra="sandbox: true\nweb:\n  hostCommands: true\n" + SHARED,
             agent=SANDBOX_AGENT,
         )
         boss = await s.login("boss", password_of("boss"))
@@ -1724,17 +1821,28 @@ class TestWorkspacesConfig:
             folder.id == f"shared:{str(outside).strip('/').replace('/', '-')}"
         )
 
-    def test_default_shared_folder_is_a_fresh_shared_dir(self, tmp_path):
+    def test_no_shared_folder_unless_configured(self, tmp_path):
         root = make_project(tmp_path / "c", "sandbox:\n  workspace: data\n")
 
         with project_lib.load_project(root) as loaded:
-            [folder] = folders_lib.Folders.for_project(loaded).shared
+            shared = folders_lib.Folders.for_project(loaded).shared
 
-        # 不是舊版的 workspace/（或 sandbox.workspace）：舊檔案不會自動
-        # 分享給所有成員。
-        assert folder.path == (root / "shared").resolve()
-        assert folder.id == "shared:shared"
-        assert folder.name == "共用"
+        # 所有人都能寫入的資料夾要由管理者明確開放。
+        assert shared == []
+        assert not (root / "shared").exists()
+
+    def test_old_default_shared_folder_with_files_gets_a_notice(self, tmp_path):
+        root = make_project(tmp_path / "c")
+        config = {"name": "x"}
+
+        assert folders_lib.legacy_shared_notice(root, config) == ""
+        (root / "shared").mkdir()
+        assert folders_lib.legacy_shared_notice(root, config) == ""
+        (root / "shared" / "report.xlsx").write_text("x")
+        notice = folders_lib.legacy_shared_notice(root, config)
+        assert "workspaces" in notice and "path: shared" in notice
+        configured = {"workspaces": [{"name": "共用", "path": "shared"}]}
+        assert folders_lib.legacy_shared_notice(root, configured) == ""
 
 
 class TestUserCommand:

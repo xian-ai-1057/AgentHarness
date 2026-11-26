@@ -672,8 +672,11 @@ Python 版的 `pyharness web` 另外支援：
 [部署到伺服器](python/README.md#部署到伺服器)）。只在自己電腦上用（不必
 登入）時和以前一樣，和命令列共用 `.harness/sessions/` 與記憶；從單人版
 升級成多人帳號時，舊對話交給第一位管理者、放在只有他看得到的「舊資料
-（專案資料夾）」裡，舊的 `workspace/` 不會分享給其他成員，預設的「共用」
-資料夾換成新的 `shared/`。
+（專案資料夾）」裡，舊的 `workspace/` 不會分享給其他成員；共用資料夾要由
+管理者在 `harness.yaml` 的 `workspaces` 開放，預設沒有。要登入時所有人的
+`run_command`（管理者也是）都在沙盒執行，指令與 MCP 伺服器拿不到金鑰，
+用 Docker Compose 部署時平台容器不掛 Docker socket（改由沙盒服務啟動
+容器）。
 
 伺服器可以執行專案的工具，所以預設只接受本機連線，並拒絕其他網站
 送來的請求。TypeScript 版沒有登入機制，要讓別台電腦連線時，用
@@ -711,9 +714,9 @@ Node.js 可以打包，所以這份打包結果要一起提交。
 
 Python 版（`python/src/harness/`）的結構相同（`loop.py`、`llm.py`、
 `tools.py`…），另外多了多個 agent 協作（`delegation.py`）、知識庫
-（`knowledge.py`）、對話壓縮（`compaction.py`）、沙盒（`sandbox.py`）、
-網頁上設定的模型金鑰（`credentials.py`、`providers.py`）等進階功能，
-可以在讀懂主迴圈之後再看。
+（`knowledge.py`）、對話壓縮（`compaction.py`）、沙盒與沙盒服務
+（`sandbox.py`、`sandbox_runner.py`）、網頁上設定的模型金鑰
+（`credentials.py`、`providers.py`）等進階功能，可以在讀懂主迴圈之後再看。
 
 ## 設計來源
 

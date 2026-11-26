@@ -1221,7 +1221,9 @@ guardrails.detect_injection("忽略之前的指示")  # True
 compaction：
 
 1. **每次呼叫模型前估算請求大小**，超過上限的 80% 時開始壓縮。估算
-   以模型上一次回報的實際用量為基準，只有之後新增的訊息用字數估計。
+   以模型上一次回報的實際用量為基準，只有之後新增的訊息用字數估計，
+   並依實際用量與字數估計的比例校正（中文用字數估計常少算兩到三成）。
+   實際用量寫在對話紀錄裡，所以使用者下一則訊息一開始就用得到。
 2. **先修剪超大的工具結果**：超過 8192 字的工具結果只留開頭 4096 字與
    結尾 1024 字，中間換成 `[... 工具結果中間已省略 ...]`。這一步不呼叫
    模型，常常修剪完就夠了。模型還沒看過的工具結果（剛回傳的）不修剪。
@@ -1232,8 +1234,8 @@ compaction：
    `ContextWindowExceededError`，以及 OpenAI、Anthropic、vLLM 等常見的
    錯誤訊息）。
 
-**對話紀錄不會被改寫。** 壓縮與修剪都以額外的紀錄（`role: harness`）
-附加在 JSONL 裡，原始訊息完整保留，模型看到的歷史是從紀錄推算出來的。
+**對話紀錄不會被改寫。** 壓縮、修剪與實際用量都以額外的紀錄
+（`role: harness`，`type` 為 `compaction`、`prune`、`usage`）附加在 JSONL 裡，原始訊息完整保留，模型看到的歷史是從紀錄推算出來的。
 TypeScript 版與網頁介面也讀得懂這些紀錄，同一段對話仍然可以在兩個版本
 間接續（TypeScript 版本身不會主動壓縮）。
 
@@ -1276,7 +1278,10 @@ compaction:
 
 ### 手動壓縮
 
-聊天時輸入 `/compact`，會把最近一段之外的對話都交給摘要。也可以用
+聊天時輸入 `/compact`，會盡量壓縮：對話停在一則完整的回覆時全部交給
+摘要；否則最近一段（最後一則使用者訊息或回覆，與它的工具結果）原文
+保留，其餘交給摘要。只摘要較早一段時，摘要請求會說明後面還有原文保留，
+避免摘要把接下來已經完成的事寫成「尚未完成」。也可以用
 `pyharness run -c /compact` 壓縮最新的對話。網頁版的輸入框也可以打
 `/compact`，後面可以接摘要時要特別保留的重點（例如
 `/compact 保留報表欄位名稱`）；見[網頁介面](https://agent-harness-docs-ten.vercel.app/guide/web#對話壓縮)。
@@ -1305,7 +1310,8 @@ result = await harness.compact(
 | `context_usage` | `{"tokens", "window", "threshold", "auto"}` | 每次模型回應與壓縮後的上下文用量（不知道上限時 `window`、`threshold` 是 `None`） |
 
 壓縮紀錄另外記著 `summarized`（被摘要的訊息數）、`tokens_before`、
-`tokens_after`，給介面顯示用。
+`tokens_after`（和 `context_usage` 同樣以實際用量校正），給介面顯示用。
+全部摘要時 `keep_from` 是壓縮紀錄本身的位置。
 
 `session.messages` 與 `RunResult.messages` 是完整紀錄（含壓縮紀錄）；
 模型實際看到的歷史用 `harness.compaction.model_history(messages)` 取得。

@@ -101,6 +101,7 @@ export interface FileChange {
 const ERROR_PREFIX = "[錯誤] ";
 /** Python 版寫進紀錄的壓縮紀錄（role 為 harness、type 為 compaction）。 */
 interface CompactionRecord {
+  keep_from?: number;
   summary?: string;
   reason?: string;
   summarized?: number;
@@ -157,21 +158,43 @@ export function buildTurns(
     return turn;
   };
 
+  // 壓縮紀錄寫在對話最後，但摘要取代的是 keep_from 之前的訊息，所以
+  // 標記顯示在 keep_from 那則訊息前面（原文保留的部分在標記之後）；
+  // 全部摘要時 keep_from 就是紀錄本身的位置。
+  const markers = new Map<
+    number,
+    { index: number; record: CompactionRecord }[]
+  >();
   detail.messages.forEach((message, index) => {
-    // Python 版會在紀錄裡寫入自己的紀錄（壓縮、修剪），role 是 harness。
-    const role: string = message.role;
-    if (role === "harness") {
-      const record = message as CompactionRecord & { type?: string };
-      if (record.type === "compaction") {
-        current().blocks.push({
-          kind: "compaction",
-          key: `c${index}`,
-          title: compactionTitle(record),
-          summary: record.summary ?? "",
-        });
-      }
-      return;
+    const record = message as CompactionRecord & {
+      role: string;
+      type?: string;
+    };
+    if (record.role !== "harness" || record.type !== "compaction") return;
+    const at =
+      typeof record.keep_from === "number" && record.keep_from < index
+        ? record.keep_from
+        : index;
+    markers.set(at, [...(markers.get(at) ?? []), { index, record }]);
+  });
+  const pushMarkers = (at: number) => {
+    for (const { index, record } of markers.get(at) ?? []) {
+      current().blocks.push({
+        kind: "compaction",
+        key: `c${index}`,
+        title: compactionTitle(record),
+        summary: record.summary ?? "",
+      });
     }
+  };
+
+  detail.messages.forEach((message, index) => {
+    // 保留的訊息是使用者訊息時，標記放在上一輪的最後，緊接在它前面。
+    pushMarkers(index);
+    // Python 版會在紀錄裡寫入自己的紀錄（壓縮、修剪、用量），role 是
+    // harness，不顯示成訊息。
+    const role: string = message.role;
+    if (role === "harness") return;
     if (message.role === "user") {
       const { text, attachments } = splitAttachments(message.content ?? "");
       turn = {

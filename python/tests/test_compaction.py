@@ -32,7 +32,8 @@ def _long_history(session, turns=4, size=400):
 
 
 def _is_summary_request(request):
-    return request["messages"][-1]["content"] == compaction.SUMMARY_INSTRUCTION
+    content = request["messages"][-1]["content"]
+    return content.startswith(compaction.SUMMARY_INSTRUCTION)
 
 
 class OverflowError(Exception):
@@ -170,13 +171,96 @@ class TestEstimateTokens:
         assert without > 4
         assert compaction.estimate_tokens([message], tools) > without
 
-    def test_measured_usage_is_used_as_baseline(self):
-        compactor = compaction.Compactor(compaction.Compaction(), None)
-        history = [{"role": "user", "content": "嗨"}]
-        compactor.record_usage(history, harness.Usage(1000, 50))
-        history.append({"role": "user", "content": "字" * 10})
 
-        assert compactor.estimate("", history, []) == 1050 + 14
+class TestMeasuredUsage:
+    """以模型回報的實際用量校正估算。"""
+
+    def _measured_session(self, tokens=270):
+        session = sessions.Session()
+        session.append({"role": "user", "content": "字" * 100})
+        session.append({"role": "assistant", "content": "答" * 100})
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+        compactor.record_usage(session, harness.Usage(tokens - 20, 20))
+        return session
+
+    def test_usage_is_written_into_the_session(self):
+        session = self._measured_session()
+
+        record = session.messages[-1]
+        assert record["role"] == "harness"
+        assert record["type"] == "usage"
+        assert record["tokens"] == 270
+        assert record["estimate"] == 208
+        assert (
+            compaction.model_history(session.messages) == session.messages[:2]
+        )
+
+    def test_measured_usage_is_the_baseline_for_new_messages(self):
+        session = self._measured_session()
+        session.append({"role": "user", "content": "字" * 10})
+        # 新的 Compactor（例如下一次 run）也讀得到對話紀錄裡的量測。
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+
+        ratio = 270 / 208
+        assert compactor.estimate("", session.messages, []) == 270 + round(
+            ratio * 14
+        )
+
+    def test_ratio_corrects_the_estimate_after_compaction(self):
+        session = self._measured_session()
+        session.append(
+            {
+                "role": "harness",
+                "type": "compaction",
+                "keep_from": 1,
+                "summary": "摘要",
+            }
+        )
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+
+        history = compaction.model_history(session.messages)
+        expected = round(270 / 208 * compaction.estimate_tokens(history))
+        assert compactor.estimate("", session.messages, []) == expected
+
+    def test_implausible_usage_is_ignored(self):
+        session = self._measured_session(tokens=21)
+        compactor = compaction.Compactor(compaction.Compaction(), None)
+
+        assert compactor.estimate("", session.messages, []) == 208
+
+    async def test_next_run_compacts_from_the_measured_usage(self, fake_model):
+        # 字元估算還在門檻以下，但上一輪模型回報的實際用量已經超過。
+        session = sessions.Session()
+        _long_history(session, turns=2, size=300)
+        reply = conftest.text_response("好")
+        reply.usage = harness.Usage(input_tokens=1900, output_tokens=10)
+        model = fake_model(
+            [reply, _summary_response(), conftest.text_response("好")]
+        )
+        settings = harness.Compaction(context_window=2400)
+
+        await harness.run(
+            harness.Agent(name="a"),
+            "第一題",
+            session=session,
+            compaction=settings,
+            model_fn=model,
+        )
+        assert not any(m.get("type") == "compaction" for m in session.messages)
+        await harness.run(
+            harness.Agent(name="a"),
+            "第二題",
+            session=session,
+            compaction=settings,
+            model_fn=model,
+        )
+
+        assert _is_summary_request(model.requests[1])
+        [record] = [
+            m for m in session.messages if m.get("type") == "compaction"
+        ]
+        assert record["reason"] == "threshold"
+        assert record["tokens_before"] > 1910
 
 
 class TestSettings:
@@ -377,7 +461,7 @@ class TestAutoCompaction:
         [failed] = [e for e in events if e.type == "compaction_failed"]
         assert "沒有回傳任何文字" in failed.data["error"]
         assert events[-1].data["result"].output == "好"
-        assert not any(compaction.is_record(m) for m in session.messages)
+        assert not any(m.get("type") == "compaction" for m in session.messages)
 
     async def test_summary_longer_than_original_is_rejected(self, fake_model):
         session = sessions.Session()
@@ -663,7 +747,9 @@ class TestContextWindow:
             model_fn=model,
         )
 
-        [record] = [m for m in session.messages if compaction.is_record(m)]
+        [record] = [
+            m for m in session.messages if m.get("type") == "compaction"
+        ]
         assert record["summarized"] == 8
         assert record["tokens_after"] < record["tokens_before"]
 
@@ -704,6 +790,39 @@ class TestManualCompaction:
         assert result.reason == "manual"
         assert result.summarized > 0
         assert _is_summary_request(model.requests[0])
+
+    async def test_finished_conversation_is_summarized_entirely(
+        self, fake_model
+    ):
+        # 停在完整的回覆時全部摘要，不會留下一則摘要說「還沒做」的回覆。
+        session = sessions.Session()
+        _long_history(session, turns=2, size=50)
+        model = fake_model([_summary_response()])
+
+        result = await harness.compact(
+            harness.Agent(name="a"), session, model_fn=model
+        )
+
+        assert result.summarized == 4
+        record = session.messages[-1]
+        assert record["keep_from"] == len(session.messages) - 1
+        [checkpoint] = compaction.model_history(session.messages)
+        assert "<compacted-summary>" in checkpoint["content"]
+        prompt = model.requests[0]["messages"][-1]["content"]
+        assert prompt == compaction.SUMMARY_INSTRUCTION
+
+    async def test_kept_messages_are_mentioned_in_the_request(self, fake_model):
+        session = sessions.Session()
+        _long_history(session, turns=2, size=50)
+        session.append({"role": "user", "content": "最新"})
+        model = fake_model([_summary_response()])
+
+        await harness.compact(harness.Agent(name="a"), session, model_fn=model)
+
+        prompt = model.requests[0]["messages"][-1]["content"]
+        assert compaction.TAIL_INSTRUCTION.format(count=1) in prompt
+        history = compaction.model_history(session.messages)
+        assert [m["content"] for m in history[1:]] == ["最新"]
 
     async def test_compact_returns_none_for_short_conversation(
         self, fake_model

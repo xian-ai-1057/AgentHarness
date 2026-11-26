@@ -261,7 +261,12 @@ async def _run_loop(
         session.append(response.message)
         yield datatypes.Event("message", {"message": response.message})
         if compactor is not None:
-            compactor.record_usage(session.messages, response.usage)
+            compactor.record_usage(
+                session,
+                response.usage,
+                _system_prompt(agent, options),
+                toolbox.schemas,
+            )
             usage_event = _context_event(
                 agent, session, toolbox, options, compactor
             )
@@ -388,10 +393,7 @@ def _context_event(
     if not options.user_facing:
         return None
     info = compactor.context_usage(
-        agent,
-        _system_prompt(agent, options),
-        compaction_lib.model_history(session.messages),
-        toolbox.schemas,
+        agent, _system_prompt(agent, options), session.messages, toolbox.schemas
     )
     return datatypes.Event("context_usage", info)
 

@@ -279,7 +279,11 @@ export const api = {
     id: string,
     changes: KnowledgeSettings & { maintainers?: string[] },
   ) => request<{ id: string }>("PATCH", `/knowledge/${id}`, changes),
-  deleteKnowledge: (id: string) => request("DELETE", `/knowledge/${id}`),
+  deleteKnowledge: (id: string, deleteFiles = false) =>
+    request<{ ok: boolean; filesDeleted: boolean }>(
+      "DELETE",
+      `/knowledge/${id}${deleteFiles ? "?files=1" : ""}`,
+    ),
   knowledgeDocuments: (id: string) =>
     request<KnowledgeDocuments>("GET", `/knowledge/${id}/documents`),
   /** replace 是要換掉的文件路徑；沒有時新增（同名的已經存在時失敗）。 */

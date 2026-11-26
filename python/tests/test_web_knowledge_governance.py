@@ -156,6 +156,25 @@ class TestEvaluation:
         assert exported.headers["Content-Type"].startswith("text/csv")
 
 
+class TestDeleteFiles:
+    async def test_files_are_deleted_only_when_asked(self, site):
+        s = await site(extra=BASES, prepare=kb_tests.add_documents)
+        boss = await s.login("boss", password_of("boss"))
+        await boss.api("POST", "/knowledge/hr/search", {"query": "特休"})
+        index = s.root / ".harness" / "knowledge" / "bases" / "hr"
+
+        kept, kept_body = await boss.api("DELETE", "/knowledge/it")
+        removed, body = await boss.api("DELETE", "/knowledge/hr?files=1")
+
+        assert kept == 200 and kept_body["filesDeleted"] is False
+        assert (s.root / "knowledge" / "it" / "vpn.md").exists()
+        assert removed == 200 and body["filesDeleted"] is True
+        assert not (s.root / "knowledge" / "hr").exists()
+        assert not index.exists()
+        # 預設知識庫的文件不受影響。
+        assert (s.root / "knowledge" / "general.md").exists()
+
+
 CLASSIFIED = (
     BASES
     + """

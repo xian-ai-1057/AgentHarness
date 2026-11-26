@@ -303,7 +303,7 @@ API（都只有管理者能用）：`GET /api/admin/audit?category=&actor=&since
 - **題庫評測**：寫下使用者會問的問題與應該找到的文件，按「執行評測」看通過率；上傳、刪除文件或改設定後會自動評測一次，退步的題目會標出來。題庫可以從 Excel／CSV 匯入、匯出（見[題庫回歸評測](/advanced/knowledge#題庫回歸評測)）。
 - **搜尋測試**：輸入問題，看會找到哪些片段與分數，用來調整門檻；可以選查詢日期，看那天有效的文件會找到什麼。
 - **設定**：名稱、說明、檢索設定（embedding 模型、切片長度、切片方式、reranker、門檻；空白時沿用 `knowledge` 區塊的設定）與維護者。「Embedding 模型」是下拉選單：第一個是「關鍵字（精確比對）」，再來是「演算法（BM25）」，然後是模型連線上能用的 embedding 模型；「Reranker」也是下拉選單，列出模型連線上的 rerank 模型。清單沒有的模型選「其他」自行輸入；模型網址上沒有 embedding 模型時，欄位下方會顯示提醒（見[檢索方式](/advanced/knowledge#檢索方式)）。放法規、內規的知識庫把「切片方式」設成「依條文」，一條（一點）一片，出處標到第幾條（見[依條文切片](/advanced/knowledge#依條文切片)）。
-- **拿掉知識庫**：只從 `harness.yaml` 拿掉，資料夾與文件都留著。預設知識庫不能拿掉；還有 agent 設定成要用它時，要先修改那個 agent。
+- **拿掉知識庫**：從 `harness.yaml` 拿掉，題庫與評測紀錄一起清掉。確認視窗預設勾選「一併刪除文件與索引」，會刪除 `knowledge/<識別碼>/` 資料夾與 `.harness/knowledge/bases/<識別碼>/` 的索引（無法復原）；取消勾選則資料夾留著。資料夾不在 `knowledge/` 裡、或和其他知識庫共用時，一律不刪。預設知識庫不能拿掉；還有 agent 設定成要用它時，要先修改那個 agent。
 
 **維護者**：管理者可以為每個知識庫指定維護者（要登入時才有）。維護者可以上傳、更新、刪除那個知識庫的文件並試搜尋，但不能改設定、不能新增或拿掉知識庫，也看不到別的知識庫。適合讓各部門自己更新自己的文件。維護者名單存在 `.harness/harness.db`。
 
@@ -320,7 +320,7 @@ API（`/api/knowledge`）：
 | `GET` | `/api/knowledge` | 管理者與維護者（維護者只看到自己的） |
 | `POST` | `/api/knowledge` | 管理者：新增知識庫 |
 | `GET` | `/api/knowledge/models` | 管理者：模型連線上的 embedding 與 rerank 模型（設定的下拉選單用；`{"embedding", "rerank", "source", "error"?}`） |
-| `PATCH`、`DELETE` | `/api/knowledge/:id` | 管理者：修改設定、維護者，或拿掉知識庫 |
+| `PATCH`、`DELETE` | `/api/knowledge/:id` | 管理者：修改設定、維護者，或拿掉知識庫（`?files=1` 一併刪除文件與索引） |
 | `GET`、`POST`、`DELETE` | `/api/knowledge/:id/documents` | 管理者與該知識庫的維護者：列出、上傳（`?dir=` 放進子資料夾、`?replace=` 換掉既有的檔案）、刪除文件（`?path=`） |
 | `POST` | `/api/knowledge/:id/search` | 管理者與該知識庫的維護者：試搜尋（`asOf` 查詢日期、`allVersions` 包含舊版與失效文件） |
 | `PUT` | `/api/knowledge/:id/documents/info?path=` | 管理者與該知識庫的維護者：文件的版本、生效日、失效日、取代的舊版與備註 |

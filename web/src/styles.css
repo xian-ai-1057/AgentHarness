@@ -4895,3 +4895,7 @@ button.skill-card:focus-visible {
   padding: 0;
   margin-bottom: 8px;
 }
+
+.kb-delete-files {
+  margin-top: 12px;
+}

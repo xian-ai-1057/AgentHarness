@@ -1433,13 +1433,24 @@ class Workspace:
             self.evals.schedule(base_id, "檢索設定變更")
         return {"id": base_id}
 
-    def delete_knowledge(self, base_id: str) -> None:
-        """從 harness.yaml 拿掉知識庫；資料夾與文件留著（不會刪除）。
+    def delete_knowledge(
+        self, base_id: str, delete_files: bool = False
+    ) -> bool:
+        """從 harness.yaml 拿掉知識庫。
+
+        Args:
+            base_id: 知識庫識別碼。
+            delete_files: 一併刪除它的資料夾（文件）與索引。只有資料夾在
+                專案的 knowledge/ 裡、而且沒有和其他知識庫共用時才會刪；
+                否則留著。
+
+        Returns:
+            有沒有刪除檔案。
 
         Raises:
             WebError: 是預設知識庫、找不到，或還有 agent 設定成要用它。
         """
-        self._require_base(base_id)
+        base = self._require_base(base_id)
         if base_id == project_lib.DEFAULT_KNOWLEDGE_ID:
             raise WebError(400, "預設知識庫不能刪除")
         using = [
@@ -1460,7 +1471,47 @@ class Workspace:
             if self._maintainers is not None:
                 self._maintainers.remove(base_id)
         self.evals.store.forget_base(base_id)
+        removed = False
+        if delete_files:
+            removed = self._delete_knowledge_files(base)
         self._reload_knowledge()
+        return removed
+
+    def _delete_knowledge_files(
+        self, base: knowledge_lib.KnowledgeBase
+    ) -> bool:
+        """刪除知識庫的資料夾與索引（只在安全時）。"""
+        root = (self.project.root / project_lib.DEFAULT_KNOWLEDGE_DIR).resolve()
+        folder = base.knowledge.path
+        if folder is None:
+            return False
+        folder = folder.resolve()
+        others = [
+            item.knowledge.path.resolve()
+            for key, item in self.project.knowledge_bases.items()
+            if key != base.id and item.knowledge.path is not None
+        ]
+        safe = (
+            folder != root
+            and folder.is_relative_to(root)
+            and not any(
+                other == folder
+                or other.is_relative_to(folder)
+                or (folder.is_relative_to(other) and other != root)
+                for other in others
+            )
+        )
+        if not safe:
+            _LOG.warning("知識庫 %s 的資料夾 %s 沒有刪除", base.id, folder)
+            return False
+        shutil.rmtree(folder, ignore_errors=True)
+        cache = base.knowledge.cache_dir
+        index_root = (
+            self.project.root / project_lib.KNOWLEDGE_CACHE_DIR
+        ).resolve()
+        if cache is not None and cache.resolve().is_relative_to(index_root):
+            shutil.rmtree(cache, ignore_errors=True)
+        return True
 
     async def knowledge_documents(
         self, user: accounts_lib.User, base_id: str

@@ -1357,9 +1357,16 @@ def _knowledge_routes(routes: web.RouteTableDef) -> None:
     async def delete_knowledge(request: web.Request) -> web.Response:
         _require_admin(request)
         base_id = request.match_info["base_id"]
-        _ws(request).delete_knowledge(base_id)
-        _audit(request, "knowledge.delete", target=base_id)
-        return _json({"ok": True})
+        removed = _ws(request).delete_knowledge(
+            base_id, request.query.get("files") == "1"
+        )
+        _audit(
+            request,
+            "knowledge.delete",
+            target=base_id,
+            detail={"filesDeleted": removed},
+        )
+        return _json({"ok": True, "filesDeleted": removed})
 
     @routes.get(f"{base}/documents")
     async def list_documents(request: web.Request) -> web.Response:

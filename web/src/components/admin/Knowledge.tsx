@@ -431,6 +431,7 @@ function KnowledgeEditor({
 }) {
   const admin = list.canCreate;
   const [deleting, setDeleting] = useState(false);
+  const [deleteFiles, setDeleteFiles] = useState(true);
   const [tab, setTab] = useState<EditorTab>("documents");
   const tabs = EDITOR_TABS.filter(([id]) => admin || id !== "settings");
   return (
@@ -502,15 +503,34 @@ function KnowledgeEditor({
             danger
             disabled={base.agents.length > 0}
             onConfirm={async () => {
-              await api.deleteKnowledge(base.id);
-              showToast("已拿掉知識庫");
+              const result = await api.deleteKnowledge(base.id, deleteFiles);
+              showToast(
+                result.filesDeleted
+                  ? "已拿掉知識庫並刪除文件"
+                  : deleteFiles
+                    ? `已拿掉知識庫；${base.path}/ 和其他知識庫共用或不在 knowledge/ 裡，文件沒有刪除`
+                    : "已拿掉知識庫，文件留著",
+              );
               onDeleted();
             }}
             onClose={() => setDeleting(false)}
           >
-            {base.agents.length > 0
-              ? `agent ${base.agents.join("、")} 預設會搜尋這個知識庫，請先修改它的 knowledge 設定。`
-              : `從 harness.yaml 拿掉這個知識庫，對話就搜尋不到它。文件不會刪除，${base.path}/ 資料夾會留著。`}
+            {base.agents.length > 0 ? (
+              `agent ${base.agents.join("、")} 預設會搜尋這個知識庫，請先修改它的 knowledge 設定。`
+            ) : (
+              <>
+                從 harness.yaml
+                拿掉這個知識庫，對話就搜尋不到它，題庫與評測紀錄也會清掉。
+                <label className="kb-check kb-delete-files">
+                  <input
+                    type="checkbox"
+                    checked={deleteFiles}
+                    onChange={(event) => setDeleteFiles(event.target.checked)}
+                  />
+                  一併刪除 {base.path}/ 裡的文件與索引（無法復原）
+                </label>
+              </>
+            )}
           </ConfirmDialog>,
           document.body,
         )}

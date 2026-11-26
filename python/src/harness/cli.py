@@ -301,11 +301,18 @@ def _web_password(
         password = credentials.stored_web_password(loaded.root)
     else:
         password, _ = credentials.web_password(loaded.root)
-    stored = credentials.SECRETS_DIR / credentials.PASSWORD_FILE
+    # 不把密碼印在 log：看得到 log（docker compose logs、systemd 日誌）的
+    # 人不一定該是管理者。只說密碼存在哪裡，讀檔要有那台機器的權限。
+    stored = (
+        credentials.secrets_dir(loaded.root) / credentials.PASSWORD_FILE
+    ).resolve()
     return password, (
-        f"密碼：{password}\n"
-        f"（自動產生，存在 {stored}；要用自己的密碼請設定環境變數 "
-        f"{WEB_PASSWORD_ENV}，或登入後在網頁上修改）"
+        f"密碼是自動產生的，存在 {stored}"
+        "（只有執行 pyharness 的使用者能讀）。\n"
+        f"查看：cat {stored}"
+        f"（Docker：docker compose exec harness cat {stored}）\n"
+        f"要用自己的密碼請設定環境變數 {WEB_PASSWORD_ENV}，"
+        "或登入後在網頁上修改。"
     )
 
 

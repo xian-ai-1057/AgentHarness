@@ -183,7 +183,13 @@ class OfficeConverter:
                     f"{workdir}/{source}",
                 ]
             )
-            result = await box.run_shell(command, workdir, TIMEOUT_SECONDS)
+            try:
+                result = await box.run_shell(command, workdir, TIMEOUT_SECONDS)
+            except RuntimeError as error:
+                # 連不上沙盒服務或被拒絕：回看得懂的訊息，不要變成 500。
+                raise ConvertError(
+                    503, f"現在無法轉成 PDF，請下載後用 Office 開啟（{error}）"
+                ) from error
             if result.exit_code == 127:
                 self._missing = True
                 raise ConvertError(

@@ -4501,11 +4501,17 @@ class _LivePermissions(permissions_lib.Permissions):
 
     @property
     def mode(self) -> str:
-        # 成員不能自己改成 bypass（例如在對話中被降級的管理者）。
+        # bypass 只給管理者：成員不能自己改成 bypass（例如在對話中被降級的
+        # 管理者），專案設成 bypass 時成員也照樣要確認（改用 ask）。成員的
+        # 對話最容易被提示注入，寫檔、讀網頁不該不經確認就執行。
+        admin = self._is_admin()
         mode = self._state.mode
-        if mode == "bypass" and not self._is_admin():
+        if mode == "bypass" and not admin:
             mode = None
-        return mode or self._shared.mode
+        mode = mode or self._shared.mode
+        if mode == "bypass" and not admin:
+            return "ask"
+        return mode
 
     @property
     def allow(self) -> list[str]:

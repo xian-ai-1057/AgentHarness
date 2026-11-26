@@ -1267,6 +1267,29 @@ class TestIsolation:
         assert fine == 200
         assert allowed == 200
 
+    async def test_project_bypass_does_not_apply_to_members(self, site):
+        s = await site(
+            [
+                conftest.tool_response(WRITE),
+                conftest.text_response("好"),
+                conftest.tool_response(WRITE),
+            ],
+            extra="permissions:\n  mode: bypass\n",
+        )
+        boss = await s.login("boss", password_of("boss"))
+        alice = await s.login("alice", password_of("alice"))
+        await boss.listen()
+        await alice.listen()
+
+        _, theirs = await boss.api("POST", "/sessions", {"text": "寫"})
+        await boss.wait_idle(theirs["id"])
+        _, mine = await alice.api("POST", "/sessions", {"text": "寫"})
+        await alice.wait_for("approval")
+
+        # 管理者照專案設定直接執行；成員還是要確認。
+        assert "approval" not in [e["type"] for e in boss.events]
+        await alice.api("POST", f"/sessions/{mine['id']}/stop", {})
+
     async def test_member_always_applies_only_to_them_in_that_folder(
         self, site
     ):

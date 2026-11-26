@@ -233,3 +233,58 @@ def test_cache_keeps_the_most_recent_pdfs(tmp_path):
     office_lib._prune(tmp_path, 250)  # noqa: SLF001
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["mid.pdf", "new.pdf"]
+
+
+async def test_preview_jobs_are_mountable_by_the_sandbox_runner(
+    tmp_path, monkeypatch
+):
+    # 用沙盒服務時，轉檔暫存資料夾（.harness/previews/jobs/<uuid>）是
+    # 服務唯一允許掛載的 .harness 底下的位置。
+    from harness import sandbox_runner
+
+    subpaths = []
+
+    async def fake_execute(self, argv, stdin, workdir, timeout):
+        subpaths.append(self.volume_subpath)
+        (self.workspace / "source.pdf").write_bytes(PDF)
+        return sandbox_lib.Result(0, "", "")
+
+    monkeypatch.setattr(sandbox_lib.Sandbox, "_execute", fake_execute)
+    monkeypatch.setenv(sandbox_lib.VOLUME_ENV, "harness-data")
+    root = test_web.make_project(tmp_path / "v", "sandbox: true\n")
+    (root / "a.docx").write_bytes(b"PK docx")
+    converter = office_lib.OfficeConverter(
+        root, project_lib.load_project(root).sandbox, allow_host=False
+    )
+
+    fd = os.open(root / "a.docx", os.O_RDONLY)
+    try:
+        await converter.to_pdf(fd, 7, ".docx")
+    finally:
+        os.close(fd)
+
+    [subpath] = subpaths
+    assert subpath.startswith(".harness/previews/jobs/")
+    assert sandbox_runner.check_subpath(subpath) == subpath
+
+
+async def test_sandbox_runner_failures_are_explained(tmp_path, monkeypatch):
+    async def refused(self, argv, stdin, workdir, timeout):
+        raise RuntimeError("沙盒服務拒絕執行：不能掛載")
+
+    monkeypatch.setattr(sandbox_lib.Sandbox, "_execute", refused)
+    root = test_web.make_project(tmp_path / "r", "sandbox: true\n")
+    (root / "a.docx").write_bytes(b"PK docx")
+    converter = office_lib.OfficeConverter(
+        root, project_lib.load_project(root).sandbox, allow_host=False
+    )
+
+    fd = os.open(root / "a.docx", os.O_RDONLY)
+    try:
+        with pytest.raises(office_lib.ConvertError) as caught:
+            await converter.to_pdf(fd, 7, ".docx")
+    finally:
+        os.close(fd)
+
+    assert caught.value.status == 503
+    assert "下載後用 Office 開啟" in str(caught.value)
